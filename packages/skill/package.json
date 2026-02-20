@@ -1,0 +1,29 @@
+{
+  "name": "@reclaw/skill",
+  "version": "0.1.0",
+  "description": "Reclaw skill package for OpenClaw and ClawHub",
+  "private": false,
+  "type": "module",
+  "files": [
+    "SKILL.md"
+  ],
+  "openclaw": {
+    "kind": "skill",
+    "name": "reclaw",
+    "version": "0.1.0",
+    "description": "Extract memories from ChatGPT, Claude, and Grok chat history",
+    "homepage": "https://reclaw.sh"
+  },
+  "scripts": {
+    "lint": "bun run lint:biome && bun run lint:typecheck",
+    "lint:biome": "biome check .",
+    "lint:typecheck": "tsc --noEmit",
+    "fix": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.3",
+    "@types/bun": "1.2.5",
+    "@types/node": "25.3.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,25 +1,9 @@
 {
-  "name": "reclaw",
-  "version": "0.1.0",
-  "description": "CLI for extracting core memories from AI chat exports",
-  "type": "module",
-  "bin": {
-    "reclaw": "./src/index.ts"
-  },
+  "name": "reclaw-workspace",
+  "private": true,
+  "workspaces": ["packages/cli", "packages/skill", "packages/website"],
   "scripts": {
-    "dev": "bun run src/index.ts",
-    "build": "bun build --target bun --outfile dist/reclaw src/index.ts",
-    "lint": "bun run lint:biome && bun run lint:typecheck",
-    "lint:biome": "biome check .",
-    "lint:typecheck": "tsc --noEmit",
-    "fix": "biome check --write ."
-  },
-  "dependencies": {
-    "@clack/prompts": "1.0.1"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "2.4.3",
-    "@types/bun": "1.2.5",
-    "typescript": "5.9.3"
+    "lint": "bun run --cwd packages/cli lint && bun run --cwd packages/skill lint && bun run --cwd packages/website lint",
+    "fix": "bun run --cwd packages/cli fix && bun run --cwd packages/skill fix && bun run --cwd packages/website fix"
   }
 }

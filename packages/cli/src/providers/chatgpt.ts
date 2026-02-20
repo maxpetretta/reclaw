@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { access, readFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
 
 import type { NormalizedConversation, NormalizedMessage } from "../types"
 
@@ -34,10 +34,8 @@ interface ChatGptMessageRaw {
   }
 }
 
-const CHATGPT_FILE = ["chatgpt", "conversations.json"] as const
-
 export async function parseChatGptConversations(extractsDir: string): Promise<NormalizedConversation[]> {
-  const filePath = join(extractsDir, ...CHATGPT_FILE)
+  const filePath = await resolveChatGptFilePath(extractsDir)
   const rawText = await readFile(filePath, "utf8")
   const parsed = JSON.parse(rawText) as unknown
 
@@ -46,6 +44,25 @@ export async function parseChatGptConversations(extractsDir: string): Promise<No
   }
 
   return parsed.map((conversation) => normalizeChatGptConversation(conversation as ChatGptConversationRaw))
+}
+
+async function resolveChatGptFilePath(extractsDir: string): Promise<string> {
+  const parentDir = dirname(extractsDir)
+  const candidates = [
+    join(extractsDir, "chatgpt", "conversations.json"),
+    join(extractsDir, "conversations.json"),
+    join(parentDir, "chatgpt", "conversations.json"),
+  ]
+
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) {
+      return candidate
+    }
+  }
+
+  throw new Error(
+    `Could not find ChatGPT conversations.json. Tried: ${candidates.map((candidate) => `'${candidate}'`).join(", ")}`,
+  )
 }
 
 function normalizeChatGptConversation(raw: ChatGptConversationRaw): NormalizedConversation {
@@ -322,4 +339,13 @@ function toLimitedString(value: string, limit = 16_000): string {
   }
 
   return `${value.slice(0, limit)}\n...`
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
 }

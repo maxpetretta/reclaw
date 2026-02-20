@@ -1,5 +1,5 @@
 import { readdir, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import type { NormalizedConversation, NormalizedMessage } from "../types"
 
@@ -29,8 +29,7 @@ interface GrokResponseRaw {
 }
 
 export async function parseGrokConversations(extractsDir: string): Promise<NormalizedConversation[]> {
-  const providerDir = join(extractsDir, "grok")
-  const backendPath = await findGrokBackendPath(providerDir)
+  const backendPath = await resolveGrokBackendPath(extractsDir)
   const rawText = await readFile(backendPath, "utf8")
   const parsed = JSON.parse(rawText) as GrokExportRaw
 
@@ -39,6 +38,23 @@ export async function parseGrokConversations(extractsDir: string): Promise<Norma
   }
 
   return parsed.conversations.map(normalizeGrokConversation)
+}
+
+async function resolveGrokBackendPath(extractsDir: string): Promise<string> {
+  const parentDir = dirname(extractsDir)
+  const searchRoots = [join(extractsDir, "grok"), extractsDir, join(parentDir, "grok")]
+
+  for (const root of searchRoots) {
+    try {
+      return await findGrokBackendPath(root)
+    } catch {
+      // try next root
+    }
+  }
+
+  throw new Error(
+    `Could not find prod-grok-backend.json. Tried searching under: ${searchRoots.map((root) => `'${root}'`).join(", ")}`,
+  )
 }
 
 function normalizeGrokConversation(raw: GrokConversationWrapperRaw): NormalizedConversation {

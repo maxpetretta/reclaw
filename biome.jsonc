@@ -5,9 +5,6 @@
     "enabled": true,
     "rules": {
       "recommended": true,
-      "a11y": {
-        "noStaticElementInteractions": "off"
-      },
       "complexity": {
         "noExcessiveCognitiveComplexity": "off",
         "noForEach": "error",
@@ -17,7 +14,6 @@
         "useSimplifiedLogicExpression": "error"
       },
       "correctness": {
-        "useExhaustiveDependencies": "off",
         "useHookAtTopLevel": "error",
         "noUnusedImports": "error",
         "noUndeclaredVariables": "error",
@@ -32,9 +28,6 @@
         "noSelfAssign": "error",
         "noUnreachable": "error"
       },
-      "nursery": {
-        "useSortedClasses": "off"
-      },
       "performance": {
         "noBarrelFile": "error",
         "noReExportAll": "error",
@@ -42,7 +35,6 @@
         "noDelete": "error"
       },
       "security": {
-        "noDangerouslySetInnerHtml": "error",
         "noDangerouslySetInnerHtmlWithChildren": "error",
         "noGlobalEval": "error"
       },
@@ -56,13 +48,21 @@
         "useForOf": "error",
         "useThrowOnlyError": "error",
         "useImportType": "error",
-        "useExportType": "error"
+        "useExportType": "error",
+        "useAsConstAssertion": "error",
+        "useDefaultParameterLast": "error",
+        "useEnumInitializers": "error",
+        "useSelfClosingElements": "error",
+        "useSingleVarDeclarator": "error",
+        "noUnusedTemplateLiteral": "error",
+        "useNumberNamespace": "error",
+        "noInferrableTypes": "error",
+        "noUselessElse": "error"
       },
       "suspicious": {
         "noArrayIndexKey": "warn",
         "noEmptyBlockStatements": "error",
         "useAwait": "error",
-        "noUnknownAtRules": "off",
         "noDoubleEquals": "error",
         "noDebugger": "error",
         "noExplicitAny": "error",
@@ -79,13 +79,63 @@
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["**/*.astro"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useConst": "off",
+            "useImportType": "off"
+          },
+          "correctness": {
+            "noUnusedVariables": "off",
+            "noUnusedImports": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/website/src/**/*.css"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noUnknownAtRules": "off"
+          }
+        }
+      }
+    }
+  ],
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/dist", "!**/bun.lock"]
+    "includes": [
+      "packages/cli/src/**/*.ts",
+      "src/**/*.ts",
+      "packages/skill/hooks/**/*.ts",
+      "hooks/**/*.ts",
+      "packages/website/**/*.ts",
+      "packages/website/**/*.tsx",
+      "packages/website/**/*.mjs",
+      "packages/website/**/*.js",
+      "packages/website/**/*.json",
+      "packages/website/**/*.jsonc",
+      "packages/website/**/*.astro",
+      "packages/website/**/*.css",
+      "src/**/*.tsx",
+      "src/**/*.mjs",
+      "src/**/*.js",
+      "src/**/*.json",
+      "src/**/*.jsonc",
+      "src/**/*.astro",
+      "src/**/*.css",
+      "!**/.vercel",
+      "!**/node_modules",
+      "!**/.astro",
+      "!**/dist"
+    ]
   },
   "formatter": {
     "indentStyle": "space",
-    "lineWidth": 120,
-    "includes": ["**", "!**/tsconfig.base.json"]
+    "lineWidth": 120
   },
   "javascript": {
     "formatter": {

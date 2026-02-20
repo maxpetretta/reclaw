@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { access, readFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
 
 import type { NormalizedConversation, NormalizedMessage } from "../types"
 
@@ -20,10 +20,8 @@ interface ClaudeMessageRaw {
   updated_at?: string | null
 }
 
-const CLAUDE_CONVERSATIONS_FILE = ["claude", "conversations.json"] as const
-
 export async function parseClaudeConversations(extractsDir: string): Promise<NormalizedConversation[]> {
-  const filePath = join(extractsDir, ...CLAUDE_CONVERSATIONS_FILE)
+  const filePath = await resolveClaudeConversationsPath(extractsDir)
   const rawText = await readFile(filePath, "utf8")
   const parsed = JSON.parse(rawText) as unknown
 
@@ -32,6 +30,25 @@ export async function parseClaudeConversations(extractsDir: string): Promise<Nor
   }
 
   return parsed.map((conversation) => normalizeClaudeConversation(conversation as ClaudeConversationRaw))
+}
+
+async function resolveClaudeConversationsPath(extractsDir: string): Promise<string> {
+  const parentDir = dirname(extractsDir)
+  const candidates = [
+    join(extractsDir, "claude", "conversations.json"),
+    join(extractsDir, "conversations.json"),
+    join(parentDir, "claude", "conversations.json"),
+  ]
+
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) {
+      return candidate
+    }
+  }
+
+  throw new Error(
+    `Could not find Claude conversations.json. Tried: ${candidates.map((candidate) => `'${candidate}'`).join(", ")}`,
+  )
 }
 
 function normalizeClaudeConversation(raw: ClaudeConversationRaw): NormalizedConversation {
@@ -211,4 +228,13 @@ function toLimitedString(value: string, limit = 16_000): string {
   }
 
   return `${value.slice(0, limit)}\n...`
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
 }
