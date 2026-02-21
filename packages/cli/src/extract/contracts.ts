@@ -13,13 +13,11 @@ export interface ConversationBatch {
 
 export interface SubagentExtraction {
   summary: string
-  interests: string[]
-  projects: string[]
-  facts: string[]
-  preferences: string[]
-  people: string[]
-  decisions: string[]
-  memory_markdown: string
+}
+
+export interface BatchConversationRef {
+  id: string
+  timestamp?: string
 }
 
 export interface BatchExtractionResult {
@@ -27,6 +25,7 @@ export interface BatchExtractionResult {
   provider: NormalizedConversation["source"]
   date: string
   conversationIds: string[]
+  conversationRefs: BatchConversationRef[]
   conversationCount: number
   extraction: SubagentExtraction
 }
@@ -43,8 +42,8 @@ export interface AggregatedInsights {
 
 export interface ExtractionArtifacts {
   outputFiles: string[]
-  memoryFilePath: string
-  userFilePath: string
+  memoryFilePath?: string
+  userFilePath?: string
   insights: AggregatedInsights
 }
 

@@ -4,7 +4,7 @@
   "description": "CLI for extracting core memories from AI chat exports",
   "type": "module",
   "bin": {
-    "reclaw": "./bin/reclaw.js"
+    "reclaw": "bin/reclaw.js"
   },
   "files": [
     "bin",
@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "dev": "bun run src/index.ts",
-    "build": "rm -rf dist && bun build --target node --outfile dist/index.js src/index.ts",
+    "build": "rm -rf dist && bun build --target node --outfile dist/index.js src/index.ts && mkdir -p dist/prompts && cp prompts/*.md dist/prompts/",
     "prepack": "bun run build",
     "lint": "bun run lint:biome && bun run lint:typecheck",
     "lint:biome": "biome check .",

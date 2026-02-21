@@ -6,6 +6,7 @@ import { removeCronJob, scheduleSubagentCronJob, waitForCronSummary } from "../l
 import type { NormalizedConversation } from "../types"
 import { writeExtractionArtifacts } from "./aggregate"
 import type {
+  BatchConversationRef,
   BatchExtractionResult,
   ConversationBatch,
   ExtractionArtifacts,
@@ -44,7 +45,7 @@ export function planExtractionBatches(options: {
   selectedProviders: NormalizedConversation["source"][]
   batchSize?: number
 }): { batches: ConversationBatch[]; conversationCount: number } {
-  const batchSize = options.batchSize ?? 12
+  const batchSize = options.batchSize ?? 1
   const batches: ConversationBatch[] = []
   let conversationCount = 0
 
@@ -136,6 +137,10 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
       provider: batch.provider,
       date: batch.date,
       conversationIds: batch.conversations.map((conversation) => conversation.id),
+      conversationRefs: batch.conversations.map((conversation) => ({
+        id: conversation.id,
+        timestamp: conversation.updatedAt ?? conversation.createdAt,
+      })),
       conversationCount: batch.conversations.length,
       extraction,
     }
@@ -358,6 +363,34 @@ function parseBatchResult(value: unknown): BatchExtractionResult | null {
   const conversationIds = Array.isArray(record.conversationIds)
     ? record.conversationIds.filter((entry): entry is string => typeof entry === "string")
     : []
+  const conversationRefs: BatchConversationRef[] = []
+  if (Array.isArray(record.conversationRefs)) {
+    for (const entry of record.conversationRefs) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        continue
+      }
+
+      const typedEntry = entry as Record<string, unknown>
+      if (typeof typedEntry.id !== "string") {
+        continue
+      }
+
+      if (typeof typedEntry.timestamp === "string") {
+        conversationRefs.push({
+          id: typedEntry.id,
+          timestamp: typedEntry.timestamp,
+        })
+      } else {
+        conversationRefs.push({
+          id: typedEntry.id,
+        })
+      }
+    }
+  } else {
+    for (const id of conversationIds) {
+      conversationRefs.push({ id })
+    }
+  }
 
   const extraction = record.extraction
   if (!extraction || typeof extraction !== "object" || Array.isArray(extraction)) {
@@ -371,28 +404,14 @@ function parseBatchResult(value: unknown): BatchExtractionResult | null {
     provider,
     date: typeof record.date === "string" ? record.date : "1970-01-01",
     conversationIds,
+    conversationRefs,
     conversationCount: typeof record.conversationCount === "number" ? record.conversationCount : conversationIds.length,
     extraction: {
       summary: asString(extractionRecord.summary),
-      interests: asStringArray(extractionRecord.interests),
-      projects: asStringArray(extractionRecord.projects),
-      facts: asStringArray(extractionRecord.facts),
-      preferences: asStringArray(extractionRecord.preferences),
-      people: asStringArray(extractionRecord.people),
-      decisions: asStringArray(extractionRecord.decisions),
-      memory_markdown: asString(extractionRecord.memory_markdown),
     },
   }
 }
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : ""
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.filter((entry): entry is string => typeof entry === "string")
 }

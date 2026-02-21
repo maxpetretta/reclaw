@@ -162,7 +162,7 @@ import Layout from "@/layouts/Layout.astro"
           </div>
           <h3 class="text-lg font-bold mt-5">Run reclaw</h3>
           <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
-            Point reclaw at your exports. It batches conversations and uses AI to extract what matters — facts, preferences, decisions.
+            Point reclaw at your exports. It runs one conversation per subagent by default (configurable) and extracts only high-signal summaries.
           </p>
         </div>
 
@@ -256,7 +256,7 @@ import Layout from "@/layouts/Layout.astro"
           </div>
           <div class="terminal-line">
             <span class="text-green-400">✓</span>
-            <span class="text-foreground/70 ml-2">Updated MEMORY.md &amp; USER.md</span>
+            <span class="text-foreground/70 ml-2">Main agent updated MEMORY.md &amp; USER.md (+ .bak)</span>
           </div>
           <div class="terminal-line mt-2">
             <span class="text-muted-foreground/60">└</span>
@@ -338,7 +338,7 @@ import Layout from "@/layouts/Layout.astro"
             </div>
           </div>
           <p class="text-sm text-muted-foreground leading-relaxed">
-            Writes structured memory artifacts, MEMORY.md, and USER.md — ready for OpenClaw&rsquo;s native memory system.
+            Writes daily memory files with session IDs, then a main synthesis agent updates MEMORY.md and USER.md (with .bak backups).
           </p>
         </div>
 
@@ -358,7 +358,7 @@ import Layout from "@/layouts/Layout.astro"
             </div>
           </div>
           <p class="text-sm text-muted-foreground leading-relaxed">
-            Creates atomic markdown notes with frontmatter, dropped into your vault&rsquo;s Inbox — ready for review.
+            Creates daily recap journals with a Sessions footer, drafts Inbox notes, then updates MEMORY.md and USER.md.
           </p>
         </div>
       </div>

@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+
 import type { ConversationBatch, ExtractionMode, SubagentExtraction } from "./contracts"
 
 const PROVIDER_LABELS: Record<ConversationBatch["provider"], string> = {
@@ -8,14 +12,15 @@ const PROVIDER_LABELS: Record<ConversationBatch["provider"], string> = {
 
 const DEFAULT_EXTRACTION: SubagentExtraction = {
   summary: "",
-  interests: [],
-  projects: [],
-  facts: [],
-  preferences: [],
-  people: [],
-  decisions: [],
-  memory_markdown: "",
 }
+
+const PROMPT_FILENAMES = {
+  agent: "agent.md",
+  subagent: "subagent.md",
+} as const
+
+const TEMPLATE_DIR_CANDIDATES = buildTemplateDirCandidates()
+const TEMPLATE_CACHE = new Map<string, string>()
 
 interface PromptOptions {
   mode: ExtractionMode
@@ -26,44 +31,76 @@ interface PromptOptions {
 export function buildSubagentPrompt(batch: ConversationBatch, options: PromptOptions): string {
   const outputInstruction =
     options.mode === "openclaw"
-      ? `Produce concise memory markdown content for memory/reclaw-${batch.provider}-${batch.date}.md inside ${options.outputPath}.`
-      : `Produce atomic note candidates for ${options.outputPath}/Inbox with Zettelclaw-style frontmatter fields.`
+      ? `Produce one concise MOST IMPORTANT summary for these conversation(s); the main Reclaw process will build memory/${batch.date}.md and update MEMORY.md/USER.md in ${options.outputPath}.`
+      : "Produce one concise MOST IMPORTANT summary for these conversation(s); the main Reclaw process will update Zettelclaw journal sections, inbox drafts, MEMORY.md, and USER.md."
 
   const conversationsMarkdown = serializeBatchConversations(batch, options.maxPromptChars ?? 110_000)
+  const agentPrompt = renderPromptTemplate(loadPromptTemplate(PROMPT_FILENAMES.agent), {
+    provider_label: PROVIDER_LABELS[batch.provider],
+  })
+  const subagentPrompt = renderPromptTemplate(loadPromptTemplate(PROMPT_FILENAMES.subagent), {
+    output_instruction: outputInstruction,
+    provider: batch.provider,
+    date: batch.date,
+    batch_index: String(batch.index + 1),
+    batch_total: String(batch.totalForDate),
+    conversation_count: String(batch.conversations.length),
+    conversations_markdown: conversationsMarkdown,
+  })
 
+  return [agentPrompt, "", subagentPrompt].join("\n")
+}
+
+function buildTemplateDirCandidates(): string[] {
+  const moduleDir = dirname(fileURLToPath(import.meta.url))
   return [
-    `You are a subagent extracting durable memory from ${PROVIDER_LABELS[batch.provider]} conversations.`,
-    "",
-    "Goal:",
-    "- Distill core long-term memory signals instead of preserving raw chat transcript details.",
-    "- Focus on stable patterns: interests, projects, life facts, preferences/opinions, important people, major decisions.",
-    "",
-    "Requirements:",
-    `- ${outputInstruction}`,
-    "- Avoid raw transcript dumps.",
-    "- Prefer concise, high-signal statements.",
-    "",
-    "Return STRICT JSON only (no markdown fences, no extra prose) with exactly these keys:",
-    "{",
-    '  "summary": "string",',
-    '  "interests": ["string"],',
-    '  "projects": ["string"],',
-    '  "facts": ["string"],',
-    '  "preferences": ["string"],',
-    '  "people": ["string"],',
-    '  "decisions": ["string"],',
-    '  "memory_markdown": "markdown string"',
-    "}",
-    "",
-    "Date batch metadata:",
-    `- provider: ${batch.provider}`,
-    `- date: ${batch.date}`,
-    `- batch: ${batch.index + 1}/${batch.totalForDate}`,
-    `- conversations: ${batch.conversations.length}`,
-    "",
-    "Conversations:",
-    conversationsMarkdown,
-  ].join("\n")
+    resolve(moduleDir, "../../prompts"),
+    resolve(moduleDir, "../prompts"),
+    resolve(moduleDir, "./prompts"),
+    resolve(process.cwd(), "packages/cli/prompts"),
+  ]
+}
+
+function loadPromptTemplate(filename: string): string {
+  const cached = TEMPLATE_CACHE.get(filename)
+  if (cached) {
+    return cached
+  }
+
+  for (const directory of TEMPLATE_DIR_CANDIDATES) {
+    const filePath = resolve(directory, filename)
+    if (!existsSync(filePath)) {
+      continue
+    }
+
+    const template = readFileSync(filePath, "utf8").trimEnd()
+    TEMPLATE_CACHE.set(filename, template)
+    return template
+  }
+
+  throw new Error(
+    `Missing prompt template '${filename}'. Searched: ${TEMPLATE_DIR_CANDIDATES.map((entry) => `${entry}/${filename}`).join(", ")}`,
+  )
+}
+
+function renderPromptTemplate(template: string, variables: Record<string, string>): string {
+  const missingKeys = new Set<string>()
+  const rendered = template.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (fullMatch, key: string) => {
+    if (!Object.hasOwn(variables, key)) {
+      missingKeys.add(key)
+      return fullMatch
+    }
+
+    return variables[key] ?? ""
+  })
+
+  if (missingKeys.size > 0) {
+    throw new Error(
+      `Prompt template is missing values for: ${[...missingKeys].sort((left, right) => left.localeCompare(right)).join(", ")}`,
+    )
+  }
+
+  return rendered
 }
 
 export function parseSubagentExtraction(rawResponse: string): SubagentExtraction {
@@ -79,30 +116,14 @@ export function parseSubagentExtraction(rawResponse: string): SubagentExtraction
     return {
       ...DEFAULT_EXTRACTION,
       summary: toTrimmed(rawResponse).slice(0, 500),
-      memory_markdown: toTrimmed(rawResponse),
     }
   }
 
   const record = parsed as Record<string, unknown>
-  const summary = toTrimmed(record.summary)
-  const interests = normalizeStringArray(record.interests)
-  const projects = normalizeStringArray(record.projects)
-  const facts = normalizeStringArray(record.facts)
-  const preferences = normalizeStringArray(record.preferences)
-  const people = normalizeStringArray(record.people)
-  const decisions = normalizeStringArray(record.decisions)
-  const memoryMarkdown = toTrimmed(record.memory_markdown)
+  const summary = toTrimmed(record.summary) || toTrimmed(rawResponse).slice(0, 500)
 
   return {
     summary,
-    interests,
-    projects,
-    facts,
-    preferences,
-    people,
-    decisions,
-    memory_markdown:
-      memoryMarkdown || buildFallbackMemoryMarkdown(summary, interests, projects, facts, preferences, people),
   }
 }
 
@@ -159,36 +180,6 @@ function sampleMessages<T>(messages: T[], limit: number): T[] {
   return [...head, ...tail]
 }
 
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  const seen = new Set<string>()
-  const output: string[] = []
-
-  for (const entry of value) {
-    if (typeof entry !== "string") {
-      continue
-    }
-
-    const normalized = entry.trim()
-    if (normalized.length === 0) {
-      continue
-    }
-
-    const key = normalized.toLowerCase()
-    if (seen.has(key)) {
-      continue
-    }
-
-    seen.add(key)
-    output.push(normalized)
-  }
-
-  return output
-}
-
 function toTrimmed(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
 }
@@ -213,35 +204,5 @@ function parseEmbeddedJson(raw: string): unknown {
     return JSON.parse(raw.slice(start, end + 1)) as unknown
   } catch {
     return undefined
-  }
-}
-
-function buildFallbackMemoryMarkdown(
-  summary: string,
-  interests: string[],
-  projects: string[],
-  facts: string[],
-  preferences: string[],
-  people: string[],
-): string {
-  const lines = ["## Summary", summary]
-
-  appendList(lines, "## Interests", interests)
-  appendList(lines, "## Projects", projects)
-  appendList(lines, "## Facts", facts)
-  appendList(lines, "## Preferences", preferences)
-  appendList(lines, "## People", people)
-
-  return lines.filter((line) => line.trim().length > 0).join("\n")
-}
-
-function appendList(lines: string[], heading: string, values: string[]): void {
-  if (values.length === 0) {
-    return
-  }
-
-  lines.push("", heading)
-  for (const value of values) {
-    lines.push(`- ${value}`)
   }
 }
