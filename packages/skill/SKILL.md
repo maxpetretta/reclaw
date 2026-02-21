@@ -54,6 +54,12 @@ npx reclaw
 bunx reclaw
 ```
 
+Canonical flag reference:
+
+```bash
+npx reclaw --help
+```
+
 ### Direct mode examples
 Use direct flags when you already know provider and input path:
 
@@ -66,6 +72,15 @@ npx reclaw --provider grok --input ./path/to/grok-export/
 `--input` accepts either:
 - a provider export directory, or
 - a direct export file path (for providers that expose a single conversations file).
+
+### Plan without writing
+Preview what reclaw will process and where outputs will go, without scheduling extraction or writing files:
+
+```bash
+npx reclaw --dry-run --provider chatgpt --input ./conversations.json
+# alias:
+npx reclaw --plan --provider claude --input ./path/to/claude-export/
+```
 
 ## 3) Output Modes
 

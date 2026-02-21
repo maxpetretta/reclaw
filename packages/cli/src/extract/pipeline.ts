@@ -114,7 +114,7 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
       outputPath: options.targetPath,
     })
 
-    const scheduled = scheduleSubagentCronJob({
+    const scheduled = await scheduleSubagentCronJob({
       message: prompt,
       model: options.model,
       sessionName: "reclaw-extract",

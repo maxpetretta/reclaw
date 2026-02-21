@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { homedir } from "node:os"
-import { resolve } from "node:path"
+import { join, resolve } from "node:path"
 
 import { cancel, confirm, intro, isCancel, log, multiselect, note, outro, select, spinner, text } from "@clack/prompts"
 import type { ExtractionMode } from "./extract/contracts"
@@ -25,6 +25,8 @@ interface CliArgs {
   model?: string
   provider?: Provider
   input?: string
+  dryRun: boolean
+  help: boolean
 }
 
 const DEFAULT_EXTRACTS_PATH = "~/Desktop/extracts"
@@ -33,6 +35,10 @@ const DEFAULT_ZETTELCLAW_VAULT_PATH = "~/zettelclaw"
 
 async function main() {
   const cliArgs = parseCliArgs(process.argv.slice(2))
+  if (cliArgs.help) {
+    printHelp()
+    return
+  }
 
   intro("reclaw - Phase 2 extraction pipeline")
 
@@ -79,6 +85,40 @@ async function main() {
   }
 
   const mode = await chooseOutputMode(cliArgs.mode)
+  const targetPath = await promptTargetPath(mode)
+  const extractionPlan = planExtractionBatches({
+    providerConversations,
+    selectedProviders: successfulProviders,
+  })
+  const statePath = resolve(".reclaw-state.json")
+
+  if (cliArgs.dryRun) {
+    const dryRunOptions: {
+      mode: ExtractionMode
+      targetPath: string
+      providerConversations: ProviderConversations
+      selectedProviders: Provider[]
+      plan: ReturnType<typeof planExtractionBatches>
+      statePath: string
+      model?: string
+    } = {
+      mode,
+      targetPath,
+      providerConversations,
+      selectedProviders: successfulProviders,
+      plan: extractionPlan,
+      statePath,
+    }
+    if (cliArgs.model) {
+      dryRunOptions.model = cliArgs.model
+    }
+
+    printDryRunPlan(dryRunOptions)
+    outro(
+      `Dry run complete. Parsed ${totalConversations} conversations (${totalMessages} messages); no extraction was executed.`,
+    )
+    return
+  }
 
   const modelSpin = spinner()
   modelSpin.start("Loading available models")
@@ -95,12 +135,6 @@ async function main() {
     ? `${selectedModel.name} (${selectedModel.alias})`
     : `${selectedModel.name} (${selectedModel.key})`
   log.info(`Using model: ${selectedModelLabel}`)
-
-  const targetPath = await promptTargetPath(mode)
-  const extractionPlan = planExtractionBatches({
-    providerConversations,
-    selectedProviders: successfulProviders,
-  })
 
   log.message(
     `Will process ${extractionPlan.conversationCount} conversations in ${extractionPlan.batches.length} batches from ${successfulProviders.length} providers using ${selectedModel.key}.`,
@@ -125,7 +159,7 @@ async function main() {
     mode,
     model: selectedModel.key,
     targetPath,
-    statePath: resolve(".reclaw-state.json"),
+    statePath,
     batchSize: 12,
     onProgress: (message) => extractionSpin.message(message),
   })
@@ -306,7 +340,10 @@ function formatPreview(values: string[]): string {
 }
 
 function parseCliArgs(args: string[]): CliArgs {
-  const parsed: CliArgs = {}
+  const parsed: CliArgs = {
+    dryRun: false,
+    help: false,
+  }
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
@@ -336,6 +373,16 @@ function parseCliArgs(args: string[]): CliArgs {
       }
 
       throw new Error(`Invalid --mode value '${value}'. Expected 'openclaw' or 'zettelclaw'.`)
+    }
+
+    if (arg === "--help" || arg === "-h") {
+      parsed.help = true
+      continue
+    }
+
+    if (arg === "--dry-run" || arg === "--plan") {
+      parsed.dryRun = true
+      continue
     }
 
     if (arg === "--model") {
@@ -412,6 +459,11 @@ function parseCliArgs(args: string[]): CliArgs {
       }
 
       parsed.input = value
+      continue
+    }
+
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown option '${arg}'. Run 'reclaw --help' for available flags.`)
     }
   }
 
@@ -425,6 +477,79 @@ function parseProviderArg(value: string): Provider | undefined {
   }
 
   return undefined
+}
+
+function printHelp(): void {
+  console.log(
+    [
+      "reclaw — extract durable memory from AI chat exports",
+      "",
+      "Usage:",
+      "  reclaw [flags]",
+      "",
+      "Core flags:",
+      "  --provider <chatgpt|claude|grok>   Parse only one provider",
+      "  --input <path>                      Export directory or provider export file path",
+      "  --mode <openclaw|zettelclaw>       Output mode",
+      "  --model <model-id>                 OpenClaw model key/alias/name",
+      "  --dry-run, --plan                  Parse and preview plan; do not schedule extraction or write files",
+      "  -h, --help                         Show help",
+      "",
+      "Examples:",
+      "  reclaw",
+      "  reclaw --provider chatgpt --input ./conversations.json",
+      "  reclaw --provider claude --input ./claude-export --mode zettelclaw",
+      "  reclaw --dry-run --provider grok --input ./grok-export",
+    ].join("\n"),
+  )
+}
+
+function printDryRunPlan(options: {
+  mode: ExtractionMode
+  targetPath: string
+  providerConversations: ProviderConversations
+  selectedProviders: Provider[]
+  plan: ReturnType<typeof planExtractionBatches>
+  statePath: string
+  model?: string
+}): void {
+  const lines = [
+    "Dry-run plan (no writes, no subagents):",
+    `- Mode: ${options.mode}`,
+    `- Target: ${options.targetPath}`,
+    `- State file: ${options.statePath}`,
+    `- Model: ${options.model ? `${options.model} (provided, not validated)` : "not selected in dry-run"}`,
+    `- Providers: ${options.selectedProviders.map((provider) => providerLabels[provider]).join(", ")}`,
+    `- Conversations: ${options.plan.conversationCount}`,
+    `- Batches: ${options.plan.batches.length}`,
+  ]
+
+  for (const provider of options.selectedProviders) {
+    const providerConversations = options.providerConversations[provider]
+    const providerMessages = providerConversations.reduce((sum, conversation) => sum + conversation.messageCount, 0)
+    const providerBatches = options.plan.batches.filter((batch) => batch.provider === provider).length
+    lines.push(
+      `  - ${providerLabels[provider]}: ${providerConversations.length} conversations, ${providerMessages} messages, ${providerBatches} batches`,
+    )
+  }
+
+  if (options.mode === "openclaw") {
+    const outputFiles = new Set<string>()
+    for (const batch of options.plan.batches) {
+      outputFiles.add(join(options.targetPath, "memory", `reclaw-${batch.provider}-${batch.date}.md`))
+    }
+
+    lines.push(`- OpenClaw memory dir: ${join(options.targetPath, "memory")}`)
+    lines.push(`- Planned memory files: ${outputFiles.size}`)
+    lines.push(`- Planned update: ${join(options.targetPath, "MEMORY.md")}`)
+    lines.push(`- Planned update: ${join(options.targetPath, "USER.md")}`)
+  } else {
+    lines.push(`- Zettelclaw note output: ${join(options.targetPath, "Inbox")}`)
+    lines.push(`- Planned update: ${join(options.targetPath, "MEMORY.md")}`)
+    lines.push(`- Planned update: ${join(options.targetPath, "USER.md")}`)
+  }
+
+  log.message(lines.join("\n"))
 }
 
 try {
