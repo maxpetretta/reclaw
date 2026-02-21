@@ -3,7 +3,20 @@ import Layout from "@/layouts/Layout.astro"
 ---
 
 <Layout>
-  <!-- ════════════════════════════════════════════════════════ HERO -->
+  <!-- ════════════════════════════════════════════ STICKY GITHUB NAV -->
+  <nav class="fixed top-0 right-0 z-50 p-4 sm:p-5">
+    <a
+      href="https://github.com/maxpetretta/reclaw"
+      target="_blank"
+      rel="noopener"
+      class="github-btn group inline-flex items-center gap-2 rounded-full border border-border bg-background/70 backdrop-blur-lg px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-amber-500/40 transition-all"
+    >
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+      GitHub
+    </a>
+  </nav>
+
+  <!-- ════════════════════════════════════════════ HERO -->
   <section class="relative min-h-[100svh] flex items-center justify-center overflow-hidden px-6">
     <!-- Amber orb -->
     <div class="amber-orb" aria-hidden="true"></div>
@@ -18,7 +31,7 @@ import Layout from "@/layouts/Layout.astro"
 
     <div class="relative z-10 max-w-3xl text-center">
       <p class="hero-kicker mb-5 text-sm font-semibold tracking-[0.2em] uppercase text-amber-400/90">
-        Knowledge recovery tool
+        OpenClaw Memory Recall
       </p>
       <h1 class="hero-title text-5xl sm:text-6xl md:text-7xl font-extrabold leading-[1.08] tracking-tight">
         Your best ideas are
@@ -38,14 +51,15 @@ import Layout from "@/layouts/Layout.astro"
             Get started
           </a>
         </div>
-        <a
-          href="https://www.npmjs.com/package/reclaw"
-          target="_blank"
-          rel="noopener"
-          class="inline-flex items-center gap-2 rounded-lg border border-border px-6 py-3.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-amber-500/40 transition-colors"
+        <button
+          id="hero-copy-btn"
+          type="button"
+          class="copy-pill inline-flex items-center gap-2.5 rounded-lg border border-border px-6 py-3.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-amber-500/40 transition-colors cursor-pointer"
         >
-          npm&hairsp;i&hairsp;-g reclaw
-        </a>
+          <code class="hero-copy-text font-mono text-[13px] inline-block w-[5.2rem] text-center">npx reclaw</code>
+          <svg class="copy-icon w-3.5 h-3.5 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <svg class="check-icon w-3.5 h-3.5 text-green-400 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>
       </div>
     </div>
 
@@ -56,8 +70,8 @@ import Layout from "@/layouts/Layout.astro"
     </div>
   </section>
 
-  <!-- ════════════════════════════════════════════════════════ THE PROBLEM -->
-  <section class="relative py-28 sm:py-36 px-6">
+  <!-- ════════════════════════════════════════════ THE PROBLEM -->
+  <section class="relative py-20 sm:py-24 px-6">
     <div class="reveal max-w-2xl mx-auto text-center">
       <h2 class="text-3xl sm:text-4xl font-bold tracking-tight leading-snug">
         Thousands of conversations.<br/>
@@ -68,35 +82,55 @@ import Layout from "@/layouts/Layout.astro"
       </p>
     </div>
 
-    <!-- Decay visualization -->
-    <div class="reveal mt-16 max-w-2xl mx-auto space-y-3">
-      <div class="decay-row" style="--fade: 1;">
-        <div class="decay-dot bg-amber-400"></div>
-        <div class="flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/30 to-amber-400/05"></div>
-        <span class="text-xs text-amber-400/60 tabular-nums w-20 text-right">yesterday</span>
+    <!-- Expanded decay visualization -->
+    <div class="reveal mt-14 max-w-2xl mx-auto space-y-2.5">
+      <div class="decay-row" style="--fade: 1; --pulse-delay: 0s;">
+        <div class="decay-dot bg-amber-400 decay-pulse"></div>
+        <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/35 via-amber-400/15 to-amber-400/05" style="--pulse-delay: 0s;"></div>
+        <span class="text-xs text-amber-400/70 tabular-nums w-20 text-right">today</span>
       </div>
-      <div class="decay-row" style="--fade: 0.7;">
-        <div class="decay-dot bg-amber-400/60"></div>
-        <div class="flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/18 to-transparent"></div>
+      <div class="decay-row" style="--fade: 0.85; --pulse-delay: 0.3s;">
+        <div class="decay-dot bg-amber-400/80 decay-pulse"></div>
+        <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/25 via-amber-400/10 to-transparent" style="--pulse-delay: 0.3s;"></div>
+        <span class="text-xs text-amber-400/50 tabular-nums w-20 text-right">3 days</span>
+      </div>
+      <div class="decay-row" style="--fade: 0.7; --pulse-delay: 0.6s;">
+        <div class="decay-dot bg-amber-400/60 decay-pulse"></div>
+        <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/18 to-transparent" style="--pulse-delay: 0.6s;"></div>
         <span class="text-xs text-muted-foreground/50 tabular-nums w-20 text-right">2 weeks</span>
       </div>
-      <div class="decay-row" style="--fade: 0.4;">
-        <div class="decay-dot bg-amber-400/30"></div>
-        <div class="flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/10 to-transparent"></div>
+      <div class="decay-row" style="--fade: 0.5; --pulse-delay: 0.9s;">
+        <div class="decay-dot bg-amber-400/40 decay-pulse"></div>
+        <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/12 to-transparent" style="--pulse-delay: 0.9s;"></div>
+        <span class="text-xs text-muted-foreground/40 tabular-nums w-20 text-right">1 month</span>
+      </div>
+      <div class="decay-row" style="--fade: 0.35; --pulse-delay: 1.2s;">
+        <div class="decay-dot bg-amber-400/25 decay-pulse"></div>
+        <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/08 to-transparent" style="--pulse-delay: 1.2s;"></div>
         <span class="text-xs text-muted-foreground/30 tabular-nums w-20 text-right">3 months</span>
       </div>
-      <div class="decay-row" style="--fade: 0.15;">
-        <div class="decay-dot bg-amber-400/10"></div>
-        <div class="flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/04 to-transparent"></div>
-        <span class="text-xs text-muted-foreground/15 tabular-nums w-20 text-right">1 year</span>
+      <div class="decay-row" style="--fade: 0.2; --pulse-delay: 1.5s;">
+        <div class="decay-dot bg-amber-400/12 decay-pulse"></div>
+        <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/04 to-transparent" style="--pulse-delay: 1.5s;"></div>
+        <span class="text-xs text-muted-foreground/20 tabular-nums w-20 text-right">6 months</span>
+      </div>
+      <div class="decay-row" style="--fade: 0.1; --pulse-delay: 1.8s;">
+        <div class="decay-dot bg-amber-400/06 decay-pulse"></div>
+        <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/02 to-transparent" style="--pulse-delay: 1.8s;"></div>
+        <span class="text-xs text-muted-foreground/10 tabular-nums w-20 text-right">1 year</span>
+      </div>
+      <div class="decay-row" style="--fade: 0.04; --pulse-delay: 2.1s;">
+        <div class="decay-dot bg-amber-400/03"></div>
+        <div class="flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/01 to-transparent"></div>
+        <span class="text-xs text-muted-foreground/05 tabular-nums w-20 text-right">gone</span>
       </div>
     </div>
   </section>
 
-  <!-- ════════════════════════════════════════════════════════ HOW IT WORKS -->
-  <section class="relative py-28 sm:py-36 px-6">
+  <!-- ════════════════════════════════════════════ HOW IT WORKS -->
+  <section class="relative py-20 sm:py-24 px-6">
     <div class="max-w-4xl mx-auto">
-      <h2 class="reveal text-3xl sm:text-4xl font-bold tracking-tight text-center mb-20">
+      <h2 class="reveal text-3xl sm:text-4xl font-bold tracking-tight text-center mb-16">
         Three steps to <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-400">total recall</span>
       </h2>
 
@@ -151,10 +185,10 @@ import Layout from "@/layouts/Layout.astro"
     </div>
   </section>
 
-  <!-- ════════════════════════════════════════════════════════ TERMINAL -->
-  <section id="terminal" class="relative py-28 sm:py-36 px-6">
+  <!-- ════════════════════════════════════════════ TERMINAL -->
+  <section id="terminal" class="relative py-20 sm:py-24 px-6">
     <div class="max-w-2xl mx-auto">
-      <h2 class="reveal text-3xl sm:text-4xl font-bold tracking-tight text-center mb-14">
+      <h2 class="reveal text-3xl sm:text-4xl font-bold tracking-tight text-center mb-12">
         One command. That&rsquo;s it.
       </h2>
 
@@ -165,8 +199,17 @@ import Layout from "@/layouts/Layout.astro"
             <span class="w-3 h-3 rounded-full bg-white/10"></span>
             <span class="w-3 h-3 rounded-full bg-white/10"></span>
           </div>
-          <span class="text-xs text-muted-foreground/60 font-medium">terminal</span>
-          <div class="w-14"></div>
+          <div class="flex-1"></div>
+          <button
+            id="terminal-copy-btn"
+            type="button"
+            class="terminal-copy-btn group/copy flex items-center gap-1.5 text-xs text-muted-foreground/40 hover:text-muted-foreground transition-colors cursor-pointer"
+            title="Copy command"
+          >
+            <svg class="copy-icon w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <svg class="check-icon w-3.5 h-3.5 text-green-400 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span class="copy-label">Copy</span>
+          </button>
         </div>
         <div class="terminal-body">
           <div class="terminal-line">
@@ -223,64 +266,57 @@ import Layout from "@/layouts/Layout.astro"
         </div>
       </div>
 
-      <p class="mt-6 text-center text-sm text-muted-foreground/60">
+      <p class="mt-5 text-center text-sm text-muted-foreground/60">
         Resumable — interrupt and re-run anytime. Reclaw picks up where it left off.
       </p>
     </div>
   </section>
 
-  <!-- ════════════════════════════════════════════════════════ PROVIDERS -->
-  <section class="relative py-28 sm:py-36 px-6">
+  <!-- ════════════════════════════════════════════ PROVIDERS -->
+  <section class="relative py-20 sm:py-24 px-6">
     <div class="max-w-4xl mx-auto">
       <h2 class="reveal text-3xl sm:text-4xl font-bold tracking-tight text-center mb-6">
         Works with what you use
       </h2>
-      <p class="reveal text-center text-muted-foreground mb-16 max-w-md mx-auto">
+      <p class="reveal text-center text-muted-foreground mb-14 max-w-md mx-auto">
         Export from any major AI platform. Reclaw normalizes and processes them all.
       </p>
 
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
-        <!-- ChatGPT -->
+        <!-- ChatGPT / OpenAI -->
         <div class="reveal provider-card">
           <div class="provider-icon" style="--glow: 16, 185, 129;">
-            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="rgb(16, 185, 129)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
-            </svg>
+            <svg class="w-7 h-7" viewBox="0 0 24 24" fill="rgb(16, 185, 129)"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>
           </div>
           <h3 class="text-lg font-bold mt-4">ChatGPT</h3>
-          <p class="text-sm text-muted-foreground mt-1">conversations.json</p>
+          <p class="text-sm text-muted-foreground mt-1">Conversations</p>
         </div>
 
-        <!-- Claude -->
+        <!-- Claude / Anthropic -->
         <div class="reveal provider-card">
           <div class="provider-icon" style="--glow: 251, 191, 136;">
-            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="rgb(251, 191, 136)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-            </svg>
+            <svg class="w-7 h-7" viewBox="0 0 24 24" fill="rgb(251, 191, 136)"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
           </div>
           <h3 class="text-lg font-bold mt-4">Claude</h3>
-          <p class="text-sm text-muted-foreground mt-1">conversations.json + memories.json</p>
+          <p class="text-sm text-muted-foreground mt-1">Conversations + Memories</p>
         </div>
 
-        <!-- Grok -->
+        <!-- Grok / xAI -->
         <div class="reveal provider-card">
           <div class="provider-icon" style="--glow: 148, 163, 184;">
-            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="rgb(148, 163, 184)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-            </svg>
+            <svg class="w-7 h-7" viewBox="0 0 841.89 595.28" fill="rgb(148, 163, 184)"><path d="m557.09 211.99 8.31 326.37h66.56l8.32-445.18zM640.28 56.91H538.72L379.35 284.53l50.78 72.52zM201.61 538.36h101.56l50.79-72.52-50.79-72.53zM201.61 211.99l228.52 326.37h101.56L303.17 211.99z"/></svg>
           </div>
           <h3 class="text-lg font-bold mt-4">Grok</h3>
-          <p class="text-sm text-muted-foreground mt-1">conversation exports</p>
+          <p class="text-sm text-muted-foreground mt-1">Conversations</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ════════════════════════════════════════════════════════ OUTPUT MODES -->
-  <section class="relative py-28 sm:py-36 px-6">
+  <!-- ════════════════════════════════════════════ OUTPUT MODES -->
+  <section class="relative py-20 sm:py-24 px-6">
     <div class="max-w-3xl mx-auto">
-      <h2 class="reveal text-3xl sm:text-4xl font-bold tracking-tight text-center mb-16">
+      <h2 class="reveal text-3xl sm:text-4xl font-bold tracking-tight text-center mb-14">
         Two ways to remember
       </h2>
 
@@ -295,7 +331,7 @@ import Layout from "@/layouts/Layout.astro"
             </div>
             <div>
               <h3 class="font-bold">OpenClaw mode</h3>
-              <span class="text-xs text-muted-foreground font-mono">--mode openclaw</span>
+              <span class="text-xs text-amber-400/70 font-semibold uppercase tracking-wider">Default</span>
             </div>
           </div>
           <p class="text-sm text-muted-foreground leading-relaxed">
@@ -326,18 +362,18 @@ import Layout from "@/layouts/Layout.astro"
     </div>
   </section>
 
-  <!-- ════════════════════════════════════════════════════════ ZETTELCLAW CTA -->
-  <section class="relative py-20 sm:py-28 px-6">
-    <div class="reveal max-w-2xl mx-auto">
+  <!-- ════════════════════════════════════════════ ZETTELCLAW CTA -->
+  <section class="relative py-20 sm:py-24 px-6">
+    <div class="reveal max-w-3xl mx-auto">
       <a
         href="https://zettelclaw.com"
         target="_blank"
         rel="noopener"
         class="zettelclaw-cta group block"
       >
-        <div class="flex items-start sm:items-center gap-5 sm:gap-6">
-          <div class="shrink-0 w-12 h-12 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center group-hover:bg-violet-500/15 transition-colors">
-            <svg class="w-6 h-6 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <div class="flex flex-col sm:flex-row items-start gap-6 sm:gap-8">
+          <div class="shrink-0 w-16 h-16 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center group-hover:bg-violet-500/15 group-hover:border-violet-500/30 transition-all">
+            <svg class="w-8 h-8 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
               <polyline points="14 2 14 8 20 8"/>
               <line x1="16" y1="13" x2="8" y2="13"/>
@@ -346,23 +382,28 @@ import Layout from "@/layouts/Layout.astro"
             </svg>
           </div>
           <div class="flex-1 min-w-0">
-            <h3 class="text-lg font-bold text-foreground group-hover:text-violet-300 transition-colors">
-              Want a full knowledge system?
-            </h3>
-            <p class="mt-1 text-sm text-muted-foreground leading-relaxed">
+            <div class="flex items-center gap-3">
+              <h3 class="text-xl sm:text-2xl font-bold text-foreground group-hover:text-violet-300 transition-colors">
+                Want a full knowledge system?
+              </h3>
+              <svg class="shrink-0 w-5 h-5 text-muted-foreground group-hover:text-violet-400 group-hover:translate-x-1 transition-all" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </div>
+            <p class="mt-3 text-base text-muted-foreground leading-relaxed max-w-lg">
               Zettelclaw is an AI-native Zettelkasten — atomic notes, wikilinks, and emergent structure. Reclaw&rsquo;s Zettelclaw mode feeds directly into it.
             </p>
+            <span class="inline-block mt-4 text-sm font-medium text-violet-400/80 group-hover:text-violet-300 transition-colors">
+              zettelclaw.com &rarr;
+            </span>
           </div>
-          <svg class="shrink-0 w-5 h-5 text-muted-foreground group-hover:text-violet-400 group-hover:translate-x-1 transition-all" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M5 12h14M12 5l7 7-7 7"/>
-          </svg>
         </div>
       </a>
     </div>
   </section>
 
-  <!-- ════════════════════════════════════════════════════════ FOOTER -->
-  <footer class="relative py-16 px-6 border-t border-border/50">
+  <!-- ════════════════════════════════════════════ FOOTER -->
+  <footer class="relative py-14 px-6 border-t border-border/50">
     <div class="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6 text-sm text-muted-foreground">
       <p>
         Built with 🦞 by <a href="https://x.com/maxpetretta" target="_blank" rel="noopener" class="text-foreground hover:text-amber-400 transition-colors font-medium">Max Petretta</a>
@@ -376,20 +417,21 @@ import Layout from "@/layouts/Layout.astro"
 </Layout>
 
 <style>
-  /* ─── Amber orb: the glowing core ─── */
+  /* ─── Amber orb: lighter, more prominent ─── */
   .amber-orb {
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 500px;
-    height: 500px;
+    width: 600px;
+    height: 600px;
     transform: translate(-50%, -50%);
     border-radius: 50%;
     background: radial-gradient(
       circle,
-      rgba(255, 167, 38, 0.12) 0%,
-      rgba(255, 107, 53, 0.06) 40%,
-      transparent 70%
+      rgba(255, 183, 77, 0.18) 0%,
+      rgba(255, 152, 56, 0.10) 35%,
+      rgba(255, 107, 53, 0.04) 60%,
+      transparent 75%
     );
     filter: blur(60px);
     animation: orb-breathe 8s ease-in-out infinite;
@@ -397,7 +439,7 @@ import Layout from "@/layouts/Layout.astro"
   }
 
   @keyframes orb-breathe {
-    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.7; }
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
     50% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
   }
 
@@ -419,9 +461,9 @@ import Layout from "@/layouts/Layout.astro"
     background: linear-gradient(
       90deg,
       transparent,
-      rgba(255, 167, 38, 0.08) 30%,
-      rgba(255, 167, 38, 0.12) 50%,
-      rgba(255, 167, 38, 0.08) 70%,
+      rgba(255, 183, 77, 0.10) 30%,
+      rgba(255, 183, 77, 0.16) 50%,
+      rgba(255, 183, 77, 0.10) 70%,
       transparent
     );
     animation: strata-fade 6s ease-in-out infinite;
@@ -471,6 +513,26 @@ import Layout from "@/layouts/Layout.astro"
     flex-shrink: 0;
   }
 
+  .decay-pulse {
+    animation: dot-pulse 3s ease-in-out infinite;
+    animation-delay: var(--pulse-delay);
+  }
+
+  @keyframes dot-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); transform: scale(1); }
+    50% { box-shadow: 0 0 8px 3px rgba(251, 191, 36, 0.25); transform: scale(1.3); }
+  }
+
+  .decay-bar {
+    animation: bar-pulse 3s ease-in-out infinite;
+    animation-delay: var(--pulse-delay);
+  }
+
+  @keyframes bar-pulse {
+    0%, 100% { opacity: 1; filter: brightness(1); }
+    50% { opacity: 1; filter: brightness(1.6); }
+  }
+
   /* ─── Step cards ─── */
   .step-card {
     position: relative;
@@ -479,6 +541,7 @@ import Layout from "@/layouts/Layout.astro"
     border: 1px solid var(--border);
     background: linear-gradient(to bottom, rgba(255, 255, 255, 0.02), transparent);
     transition: border-color 0.3s, background 0.3s;
+    overflow: hidden;
   }
 
   .step-card:hover {
@@ -488,13 +551,14 @@ import Layout from "@/layouts/Layout.astro"
 
   .step-number {
     position: absolute;
-    top: -14px;
-    left: 24px;
+    top: 0;
+    left: 0;
     width: 28px;
     height: 28px;
-    border-radius: 50%;
-    background: var(--background);
-    border: 1px solid rgba(255, 167, 38, 0.3);
+    border-radius: 0 0 12px 0;
+    background: rgba(255, 167, 38, 0.08);
+    border-right: 1px solid rgba(255, 167, 38, 0.15);
+    border-bottom: 1px solid rgba(255, 167, 38, 0.15);
     color: rgba(255, 167, 38, 0.9);
     font-size: 12px;
     font-weight: 700;
@@ -533,7 +597,6 @@ import Layout from "@/layouts/Layout.astro"
   .terminal-bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     padding: 14px 18px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     background: rgba(255, 255, 255, 0.02);
@@ -553,7 +616,7 @@ import Layout from "@/layouts/Layout.astro"
   }
 
   .terminal-prompt {
-    color: rgba(255, 167, 38, 0.7);
+    color: rgba(255, 183, 77, 0.7);
     margin-right: 10px;
     user-select: none;
   }
@@ -610,15 +673,64 @@ import Layout from "@/layouts/Layout.astro"
 
   /* ─── Zettelclaw CTA ─── */
   .zettelclaw-cta {
-    padding: 24px 28px;
-    border-radius: 16px;
+    padding: 32px 36px;
+    border-radius: 20px;
     border: 1px solid rgba(139, 92, 246, 0.15);
-    background: linear-gradient(to right, rgba(139, 92, 246, 0.04), rgba(139, 92, 246, 0.02));
-    transition: border-color 0.3s, background 0.3s;
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.06), rgba(139, 92, 246, 0.02));
+    transition: border-color 0.3s, background 0.3s, box-shadow 0.3s;
   }
 
   .zettelclaw-cta:hover {
     border-color: rgba(139, 92, 246, 0.3);
-    background: linear-gradient(to right, rgba(139, 92, 246, 0.06), rgba(139, 92, 246, 0.03));
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(139, 92, 246, 0.03));
+    box-shadow: 0 8px 40px rgba(139, 92, 246, 0.08);
+  }
+
+  /* ─── GitHub nav button ─── */
+  .github-btn {
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
   }
 </style>
+
+<script>
+  function copyToClipboard(text: string, btn: HTMLElement) {
+    navigator.clipboard.writeText(text).then(() => {
+      const copyIcon = btn.querySelector('.copy-icon') as HTMLElement
+      const checkIcon = btn.querySelector('.check-icon') as HTMLElement
+      const label = btn.querySelector('.copy-label') as HTMLElement | null
+
+      if (copyIcon) { copyIcon.classList.add('hidden') }
+      if (checkIcon) { checkIcon.classList.remove('hidden') }
+      if (label) { label.textContent = 'Copied!' }
+
+      setTimeout(() => {
+        if (copyIcon) { copyIcon.classList.remove('hidden') }
+        if (checkIcon) { checkIcon.classList.add('hidden') }
+        if (label) { label.textContent = 'Copy' }
+      }, 2000)
+    })
+  }
+
+  document.getElementById('hero-copy-btn')?.addEventListener('click', function() {
+    const btn = this
+    const textEl = btn.querySelector('.hero-copy-text') as HTMLElement
+    const copyIcon = btn.querySelector('.copy-icon') as HTMLElement
+    const checkIcon = btn.querySelector('.check-icon') as HTMLElement
+
+    navigator.clipboard.writeText('npx reclaw').then(() => {
+      if (textEl) { textEl.textContent = 'Copied!' }
+      if (copyIcon) { copyIcon.classList.add('hidden') }
+      if (checkIcon) { checkIcon.classList.remove('hidden') }
+
+      setTimeout(() => {
+        if (textEl) { textEl.textContent = 'npx reclaw' }
+        if (copyIcon) { copyIcon.classList.remove('hidden') }
+        if (checkIcon) { checkIcon.classList.add('hidden') }
+      }, 2000)
+    })
+  })
+
+  document.getElementById('terminal-copy-btn')?.addEventListener('click', function() {
+    copyToClipboard('npx reclaw', this)
+  })
+</script>

@@ -5,7 +5,8 @@
   "private": false,
   "type": "module",
   "files": [
-    "SKILL.md"
+    "SKILL.md",
+    "hooks"
   ],
   "openclaw": {
     "kind": "skill",

@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises"
+import { readdir, readFile, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
 import type { NormalizedConversation, NormalizedMessage } from "../types"
@@ -41,6 +41,10 @@ export async function parseGrokConversations(extractsDir: string): Promise<Norma
 }
 
 async function resolveGrokBackendPath(extractsDir: string): Promise<string> {
+  if (await isFile(extractsDir)) {
+    return extractsDir
+  }
+
   const parentDir = dirname(extractsDir)
   const searchRoots = [join(extractsDir, "grok"), extractsDir, join(parentDir, "grok")]
 
@@ -235,4 +239,12 @@ async function findGrokBackendPath(grokDir: string): Promise<string> {
   }
 
   throw new Error(`Could not find prod-grok-backend.json under ${grokDir}`)
+}
+
+async function isFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile()
+  } catch {
+    return false
+  }
 }

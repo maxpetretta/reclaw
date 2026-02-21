@@ -23,6 +23,8 @@ type Provider = keyof typeof providerLabels
 interface CliArgs {
   mode?: ExtractionMode
   model?: string
+  provider?: Provider
+  input?: string
 }
 
 const DEFAULT_EXTRACTS_PATH = "~/Desktop/extracts"
@@ -34,40 +36,14 @@ async function main() {
 
   intro("reclaw - Phase 2 extraction pipeline")
 
-  const selectedProviders = await multiselect({
-    message: "Select providers to import",
-    options: [
-      { value: "chatgpt", label: providerLabels.chatgpt },
-      { value: "claude", label: providerLabels.claude },
-      { value: "grok", label: providerLabels.grok },
-    ],
-    required: true,
-    initialValues: ["chatgpt", "claude", "grok"],
-  })
-
-  if (isCancel(selectedProviders)) {
-    cancel("Cancelled")
-    process.exit(0)
+  const selected = await chooseProviders(cliArgs.provider)
+  if (cliArgs.provider) {
+    log.info(`Provider: ${providerLabels[cliArgs.provider]}`)
   }
 
-  const extractsInput = await text({
-    message: "Path to extracts directory",
-    defaultValue: DEFAULT_EXTRACTS_PATH,
-    validate: (value) => {
-      const normalizedValue = typeof value === "string" ? value : ""
-      return normalizedValue.trim().length === 0 ? "Path is required" : undefined
-    },
-  })
+  const extractsDir = await chooseInputPath(cliArgs.input)
+  log.info(`Input: ${extractsDir}`)
 
-  if (isCancel(extractsInput)) {
-    cancel("Cancelled")
-    process.exit(0)
-  }
-
-  const extractsDir = resolveHomePath(extractsInput)
-  log.info(`Extracts: ${extractsDir}`)
-
-  const selected = selectedProviders as Provider[]
   const providerConversations: ProviderConversations = {
     chatgpt: [],
     claude: [],
@@ -99,7 +75,7 @@ async function main() {
 
   if (successfulProviders.length === 0) {
     log.error("No providers were parsed successfully.")
-    return
+    process.exit(1)
   }
 
   const mode = await chooseOutputMode(cliArgs.mode)
@@ -206,6 +182,52 @@ async function chooseOutputMode(preselected: ExtractionMode | undefined): Promis
   return selectedMode as ExtractionMode
 }
 
+async function chooseProviders(preselected: Provider | undefined): Promise<Provider[]> {
+  if (preselected) {
+    return [preselected]
+  }
+
+  const selectedProviders = await multiselect({
+    message: "Select providers to import",
+    options: [
+      { value: "chatgpt", label: providerLabels.chatgpt },
+      { value: "claude", label: providerLabels.claude },
+      { value: "grok", label: providerLabels.grok },
+    ],
+    required: true,
+    initialValues: ["chatgpt", "claude", "grok"],
+  })
+
+  if (isCancel(selectedProviders)) {
+    cancel("Cancelled")
+    process.exit(0)
+  }
+
+  return selectedProviders as Provider[]
+}
+
+async function chooseInputPath(preselected: string | undefined): Promise<string> {
+  if (preselected) {
+    return resolveHomePath(preselected)
+  }
+
+  const extractsInput = await text({
+    message: "Path to extracts directory or export file",
+    defaultValue: DEFAULT_EXTRACTS_PATH,
+    validate: (value) => {
+      const normalizedValue = typeof value === "string" ? value : ""
+      return normalizedValue.trim().length === 0 ? "Path is required" : undefined
+    },
+  })
+
+  if (isCancel(extractsInput)) {
+    cancel("Cancelled")
+    process.exit(0)
+  }
+
+  return resolveHomePath(extractsInput)
+}
+
 async function promptTargetPath(mode: ExtractionMode): Promise<string> {
   const defaultValue = mode === "openclaw" ? DEFAULT_OPENCLAW_WORKSPACE_PATH : DEFAULT_ZETTELCLAW_VAULT_PATH
   const message =
@@ -294,39 +316,121 @@ function parseCliArgs(args: string[]): CliArgs {
 
     if (arg === "--mode") {
       const value = args[index + 1]
+      if (typeof value !== "string") {
+        throw new Error("Missing value for --mode")
+      }
       if (value === "openclaw" || value === "zettelclaw") {
         parsed.mode = value
         index += 1
+        continue
       }
-      continue
+
+      throw new Error(`Invalid --mode value '${value}'. Expected 'openclaw' or 'zettelclaw'.`)
     }
 
     if (arg.startsWith("--mode=")) {
       const value = arg.slice("--mode=".length)
       if (value === "openclaw" || value === "zettelclaw") {
         parsed.mode = value
+        continue
       }
-      continue
+
+      throw new Error(`Invalid --mode value '${value}'. Expected 'openclaw' or 'zettelclaw'.`)
     }
 
     if (arg === "--model") {
       const value = args[index + 1]
+      if (typeof value !== "string") {
+        throw new Error("Missing value for --model")
+      }
       if (typeof value === "string" && value.trim().length > 0) {
         parsed.model = value.trim()
         index += 1
+        continue
       }
-      continue
+
+      throw new Error("Empty value for --model")
     }
 
     if (arg.startsWith("--model=")) {
       const value = arg.slice("--model=".length)
       if (value.trim().length > 0) {
         parsed.model = value.trim()
+        continue
       }
+
+      throw new Error("Empty value for --model")
+    }
+
+    if (arg === "--provider") {
+      const value = args[index + 1]
+      if (typeof value !== "string") {
+        throw new Error("Missing value for --provider")
+      }
+
+      const provider = parseProviderArg(value)
+      if (!provider) {
+        throw new Error(`Invalid --provider value '${value}'. Expected 'chatgpt', 'claude', or 'grok'.`)
+      }
+
+      parsed.provider = provider
+      index += 1
+      continue
+    }
+
+    if (arg.startsWith("--provider=")) {
+      const value = arg.slice("--provider=".length)
+      const provider = parseProviderArg(value)
+      if (!provider) {
+        throw new Error(`Invalid --provider value '${value}'. Expected 'chatgpt', 'claude', or 'grok'.`)
+      }
+
+      parsed.provider = provider
+      continue
+    }
+
+    if (arg === "--input") {
+      const value = args[index + 1]
+      if (typeof value !== "string") {
+        throw new Error("Missing value for --input")
+      }
+
+      const normalized = value.trim()
+      if (normalized.length === 0) {
+        throw new Error("Empty value for --input")
+      }
+
+      parsed.input = normalized
+      index += 1
+      continue
+    }
+
+    if (arg.startsWith("--input=")) {
+      const value = arg.slice("--input=".length).trim()
+      if (value.length === 0) {
+        throw new Error("Empty value for --input")
+      }
+
+      parsed.input = value
     }
   }
 
   return parsed
 }
 
-await main()
+function parseProviderArg(value: string): Provider | undefined {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === "chatgpt" || normalized === "claude" || normalized === "grok") {
+    return normalized
+  }
+
+  return undefined
+}
+
+try {
+  await main()
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error)
+  log.error(message)
+  process.exit(1)
+}

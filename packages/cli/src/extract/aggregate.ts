@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import type { AggregatedInsights, BatchExtractionResult, ExtractionArtifacts, ExtractionMode } from "./contracts"
@@ -149,7 +149,7 @@ async function writeZettelclawNotes(batchResults: BatchExtractionResult[], vault
     let filename = `${baseFilename}.md`
     let suffix = 2
 
-    while (usedFilenames.has(filename)) {
+    while (usedFilenames.has(filename) || (await pathExists(join(inboxPath, filename)))) {
       filename = `${baseFilename}-${suffix}.md`
       suffix += 1
     }
@@ -383,4 +383,13 @@ function toTitleCase(value: string): string {
     .filter((chunk) => chunk.length > 0)
     .map((chunk) => `${chunk.slice(0, 1).toUpperCase()}${chunk.slice(1)}`)
     .join(" ")
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
 }

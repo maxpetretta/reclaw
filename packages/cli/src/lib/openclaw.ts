@@ -173,27 +173,6 @@ export function removeCronJob(jobId: string): void {
   runOpenClaw(["cron", "rm", jobId], { allowFailure: true, timeoutMs: 15_000 })
 }
 
-export function parseFirstJsonObject(raw: string): Record<string, unknown> {
-  const direct = tryParseJsonObject(raw)
-  if (direct) {
-    return direct
-  }
-
-  const start = raw.indexOf("{")
-  const end = raw.lastIndexOf("}")
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Could not find JSON object in subagent response")
-  }
-
-  const candidate = raw.slice(start, end + 1)
-  const parsed = tryParseJsonObject(candidate)
-  if (!parsed) {
-    throw new Error("Could not parse JSON object in subagent response")
-  }
-
-  return parsed
-}
-
 function parseCronAddJobId(stdout: string): string {
   const parsed = parseJson<CronAddResponse>(stdout)
   const id = typeof parsed.id === "string" ? parsed.id : ""
@@ -210,18 +189,6 @@ function parseJson<T>(value: string): T {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(`Could not parse OpenClaw JSON output: ${message}`)
-  }
-}
-
-function tryParseJsonObject(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>
-    }
-    return null
-  } catch {
-    return null
   }
 }
 

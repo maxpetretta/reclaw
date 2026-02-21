@@ -33,6 +33,7 @@ Use reclaw when the user already has a lot of historical chats and wants durable
 4. Wait for the email.
 5. Download and unzip the archive.
 6. Locate `conversations.json` and `memories.json`.
+7. For reclaw runs today, point to the export folder (reclaw reads `conversations.json`; keep `memories.json` alongside it).
 
 ### Grok export
 1. Open Grok Settings.
@@ -61,6 +62,10 @@ npx reclaw --provider chatgpt --input ./conversations.json
 npx reclaw --provider claude --input ./path/to/claude-export/
 npx reclaw --provider grok --input ./path/to/grok-export/
 ```
+
+`--input` accepts either:
+- a provider export directory, or
+- a direct export file path (for providers that expose a single conversations file).
 
 ## 3) Output Modes
 

@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises"
+import { access, readFile, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
 import type { NormalizedConversation, NormalizedMessage } from "../types"
@@ -33,6 +33,10 @@ export async function parseClaudeConversations(extractsDir: string): Promise<Nor
 }
 
 async function resolveClaudeConversationsPath(extractsDir: string): Promise<string> {
+  if (await isFile(extractsDir)) {
+    return extractsDir
+  }
+
   const parentDir = dirname(extractsDir)
   const candidates = [
     join(extractsDir, "claude", "conversations.json"),
@@ -234,6 +238,14 @@ async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path)
     return true
+  } catch {
+    return false
+  }
+}
+
+async function isFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile()
   } catch {
     return false
   }
