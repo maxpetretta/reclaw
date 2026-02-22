@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": ["packages/cli", "packages/skill", "packages/website"],
   "scripts": {
+    "clone": "./scripts/clone-openclaw-workspace.sh",
     "dev": "bun run --cwd packages/website dev",
     "start": "bun run dev",
     "build": "bun run build:cli && bun run build:website",

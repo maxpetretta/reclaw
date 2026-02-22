@@ -10,6 +10,8 @@ out
 coverage
 *.tgz
 *.tsbuildinfo
+.reclaw-state.json
+**/.reclaw-state.json
 
 # env
 .env

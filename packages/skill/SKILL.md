@@ -5,7 +5,7 @@ read_when:
   - You need to bootstrap memory from existing AI chat history
   - You are importing ChatGPT, Claude, or Grok conversation exports
   - You want to generate durable memory files for OpenClaw
-  - You want to generate atomic notes for a Zettelclaw vault
+  - You want to generate journal-based imports for a Zettelclaw vault
 ---
 
 # Reclaw
@@ -43,8 +43,6 @@ Reclaw imports AI chat exports (ChatGPT, Claude, Grok) and builds durable memory
 
 ```bash
 npx reclaw
-# or
-bunx reclaw
 ```
 
 Canonical flags:
@@ -77,9 +75,9 @@ npx reclaw --plan --provider claude --input ./path/to/claude-export/
 ### `--mode openclaw` (default)
 - Writes daily files to `memory/YYYY-MM-DD.md`.
 - Daily file format:
-  - `## Done`
   - `## Decisions`
   - `## Facts`
+  - `## Interests`
   - `## Open`
   - `---`
   - `## Sessions` (bullets as `provider:conversationId — timestamp`)
@@ -89,19 +87,22 @@ npx reclaw --plan --provider claude --input ./path/to/claude-export/
 ### `--mode zettelclaw`
 - Writes daily journals to `03 Journal/YYYY-MM-DD.md`.
 - Journal format is day-level recap with:
-  - `## Done`
   - `## Decisions`
   - `## Facts`
+  - `## Interests`
   - `## Open`
   - `---`
   - `## Sessions` (bullets as `provider:conversationId — HH:MM`)
-- Writes evergreen inbox drafts to `00 Inbox/`.
+- Does not write inbox notes.
+- Imports legacy conversations into OpenClaw session history by default (`--legacy-sessions on`) using `--workspace` or `~/.openclaw/workspace`.
 - Updates `MEMORY.md` and `USER.md` via a main synthesis agent run.
 
 ## 4) Subagent Model
 
-- Default is **one conversation per subagent task**.
-- Override with `--subagent-batch-size <n>` if you want larger groups.
+- Default is **one merged subagent task per day** (all same-day conversations grouped together).
+- `--subagent-batch-size` is deprecated and ignored.
+- Subagent jobs run in parallel by default (`--parallel-jobs 5`).
+- Individual batch failures do not stop the run; successful batches continue and failed batches are reported at the end.
 - Subagents return strict JSON with one field:
   - `summary`
 - The main process synthesizes structured memory signals from those summaries.
@@ -114,6 +115,10 @@ Before updates, Reclaw writes backups:
 
 Then a dedicated main synthesis agent updates `MEMORY.md` and `USER.md` using its own tools.
 
+For repeated test runs, use:
+- `--timestamped-backups` to write `.bak.<timestamp>` files instead of overwriting `.bak`.
+- `--state-path <path>` to isolate resumability state per run.
+
 ## 6) Model Choice
 
 Preferred profile:
@@ -121,7 +126,7 @@ Preferred profile:
 - low cost,
 - reliable long-context behavior.
 
-Recommended default: **Gemini Flash**.
+Recommended models: **Claude Haiku** or **Gemini Flash**.
 
 Set with:
 - `--model <model-id>`, or
@@ -141,25 +146,29 @@ If interrupted:
 When helping a user:
 1. Confirm provider export and extracted path.
 2. Recommend `--mode openclaw` unless user explicitly wants Zettelclaw vault output.
-3. Explain default per-conversation subagent processing and optional `--subagent-batch-size`.
+3. Explain day-grouped extraction and parallel job controls.
 4. Recommend a fast model.
 5. Mention resume behavior and `.bak` safety copies for `MEMORY.md`/`USER.md`.
+6. For test loops, recommend `--state-path` + `--timestamped-backups`.
 
 ## 9) Quick Command Reference
 
 ```bash
 # Interactive
-bunx reclaw
+npx reclaw
 
-# Per-conversation subagent default
-bunx reclaw --provider chatgpt --input ./conversations.json
+# Day-grouped extraction default
+npx reclaw --provider chatgpt --input ./conversations.json
 
-# Increase conversations per subagent task
-bunx reclaw --provider chatgpt --input ./conversations.json --subagent-batch-size 4
+# Increase parallel subagent jobs
+npx reclaw --provider chatgpt --input ./conversations.json --parallel-jobs 8
+
+# Test-safe repeated runs (isolated state + timestamped backups)
+npx reclaw --provider chatgpt --input ./conversations.json --state-path ./tmp/reclaw-run-1.json --timestamped-backups
 
 # Explicit mode/model
-bunx reclaw --mode openclaw --model gemini-2.5-flash
-bunx reclaw --mode zettelclaw --model gemini-2.5-flash
+npx reclaw --mode openclaw --model anthropic/claude-3.5-haiku
+npx reclaw --mode zettelclaw --model openrouter/google/gemini-3-flash-preview
 ```
 
 ## 10) What Reclaw Produces
@@ -171,7 +180,6 @@ OpenClaw mode:
 
 Zettelclaw mode:
 - `03 Journal/YYYY-MM-DD.md`
-- inbox drafts in `00 Inbox/`
 - updated `MEMORY.md` (+ `MEMORY.md.bak`)
 - updated `USER.md` (+ `USER.md.bak`)
 
