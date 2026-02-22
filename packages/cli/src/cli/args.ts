@@ -183,7 +183,7 @@ export function printHelp(): void {
       "  reclaw --provider chatgpt --input ./conversations.json",
       "  reclaw --parallel-jobs 5",
       "  reclaw --state-path ./tmp/reclaw-run-1.json --timestamped-backups",
-      "  reclaw --mode openclaw --workspace ~/tmp/reclaw-workspaces/workspace-20260221-120000 --yes",
+      "  reclaw --mode openclaw --workspace ~/tmp/openclaw-workspace-clone-20260221-120000/workspace --yes",
       "  reclaw --provider claude --input ./claude-export --mode zettelclaw",
       "  reclaw --dry-run --provider grok --input ./grok-export",
     ].join("\n"),

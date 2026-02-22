@@ -2,22 +2,33 @@
 set -euo pipefail
 
 print_usage() {
-  cat <<'EOF'
-Clone your current OpenClaw workspace into a temporary test workspace.
+  cat <<'EOF_INNER'
+Clone the current OpenClaw workspace into a temporary test directory.
 
 Usage:
   scripts/clone-openclaw-workspace.sh [options]
 
 Options:
-  --source-workspace <path>   Source workspace (default: ~/.openclaw/workspace)
-  --dest-root <path>          Destination root (default: ~/tmp/reclaw-workspaces)
-  --name <value>              Folder name under dest root (default: workspace-<timestamp>)
-  -h, --help                  Show this help
+  --source-workspace <path>  Source workspace to clone (default: ~/.openclaw/workspace)
+  --dest-root <path>         Parent dir for clone output (default: ~/tmp)
+  --name <value>             Clone directory name (default: openclaw-workspace-clone-<timestamp>)
+  -h, --help                 Show this help.
+EOF_INNER
+}
 
-Environment overrides:
-  SOURCE_OPENCLAW_WORKSPACE   Source workspace path
-  DEST_ROOT                   Destination root
-EOF
+expand_home() {
+  local input="$1"
+  case "$input" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s\n' "$HOME/${input#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$input"
+      ;;
+  esac
 }
 
 require_cmd() {
@@ -27,10 +38,9 @@ require_cmd() {
   fi
 }
 
-timestamp="$(date +%Y%m%d-%H%M%S)"
-source_workspace="${SOURCE_OPENCLAW_WORKSPACE:-$HOME/.openclaw/workspace}"
-dest_root="${DEST_ROOT:-$HOME/tmp/reclaw-workspaces}"
-name="workspace-$timestamp"
+source_workspace="~/.openclaw/workspace"
+dest_root="~/tmp"
+clone_name="openclaw-workspace-clone-$(date +%Y%m%d-%H%M%S)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,7 +54,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --name)
       shift
-      name="${1:-}"
+      clone_name="${1:-}"
       ;;
     -h|--help)
       print_usage
@@ -59,29 +69,63 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-if [[ -z "$source_workspace" || -z "$dest_root" || -z "$name" ]]; then
-  echo "source workspace, destination root, and name must be non-empty" >&2
+if [[ -z "$source_workspace" || -z "$dest_root" || -z "$clone_name" ]]; then
+  echo "source workspace, dest root, and name must be non-empty" >&2
   exit 1
 fi
 
 require_cmd rsync
+
+source_workspace="$(expand_home "$source_workspace")"
+dest_root="$(expand_home "$dest_root")"
+source_openclaw_dir="$(dirname "$source_workspace")"
+source_openclaw_config="$source_openclaw_dir/openclaw.json"
 
 if [[ ! -d "$source_workspace" ]]; then
   echo "Source workspace not found: $source_workspace" >&2
   exit 1
 fi
 
-dest_workspace="$dest_root/$name"
-if [[ -e "$dest_workspace" ]]; then
-  echo "Destination already exists: $dest_workspace" >&2
+mkdir -p "$dest_root"
+
+clone_root="$dest_root/$clone_name"
+clone_workspace="$clone_root/workspace"
+clone_openclaw_config="$clone_root/openclaw.json"
+
+if [[ -e "$clone_root" ]]; then
+  echo "Clone target already exists: $clone_root" >&2
   exit 1
 fi
 
-mkdir -p "$dest_root"
-rsync -a "$source_workspace/" "$dest_workspace/"
+mkdir -p "$clone_root"
+rsync -a "$source_openclaw_dir/" "$clone_root/"
+mkdir -p "$clone_workspace"
+rsync -a "$source_workspace/" "$clone_workspace/"
 
-echo "Workspace clone created:"
-echo "  $dest_workspace"
-echo
-echo "Run reclaw against the clone:"
-echo "  npx reclaw --mode openclaw --workspace \"$dest_workspace\" --state-path \"$dest_workspace/.reclaw-state.json\""
+if [[ -f "$source_openclaw_config" ]]; then
+  cp "$source_openclaw_config" "$clone_openclaw_config"
+else
+  cat >"$clone_openclaw_config" <<'EOF_INNER'
+{}
+EOF_INNER
+fi
+
+cat <<EOF_INNER
+Clone complete.
+
+Source workspace:
+  $source_workspace
+
+Cloned workspace:
+  $clone_workspace
+
+Cloned config:
+  $clone_openclaw_config
+
+Example test commands:
+  bun run --cwd packages/cli build
+  node packages/cli/bin/reclaw.js --mode openclaw --workspace "$clone_workspace" --state-path "$clone_root/.reclaw-state.json" --yes
+
+Optional: inspect cloned OpenClaw cron state directly:
+  OPENCLAW_STATE_DIR="$clone_root" OPENCLAW_CONFIG_PATH="$clone_openclaw_config" openclaw cron list --json
+EOF_INNER
