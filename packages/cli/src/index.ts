@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os"
 import { basename, join, resolve } from "node:path"
 
 import { cancel, confirm, intro, isCancel, log, multiselect, note, outro, select, spinner, text } from "@clack/prompts"
-import type { ExtractionMode } from "./extract/contracts"
+import type { BackupMode, ExtractionMode } from "./extract/contracts"
 import { type ProviderConversations, planExtractionBatches, runExtractionPipeline } from "./extract/pipeline"
 import { promptModelSelect, readModelsFromOpenClaw } from "./lib/models"
 import {
@@ -41,8 +41,14 @@ interface CliArgs {
   model?: string
   provider?: Provider
   input?: string
+  workspace?: string
+  targetPath?: string
+  statePath?: string
   legacySessions?: LegacySessionMode
   subagentBatchSize?: number
+  parallelJobs?: number
+  timestampedBackups: boolean
+  yes: boolean
   dryRun: boolean
   help: boolean
 }
@@ -52,10 +58,11 @@ interface ParsedProviderResult {
   sourcePath: string
 }
 
-const DEFAULT_EXTRACTS_PATH = "~/Desktop/extracts"
+const DEFAULT_EXTRACTS_PATH = "~/Desktop"
 const DEFAULT_OPENCLAW_WORKSPACE_PATH = "~/.openclaw/workspace"
 const DEFAULT_ZETTELCLAW_VAULT_PATH = "~/zettelclaw"
-const DEFAULT_SUBAGENT_BATCH_SIZE = 1
+const DEFAULT_PARALLEL_JOBS = 5
+const DEFAULT_STATE_PATH = ".reclaw-state.json"
 
 async function main() {
   const cliArgs = parseCliArgs(process.argv.slice(2))
@@ -66,7 +73,7 @@ async function main() {
 
   intro("reclaw - Phase 2 extraction pipeline")
 
-  const extractsDir = await chooseInputPath(cliArgs.input)
+  const extractsDir = await chooseInputPath(cliArgs.input, cliArgs.yes)
   log.info(`Input: ${extractsDir}`)
   const preparedInput = await prepareInputSources(extractsDir)
   const detectedProviders = preparedInput.detectedProviders
@@ -82,7 +89,7 @@ async function main() {
     )
   }
 
-  const selected = await chooseProviders(cliArgs.provider, detectedProviders)
+  const selected = await chooseProviders(cliArgs.provider, detectedProviders, cliArgs.yes)
   if (cliArgs.provider) {
     log.info(`Provider: ${providerLabels[cliArgs.provider]}`)
   }
@@ -116,7 +123,6 @@ async function main() {
     log.success(
       `Found ${parsed.conversations.length} conversations from ${providerLabels[provider]} (${providerMessages} messages total)`,
     )
-    printConversationList(parsed.conversations)
   }
 
   if (successfulProviders.length === 0) {
@@ -124,41 +130,57 @@ async function main() {
     process.exit(1)
   }
 
-  const mode = await chooseOutputMode(cliArgs.mode)
-  const targetPath = await promptTargetPath(mode)
-  const legacySessionMode = resolveLegacySessionMode(cliArgs.legacySessions, mode)
-  const subagentBatchSize = cliArgs.subagentBatchSize ?? DEFAULT_SUBAGENT_BATCH_SIZE
-  if (mode !== "openclaw" && cliArgs.legacySessions && cliArgs.legacySessions !== "off") {
-    log.info("Ignoring --legacy-sessions because it only applies to --mode openclaw.")
+  const modeFromWorkspace = cliArgs.workspace && !cliArgs.mode ? "openclaw" : cliArgs.mode
+  const mode = await chooseOutputMode(modeFromWorkspace, cliArgs.yes)
+  if (mode === "openclaw" && cliArgs.workspace && cliArgs.targetPath) {
+    const workspacePath = resolveHomePath(cliArgs.workspace)
+    const explicitTargetPath = resolveHomePath(cliArgs.targetPath)
+    if (workspacePath !== explicitTargetPath) {
+      throw new Error("Cannot combine --workspace and --target-path with different values.")
+    }
   }
+
+  const preselectedTargetPath = mode === "openclaw" ? (cliArgs.workspace ?? cliArgs.targetPath) : cliArgs.targetPath
+  const targetPath = await promptTargetPath(mode, preselectedTargetPath, cliArgs.yes)
+  const legacySessionMode = resolveLegacySessionMode(cliArgs.legacySessions, mode)
+  const legacyWorkspacePath =
+    mode === "openclaw" ? targetPath : resolveHomePath(cliArgs.workspace ?? DEFAULT_OPENCLAW_WORKSPACE_PATH)
+  if (typeof cliArgs.subagentBatchSize === "number" && cliArgs.subagentBatchSize !== 1) {
+    log.info("Ignoring --subagent-batch-size; Reclaw now runs one merged extraction batch per day.")
+  }
+  const parallelJobs = cliArgs.parallelJobs ?? DEFAULT_PARALLEL_JOBS
+  const backupMode: BackupMode = cliArgs.timestampedBackups ? "timestamped" : "overwrite"
 
   const extractionPlan = planExtractionBatches({
     providerConversations,
     selectedProviders: successfulProviders,
-    batchSize: subagentBatchSize,
   })
-  const statePath = resolve(".reclaw-state.json")
+  const statePath = cliArgs.statePath ? resolveHomePath(cliArgs.statePath) : resolve(DEFAULT_STATE_PATH)
 
   if (cliArgs.dryRun) {
     const dryRunOptions: {
       mode: ExtractionMode
       targetPath: string
+      legacyWorkspacePath: string
       providerConversations: ProviderConversations
       selectedProviders: Provider[]
       plan: ReturnType<typeof planExtractionBatches>
       statePath: string
       legacySessionMode: LegacySessionMode
-      subagentBatchSize: number
+      parallelJobs: number
+      backupMode: BackupMode
       model?: string
     } = {
       mode,
       targetPath,
+      legacyWorkspacePath,
       providerConversations,
       selectedProviders: successfulProviders,
       plan: extractionPlan,
       statePath,
       legacySessionMode,
-      subagentBatchSize,
+      parallelJobs,
+      backupMode,
     }
     if (cliArgs.model) {
       dryRunOptions.model = cliArgs.model
@@ -176,38 +198,40 @@ async function main() {
   const models = readModelsFromOpenClaw()
   modelSpin.stop("Model list loaded")
 
-  note(
-    "Recommended for this workload: Gemini Flash (fast, high context window, good for bulk summarization).",
-    "Model Tip",
-  )
+  note("Recommended: Claude Haiku, Gemini Flash.", "Model Tip")
 
-  const selectedModel = await promptModelSelect(models, cliArgs.model)
+  const selectedModel =
+    cliArgs.yes && !cliArgs.model ? resolveDefaultModel(models) : await promptModelSelect(models, cliArgs.model)
   const selectedModelLabel = selectedModel.alias
     ? `${selectedModel.name} (${selectedModel.alias})`
     : `${selectedModel.name} (${selectedModel.key})`
   log.info(`Using model: ${selectedModelLabel}`)
 
   log.message(
-    `Will process ${extractionPlan.conversationCount} conversations in ${extractionPlan.batches.length} batches from ${successfulProviders.length} providers using ${selectedModel.key} (${subagentBatchSize} conversation(s)/subagent).`,
+    `Will process ${extractionPlan.conversationCount} conversations in ${extractionPlan.batches.length} day-grouped batches from ${successfulProviders.length} providers using ${selectedModel.key} (${parallelJobs} parallel job(s)).`,
   )
 
-  const shouldProceed = await confirm({
-    message: "Proceed with extraction/summarization now?",
-    initialValue: true,
-  })
+  if (!cliArgs.yes) {
+    const shouldProceed = await confirm({
+      message: "Proceed with extraction/summarization now?",
+      initialValue: true,
+    })
 
-  if (isCancel(shouldProceed) || !shouldProceed) {
-    cancel("Cancelled")
-    process.exit(0)
+    if (isCancel(shouldProceed) || !shouldProceed) {
+      cancel("Cancelled")
+      process.exit(0)
+    }
+  } else {
+    log.info("Auto-confirm enabled (--yes); proceeding without prompt.")
   }
 
   let legacyImportResult: LegacySessionImportResult | undefined
-  if (mode === "openclaw" && legacySessionMode !== "off") {
+  if (legacySessionMode !== "off") {
     const sessionImportSpin = spinner()
     sessionImportSpin.start("Importing legacy sessions into OpenClaw history")
     try {
       legacyImportResult = await importLegacySessionsToOpenClawHistory({
-        workspacePath: targetPath,
+        workspacePath: legacyWorkspacePath,
         providers: successfulProviders.map((provider) => ({
           provider,
           sourcePath: providerSourcePaths[provider] ?? extractsDir,
@@ -256,28 +280,34 @@ async function main() {
     model: selectedModel.key,
     targetPath,
     statePath,
-    batchSize: subagentBatchSize,
+    backupMode,
+    maxParallelJobs: parallelJobs,
     onProgress: (message) => extractionSpin.message(message),
   })
 
   extractionSpin.stop("Extraction pipeline complete")
 
-  log.success(
-    `Batches processed: ${result.processedBatches}, resumed/skipped: ${result.skippedBatches}, total: ${result.totalBatches}`,
-  )
-  log.success(`Output files created: ${result.artifacts.outputFiles.length}`)
-
-  for (const filePath of result.artifacts.outputFiles) {
-    log.step(filePath)
+  const batchSummaryLine = `Batches processed: ${result.processedBatches}, failed: ${result.failedBatches}, resumed/skipped: ${result.skippedBatches}, total: ${result.totalBatches}`
+  if (result.failedBatches > 0) {
+    log.error(batchSummaryLine)
+  } else {
+    log.success(batchSummaryLine)
   }
 
+  if (result.failedBatchErrors.length > 0) {
+    for (const failure of result.failedBatchErrors.slice(0, 8)) {
+      log.error(failure)
+    }
+    if (result.failedBatchErrors.length > 8) {
+      log.error(`...and ${result.failedBatchErrors.length - 8} more batch failure(s).`)
+    }
+  }
+
+  log.success(`Output files created: ${result.artifacts.outputFiles.length}`)
+
   const summaryLines = [
-    `Summary: ${result.artifacts.insights.summary || "No summary captured."}`,
-    `Projects: ${formatPreview(result.artifacts.insights.projects)}`,
-    `Interests: ${formatPreview(result.artifacts.insights.interests)}`,
-    `Facts: ${formatPreview(result.artifacts.insights.facts)}`,
-    `Preferences: ${formatPreview(result.artifacts.insights.preferences)}`,
-    `People: ${formatPreview(result.artifacts.insights.people)}`,
+    `Summary: ${clipLogText(result.artifacts.insights.summary || "No summary captured.", 220)}`,
+    `Insight counts: projects=${result.artifacts.insights.projects.length}, interests=${result.artifacts.insights.interests.length}, facts=${result.artifacts.insights.facts.length}, preferences=${result.artifacts.insights.preferences.length}, people=${result.artifacts.insights.people.length}`,
   ]
 
   if (result.artifacts.memoryFilePath) {
@@ -302,9 +332,16 @@ async function main() {
   )
 }
 
-async function chooseOutputMode(preselected: ExtractionMode | undefined): Promise<ExtractionMode> {
+async function chooseOutputMode(
+  preselected: ExtractionMode | undefined,
+  nonInteractive: boolean,
+): Promise<ExtractionMode> {
   if (preselected) {
     return preselected
+  }
+
+  if (nonInteractive) {
+    return "openclaw"
   }
 
   const selectedMode = await select({
@@ -324,14 +361,22 @@ async function chooseOutputMode(preselected: ExtractionMode | undefined): Promis
   return selectedMode as ExtractionMode
 }
 
-async function chooseProviders(preselected: Provider | undefined, suggestedProviders: Provider[]): Promise<Provider[]> {
+async function chooseProviders(
+  preselected: Provider | undefined,
+  suggestedProviders: Provider[],
+  nonInteractive: boolean,
+): Promise<Provider[]> {
   if (preselected) {
     return [preselected]
   }
 
+  if (nonInteractive) {
+    return suggestedProviders.length > 0 ? suggestedProviders : ALL_PROVIDERS
+  }
+
   const initialValues = suggestedProviders.length > 0 ? suggestedProviders : ALL_PROVIDERS
   const selectedProviders = await multiselect({
-    message: "Select providers to import",
+    message: "Select providers to import (Space to select, Enter to confirm)",
     options: [
       { value: "chatgpt", label: providerLabels.chatgpt },
       { value: "claude", label: providerLabels.claude },
@@ -349,18 +394,19 @@ async function chooseProviders(preselected: Provider | undefined, suggestedProvi
   return selectedProviders as Provider[]
 }
 
-async function chooseInputPath(preselected: string | undefined): Promise<string> {
+async function chooseInputPath(preselected: string | undefined, nonInteractive: boolean): Promise<string> {
   if (preselected) {
     return resolveHomePath(preselected)
   }
 
+  if (nonInteractive) {
+    return resolveHomePath(DEFAULT_EXTRACTS_PATH)
+  }
+
   const extractsInput = await text({
     message: "Path to extracts directory or export file",
+    placeholder: DEFAULT_EXTRACTS_PATH,
     defaultValue: DEFAULT_EXTRACTS_PATH,
-    validate: (value) => {
-      const normalizedValue = typeof value === "string" ? value : ""
-      return normalizedValue.trim().length === 0 ? "Path is required" : undefined
-    },
   })
 
   if (isCancel(extractsInput)) {
@@ -368,21 +414,31 @@ async function chooseInputPath(preselected: string | undefined): Promise<string>
     process.exit(0)
   }
 
-  return resolveHomePath(extractsInput)
+  const normalizedInput = typeof extractsInput === "string" ? extractsInput.trim() : ""
+  return resolveHomePath(normalizedInput.length > 0 ? normalizedInput : DEFAULT_EXTRACTS_PATH)
 }
 
-async function promptTargetPath(mode: ExtractionMode): Promise<string> {
+async function promptTargetPath(
+  mode: ExtractionMode,
+  preselected: string | undefined,
+  nonInteractive: boolean,
+): Promise<string> {
+  if (preselected) {
+    return resolveHomePath(preselected)
+  }
+
   const defaultValue = mode === "openclaw" ? DEFAULT_OPENCLAW_WORKSPACE_PATH : DEFAULT_ZETTELCLAW_VAULT_PATH
   const message =
-    mode === "openclaw" ? "OpenClaw workspace path" : "Zettelclaw vault path (Inbox/ will receive output notes)"
+    mode === "openclaw" ? "OpenClaw workspace path" : "Zettelclaw vault path (Journal/ will receive output notes)"
+
+  if (nonInteractive) {
+    return resolveHomePath(defaultValue)
+  }
 
   const value = await text({
     message,
+    placeholder: defaultValue,
     defaultValue,
-    validate: (entry) => {
-      const normalized = typeof entry === "string" ? entry.trim() : ""
-      return normalized.length === 0 ? "Path is required" : undefined
-    },
   })
 
   if (isCancel(value)) {
@@ -390,7 +446,8 @@ async function promptTargetPath(mode: ExtractionMode): Promise<string> {
     process.exit(0)
   }
 
-  return resolveHomePath(value)
+  const normalized = typeof value === "string" ? value.trim() : ""
+  return resolveHomePath(normalized.length > 0 ? normalized : defaultValue)
 }
 
 async function parseProvider(provider: Provider, parseCandidates: string[]): Promise<ParsedProviderResult | null> {
@@ -432,14 +489,6 @@ function getProviderParser(provider: Provider) {
   }
 }
 
-function printConversationList(conversations: NormalizedConversation[]) {
-  for (const conversation of conversations) {
-    const date = conversation.createdAt.slice(0, 10)
-    const paddedCount = String(conversation.messageCount).padStart(4, " ")
-    console.log(`${date} | ${paddedCount} msgs | ${conversation.title}`)
-  }
-}
-
 function resolveHomePath(value: string): string {
   if (value === "~") {
     return homedir()
@@ -450,6 +499,15 @@ function resolveHomePath(value: string): string {
   }
 
   return resolve(value)
+}
+
+function resolveDefaultModel(models: ReturnType<typeof readModelsFromOpenClaw>) {
+  const selected = models.find((model) => model.isDefault) ?? models[0]
+  if (!selected) {
+    throw new Error("OpenClaw returned no models")
+  }
+
+  return selected
 }
 
 async function prepareInputSources(inputPath: string): Promise<PreparedInputSources> {
@@ -893,16 +951,19 @@ function uniqueStrings(values: string[]): string[] {
   return output
 }
 
-function formatPreview(values: string[]): string {
-  if (values.length === 0) {
-    return "n/a"
+function clipLogText(value: string, maxChars: number): string {
+  const normalized = value.replaceAll(/\s+/g, " ").trim()
+  if (normalized.length <= maxChars) {
+    return normalized
   }
 
-  return values.slice(0, 6).join("; ")
+  return `${normalized.slice(0, maxChars)}...`
 }
 
 function parseCliArgs(args: string[]): CliArgs {
   const parsed: CliArgs = {
+    timestampedBackups: false,
+    yes: false,
     dryRun: false,
     help: false,
   }
@@ -947,6 +1008,94 @@ function parseCliArgs(args: string[]): CliArgs {
       continue
     }
 
+    if (arg === "--yes" || arg === "-y") {
+      parsed.yes = true
+      continue
+    }
+
+    if (arg === "--workspace") {
+      const value = args[index + 1]
+      if (typeof value !== "string") {
+        throw new Error("Missing value for --workspace")
+      }
+
+      const normalized = value.trim()
+      if (normalized.length === 0) {
+        throw new Error("Empty value for --workspace")
+      }
+
+      parsed.workspace = normalized
+      index += 1
+      continue
+    }
+
+    if (arg.startsWith("--workspace=")) {
+      const value = arg.slice("--workspace=".length).trim()
+      if (value.length === 0) {
+        throw new Error("Empty value for --workspace")
+      }
+
+      parsed.workspace = value
+      continue
+    }
+
+    if (arg === "--target-path") {
+      const value = args[index + 1]
+      if (typeof value !== "string") {
+        throw new Error("Missing value for --target-path")
+      }
+
+      const normalized = value.trim()
+      if (normalized.length === 0) {
+        throw new Error("Empty value for --target-path")
+      }
+
+      parsed.targetPath = normalized
+      index += 1
+      continue
+    }
+
+    if (arg.startsWith("--target-path=")) {
+      const value = arg.slice("--target-path=".length).trim()
+      if (value.length === 0) {
+        throw new Error("Empty value for --target-path")
+      }
+
+      parsed.targetPath = value
+      continue
+    }
+
+    if (arg === "--timestamped-backups") {
+      parsed.timestampedBackups = true
+      continue
+    }
+
+    if (arg === "--state-path") {
+      const value = args[index + 1]
+      if (typeof value !== "string") {
+        throw new Error("Missing value for --state-path")
+      }
+
+      const normalized = value.trim()
+      if (normalized.length === 0) {
+        throw new Error("Empty value for --state-path")
+      }
+
+      parsed.statePath = normalized
+      index += 1
+      continue
+    }
+
+    if (arg.startsWith("--state-path=")) {
+      const value = arg.slice("--state-path=".length).trim()
+      if (value.length === 0) {
+        throw new Error("Empty value for --state-path")
+      }
+
+      parsed.statePath = value
+      continue
+    }
+
     if (arg === "--subagent-batch-size") {
       const value = args[index + 1]
       if (typeof value !== "string") {
@@ -971,6 +1120,33 @@ function parseCliArgs(args: string[]): CliArgs {
       }
 
       parsed.subagentBatchSize = parsedSize
+      continue
+    }
+
+    if (arg === "--parallel-jobs") {
+      const value = args[index + 1]
+      if (typeof value !== "string") {
+        throw new Error("Missing value for --parallel-jobs")
+      }
+
+      const parsedSize = parsePositiveIntegerArg(value)
+      if (parsedSize === undefined) {
+        throw new Error("Invalid --parallel-jobs value. Expected a positive integer.")
+      }
+
+      parsed.parallelJobs = parsedSize
+      index += 1
+      continue
+    }
+
+    if (arg.startsWith("--parallel-jobs=")) {
+      const value = arg.slice("--parallel-jobs=".length)
+      const parsedSize = parsePositiveIntegerArg(value)
+      if (parsedSize === undefined) {
+        throw new Error("Invalid --parallel-jobs value. Expected a positive integer.")
+      }
+
+      parsed.parallelJobs = parsedSize
       continue
     }
 
@@ -1106,13 +1282,13 @@ function parseLegacySessionModeArg(value: string): LegacySessionMode | undefined
 
 function resolveLegacySessionMode(
   requestedMode: LegacySessionMode | undefined,
-  extractionMode: ExtractionMode,
+  _extractionMode: ExtractionMode,
 ): LegacySessionMode {
   if (requestedMode) {
     return requestedMode
   }
 
-  return extractionMode === "openclaw" ? "on" : "off"
+  return "on"
 }
 
 function parsePositiveIntegerArg(value: string): number | undefined {
@@ -1141,16 +1317,24 @@ function printHelp(): void {
       "  --provider <chatgpt|claude|grok>   Parse only one provider",
       "  --input <path>                      Export directory or provider export file path",
       "  --mode <openclaw|zettelclaw>       Output mode",
+      "  --workspace <path>                 OpenClaw workspace path (output in OpenClaw mode; legacy import target in Zettelclaw mode)",
+      "  --target-path <path>               Output root (OpenClaw workspace or Zettelclaw vault)",
       "  --model <model-id>                 OpenClaw model key/alias/name",
-      "  --subagent-batch-size <n>          Conversations per subagent task (default: 1)",
-      "  --legacy-sessions <on|off|required> Import legacy conversations into OpenClaw session history",
+      "  --state-path <path>                Resume state file path (default: ./.reclaw-state.json)",
+      "  --subagent-batch-size <n>          Deprecated (ignored; batching is one merged day per job)",
+      "  --parallel-jobs <n>                Parallel subagent jobs (default: 5)",
+      "  --timestamped-backups              Write MEMORY/USER backups as .bak.<timestamp>",
+      "  --legacy-sessions <on|off|required> Import legacy conversations into OpenClaw session history (default: on)",
+      "  --yes, -y                          Non-interactive defaults; auto-confirm execution",
       "  --dry-run, --plan                  Parse and preview plan; do not schedule extraction or write files",
       "  -h, --help                         Show help",
       "",
       "Examples:",
       "  reclaw",
       "  reclaw --provider chatgpt --input ./conversations.json",
-      "  reclaw --subagent-batch-size 1",
+      "  reclaw --parallel-jobs 5",
+      "  reclaw --state-path ./tmp/reclaw-run-1.json --timestamped-backups",
+      "  reclaw --mode openclaw --workspace ~/tmp/reclaw-workspaces/workspace-20260221-120000 --yes",
       "  reclaw --provider claude --input ./claude-export --mode zettelclaw",
       "  reclaw --dry-run --provider grok --input ./grok-export",
     ].join("\n"),
@@ -1160,21 +1344,26 @@ function printHelp(): void {
 function printDryRunPlan(options: {
   mode: ExtractionMode
   targetPath: string
+  legacyWorkspacePath: string
   providerConversations: ProviderConversations
   selectedProviders: Provider[]
   plan: ReturnType<typeof planExtractionBatches>
   statePath: string
   legacySessionMode: LegacySessionMode
-  subagentBatchSize: number
+  parallelJobs: number
+  backupMode: BackupMode
   model?: string
 }): void {
+  const backupPathSuffix = options.backupMode === "timestamped" ? ".bak.<timestamp>" : ".bak"
   const lines = [
     "Dry-run plan (no writes, no subagents):",
     `- Mode: ${options.mode}`,
     `- Target: ${options.targetPath}`,
     `- State file: ${options.statePath}`,
     `- Model: ${options.model ? `${options.model} (provided, not validated)` : "not selected in dry-run"}`,
-    `- Conversations per subagent: ${options.subagentBatchSize}`,
+    "- Batch strategy: one subagent per day (all same-day conversations merged before extraction)",
+    `- Parallel subagent jobs: ${options.parallelJobs}`,
+    `- Backup mode: ${options.backupMode}`,
     `- Providers: ${options.selectedProviders.map((provider) => providerLabels[provider]).join(", ")}`,
     `- Conversations: ${options.plan.conversationCount}`,
     `- Batches: ${options.plan.batches.length}`,
@@ -1183,7 +1372,9 @@ function printDryRunPlan(options: {
   for (const provider of options.selectedProviders) {
     const providerConversations = options.providerConversations[provider]
     const providerMessages = providerConversations.reduce((sum, conversation) => sum + conversation.messageCount, 0)
-    const providerBatches = options.plan.batches.filter((batch) => batch.provider === provider).length
+    const providerBatches = options.plan.batches.filter((batch) =>
+      batch.conversations.some((conversation) => conversation.source === provider),
+    ).length
     lines.push(
       `  - ${providerLabels[provider]}: ${providerConversations.length} conversations, ${providerMessages} messages, ${providerBatches} batches`,
     )
@@ -1199,21 +1390,28 @@ function printDryRunPlan(options: {
     lines.push(`- Planned memory files: ${outputFiles.size}`)
     lines.push(`- Planned main-agent update: ${join(options.targetPath, "MEMORY.md")}`)
     lines.push(`- Planned main-agent update: ${join(options.targetPath, "USER.md")}`)
-    lines.push(`- Planned backup: ${join(options.targetPath, "MEMORY.md.bak")}`)
-    lines.push(`- Planned backup: ${join(options.targetPath, "USER.md.bak")}`)
+    lines.push(`- Planned backup: ${join(options.targetPath, `MEMORY.md${backupPathSuffix}`)}`)
+    lines.push(`- Planned backup: ${join(options.targetPath, `USER.md${backupPathSuffix}`)}`)
     lines.push(`- Legacy sessions: ${options.legacySessionMode}`)
     if (options.legacySessionMode !== "off") {
       lines.push(`- Planned legacy session imports: ${options.plan.conversationCount}`)
+      lines.push(`- Legacy import workspace: ${options.legacyWorkspacePath}`)
       lines.push("- Legacy markers: origin.label=reclaw-legacy-import, customType=reclaw:legacy-source")
     }
   } else {
     lines.push(`- Zettelclaw journal output: ${join(options.targetPath, "03 Journal")}`)
-    lines.push(`- Zettelclaw inbox drafts: ${join(options.targetPath, "00 Inbox")}`)
-    lines.push("- Planned typed-note updates: none (handled by Zettelclaw supervised/nightly flows)")
+    lines.push("- Zettelclaw inbox notes: none")
+    lines.push("- Planned typed-note updates: none (handled by user/nightly agent workflows)")
     lines.push(`- Planned main-agent update: ${join(options.targetPath, "MEMORY.md")}`)
     lines.push(`- Planned main-agent update: ${join(options.targetPath, "USER.md")}`)
-    lines.push(`- Planned backup: ${join(options.targetPath, "MEMORY.md.bak")}`)
-    lines.push(`- Planned backup: ${join(options.targetPath, "USER.md.bak")}`)
+    lines.push(`- Planned backup: ${join(options.targetPath, `MEMORY.md${backupPathSuffix}`)}`)
+    lines.push(`- Planned backup: ${join(options.targetPath, `USER.md${backupPathSuffix}`)}`)
+    lines.push(`- Legacy sessions: ${options.legacySessionMode}`)
+    if (options.legacySessionMode !== "off") {
+      lines.push(`- Planned legacy session imports: ${options.plan.conversationCount}`)
+      lines.push(`- Legacy import workspace: ${options.legacyWorkspacePath}`)
+      lines.push("- Legacy markers: origin.label=reclaw-legacy-import, customType=reclaw:legacy-source")
+    }
   }
 
   log.message(lines.join("\n"))

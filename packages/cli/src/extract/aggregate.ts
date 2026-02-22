@@ -2,13 +2,20 @@ import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import { removeCronJob, scheduleSubagentCronJob, waitForCronSummary } from "../lib/openclaw"
-import type { AggregatedInsights, BatchExtractionResult, ExtractionArtifacts, ExtractionMode } from "./contracts"
+import type {
+  AggregatedInsights,
+  BackupMode,
+  BatchExtractionResult,
+  ExtractionArtifacts,
+  ExtractionMode,
+} from "./contracts"
 import { extractSummarySignals } from "./summarySignals"
 
 interface WriteArtifactsOptions {
   mode: ExtractionMode
   targetPath: string
   model: string
+  backupMode: BackupMode
 }
 
 interface ZettelclawArtifactsResult {
@@ -16,16 +23,7 @@ interface ZettelclawArtifactsResult {
 }
 
 interface ZettelclawLayout {
-  inboxPath: string
   journalPath: string
-}
-
-interface ZettelclawInboxCandidate {
-  title: string
-  summary: string
-  categoryTag: string
-  source: string
-  created: string
 }
 
 interface SessionEntry {
@@ -48,13 +46,12 @@ interface MainAgentDocUpdateOptions {
   userFilePath: string
 }
 
-const PROVIDER_LABELS: Record<BatchExtractionResult["provider"], string> = {
+const PROVIDER_LABELS: Record<"chatgpt" | "claude" | "grok", string> = {
   chatgpt: "ChatGPT",
   claude: "Claude",
   grok: "Grok",
 }
 
-const ZETTELCLAW_INBOX_FOLDER = "00 Inbox"
 const ZETTELCLAW_JOURNAL_FOLDER = "03 Journal"
 
 export async function writeExtractionArtifacts(
@@ -62,14 +59,15 @@ export async function writeExtractionArtifacts(
   options: WriteArtifactsOptions,
 ): Promise<ExtractionArtifacts> {
   const insights = aggregateInsights(batchResults)
+  const backupTimestamp = options.backupMode === "timestamped" ? formatBackupTimestamp(new Date()) : undefined
 
   if (options.mode === "openclaw") {
     const outputFiles = await writeOpenClawMemoryFiles(batchResults, options.targetPath)
 
     const memoryFilePath = join(options.targetPath, "MEMORY.md")
     const userFilePath = join(options.targetPath, "USER.md")
-    await backupFileIfExists(memoryFilePath)
-    await backupFileIfExists(userFilePath)
+    await backupFileIfExists(memoryFilePath, options.backupMode, backupTimestamp)
+    await backupFileIfExists(userFilePath, options.backupMode, backupTimestamp)
     await updateMemoryAndUserWithMainAgent({
       mode: options.mode,
       targetPath: options.targetPath,
@@ -91,8 +89,8 @@ export async function writeExtractionArtifacts(
   const zettelclawArtifacts = await writeZettelclawArtifacts(batchResults, options.targetPath)
   const memoryFilePath = join(options.targetPath, "MEMORY.md")
   const userFilePath = join(options.targetPath, "USER.md")
-  await backupFileIfExists(memoryFilePath)
-  await backupFileIfExists(userFilePath)
+  await backupFileIfExists(memoryFilePath, options.backupMode, backupTimestamp)
+  await backupFileIfExists(userFilePath, options.backupMode, backupTimestamp)
   await updateMemoryAndUserWithMainAgent({
     mode: options.mode,
     targetPath: options.targetPath,
@@ -182,40 +180,24 @@ async function writeOpenClawMemoryFiles(batchResults: BatchExtractionResult[], t
 function buildOpenClawDailyMemoryContent(date: string, batchResults: BatchExtractionResult[]): string {
   const providerSummary = summarizeProviders(batchResults)
   const sessionRefs = collectSessionRefs(batchResults)
-  const summaries = uniqueStrings(batchResults.map((entry) => entry.extraction.summary))
   const decisions = uniqueStrings(
     batchResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).decisions),
   )
   const facts = uniqueStrings(
     batchResults.flatMap((entry) => {
       const signals = extractSummarySignals(entry.extraction.summary)
-      return [
-        ...signals.facts,
-        ...signals.preferences.map((value) => `Preference: ${value}`),
-        ...signals.people.map((value) => `Person: ${value}`),
-      ]
+      return [...signals.facts, ...signals.projects, ...signals.preferences, ...signals.people]
     }),
   )
-  const open = uniqueStrings(
-    batchResults.flatMap((entry) => {
-      const signals = extractSummarySignals(entry.extraction.summary)
-      return [
-        ...signals.open,
-        ...signals.projects.map((value) => `Project to revisit: ${value}`),
-        ...signals.interests.map((value) => `Interest to triage: ${value}`),
-      ]
-    }),
+  const interests = uniqueStrings(
+    batchResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).interests),
   )
-
-  const done = [
-    `Imported ${batchResults.reduce((sum, entry) => sum + entry.conversationCount, 0)} conversation(s) from ${providerSummary}.`,
-    ...summaries,
-  ]
+  const open = uniqueStrings(batchResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).open))
 
   const lines = [`# Reclaw Import ${date}`, "", `Source providers: ${providerSummary}`, ""]
-  appendSection(lines, "## Done", done)
   appendSection(lines, "## Decisions", decisions)
   appendSection(lines, "## Facts", facts)
+  appendSection(lines, "## Interests", interests)
   appendSection(lines, "## Open", open)
 
   lines.push("---", "", "## Sessions")
@@ -236,20 +218,14 @@ async function writeZettelclawArtifacts(
   vaultPath: string,
 ): Promise<ZettelclawArtifactsResult> {
   const layout = resolveZettelclawLayout(vaultPath)
-  await mkdir(layout.inboxPath, { recursive: true })
   await mkdir(layout.journalPath, { recursive: true })
 
   const journalFiles = await writeZettelclawJournalImports(batchResults, layout.journalPath)
-  const inboxFiles = await writeZettelclawInboxDrafts(batchResults, layout.inboxPath)
-
-  return {
-    outputFiles: [...journalFiles, ...inboxFiles].sort((left, right) => left.localeCompare(right)),
-  }
+  return { outputFiles: journalFiles.sort((left, right) => left.localeCompare(right)) }
 }
 
 function resolveZettelclawLayout(vaultPath: string): ZettelclawLayout {
   return {
-    inboxPath: join(vaultPath, ZETTELCLAW_INBOX_FOLDER),
     journalPath: join(vaultPath, ZETTELCLAW_JOURNAL_FOLDER),
   }
 }
@@ -282,6 +258,9 @@ async function writeZettelclawJournalImports(
     const ensured = ensureDailyJournalSections(content)
     content = ensured.content
     let changed = ensured.changed
+    const normalizedSections = normalizeJournalSections(content)
+    content = normalizedSections.content
+    changed = changed || normalizedSections.changed
 
     const existingSessionIds = collectSessionIds(content)
     const sessionEntries = collectSessionEntries(dateResults)
@@ -303,48 +282,39 @@ async function writeZettelclawJournalImports(
         collectResultSessionEntries(result).some((entry) => sessionIdsToAppend.has(entry.id.toLowerCase())),
       )
 
-      const providerSummary = summarizeProviders(pendingResults)
-      const done = uniqueStrings([
-        `Imported ${pendingResults.reduce((sum, entry) => sum + entry.conversationCount, 0)} conversation(s) from ${providerSummary}.`,
-        ...pendingResults.map((entry) => entry.extraction.summary),
-      ])
       const decisions = uniqueStrings(
         pendingResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).decisions),
       )
       const facts = uniqueStrings(
         pendingResults.flatMap((entry) => {
           const signals = extractSummarySignals(entry.extraction.summary)
-          return [
-            ...signals.facts,
-            ...signals.people.map((value) => `Person: ${value}`),
-            ...signals.preferences.map((value) => `Preference: ${value}`),
-          ]
+          return [...signals.facts, ...signals.projects, ...signals.people, ...signals.preferences]
         }),
+      )
+      const interests = uniqueStrings(
+        pendingResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).interests),
       )
       const open = uniqueStrings(
-        pendingResults.flatMap((entry) => {
-          const signals = extractSummarySignals(entry.extraction.summary)
-          return [
-            ...signals.open,
-            ...signals.projects.map((value) => `Project to revisit: ${value}`),
-            ...signals.interests.map((value) => `Interest to triage: ${value}`),
-          ]
-        }),
+        pendingResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).open),
       )
+      const cleanedDecisions = cleanJournalBullets(decisions)
+      const cleanedFacts = cleanJournalBullets(facts)
+      const cleanedInterests = cleanJournalBullets(interests)
+      const cleanedOpen = cleanJournalBullets(open)
 
-      const doneUpdate = appendUniqueSectionBullets(content, "## Done", done)
-      content = doneUpdate.content
-      changed = changed || doneUpdate.changed
-
-      const decisionsUpdate = appendUniqueSectionBullets(content, "## Decisions", decisions)
+      const decisionsUpdate = appendUniqueSectionBullets(content, "## Decisions", cleanedDecisions)
       content = decisionsUpdate.content
       changed = changed || decisionsUpdate.changed
 
-      const factsUpdate = appendUniqueSectionBullets(content, "## Facts", facts)
+      const factsUpdate = appendUniqueSectionBullets(content, "## Facts", cleanedFacts)
       content = factsUpdate.content
       changed = changed || factsUpdate.changed
 
-      const openUpdate = appendUniqueSectionBullets(content, "## Open", open)
+      const interestsUpdate = appendUniqueSectionBullets(content, "## Interests", cleanedInterests)
+      content = interestsUpdate.content
+      changed = changed || interestsUpdate.changed
+
+      const openUpdate = appendUniqueSectionBullets(content, "## Open", cleanedOpen)
       content = openUpdate.content
       changed = changed || openUpdate.changed
 
@@ -383,15 +353,6 @@ function buildJournalTemplate(date: string, updatedDate: string): string {
     `created: ${date}`,
     `updated: ${updatedDate}`,
     "---",
-    "",
-    "## Done",
-    "",
-    "## Decisions",
-    "",
-    "## Facts",
-    "",
-    "## Open",
-    "",
     "---",
     "## Sessions",
     "",
@@ -400,7 +361,11 @@ function buildJournalTemplate(date: string, updatedDate: string): string {
 
 function ensureDailyJournalSections(content: string): ContentUpdateResult {
   const lines = content.replaceAll("\r\n", "\n").split("\n")
-  let changed = false
+  let changed = stripBlankLinesAfterFrontmatter(lines)
+
+  if (removeSection(lines, "## Done")) {
+    changed = true
+  }
 
   const sessionsFooter = ensureSessionsFooter(lines)
   changed = changed || sessionsFooter.changed
@@ -420,22 +385,93 @@ function ensureDailyJournalSections(content: string): ContentUpdateResult {
     changed = true
   }
 
-  for (const heading of ["## Done", "## Decisions", "## Facts", "## Open"]) {
-    const existing = findLineIndex(lines, heading)
-    if (existing !== -1 && existing < dividerIndex) {
+  for (const heading of ["## Decisions", "## Facts", "## Interests", "## Open"]) {
+    const bounds = findSectionBounds(lines, heading)
+    if (!bounds || bounds.start >= dividerIndex) {
       continue
     }
 
-    if (dividerIndex > 0 && lines[dividerIndex - 1]?.trim().length !== 0) {
-      lines.splice(dividerIndex, 0, "")
-      dividerIndex += 1
-      sessionsIndex += 1
+    if (sectionHasBullets(lines, bounds)) {
+      continue
     }
 
-    lines.splice(dividerIndex, 0, heading, "")
-    dividerIndex += 2
-    sessionsIndex += 2
+    removeSection(lines, heading)
     changed = true
+    sessionsIndex = findLineIndex(lines, "## Sessions")
+    if (sessionsIndex === -1) {
+      break
+    }
+    dividerIndex = findDividerBefore(lines, sessionsIndex)
+    if (dividerIndex === -1) {
+      lines.splice(sessionsIndex, 0, "---")
+      dividerIndex = sessionsIndex
+      sessionsIndex += 1
+      changed = true
+    }
+  }
+
+  return {
+    content: `${lines.join("\n").trimEnd()}\n`,
+    changed,
+  }
+}
+
+function stripBlankLinesAfterFrontmatter(lines: string[]): boolean {
+  if (lines.length < 3 || lines[0]?.trim() !== "---") {
+    return false
+  }
+
+  let frontmatterEnd = -1
+  for (let index = 1; index < lines.length; index += 1) {
+    if ((lines[index] ?? "").trim() === "---") {
+      frontmatterEnd = index
+      break
+    }
+  }
+
+  if (frontmatterEnd === -1) {
+    return false
+  }
+
+  let changed = false
+  while (frontmatterEnd + 1 < lines.length && (lines[frontmatterEnd + 1] ?? "").trim().length === 0) {
+    lines.splice(frontmatterEnd + 1, 1)
+    changed = true
+  }
+
+  return changed
+}
+
+function normalizeJournalSections(content: string): ContentUpdateResult {
+  const lines = content.replaceAll("\r\n", "\n").split("\n")
+  let changed = false
+
+  for (const heading of ["## Decisions", "## Facts", "## Interests", "## Open"]) {
+    const bounds = findSectionBounds(lines, heading)
+    if (!bounds) {
+      continue
+    }
+
+    const cleanedBullets = cleanJournalBullets(
+      lines
+        .slice(bounds.start + 1, bounds.end)
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("- "))
+        .map((line) => line.slice(2)),
+    )
+
+    if (cleanedBullets.length === 0) {
+      removeSection(lines, heading)
+      changed = true
+      continue
+    }
+
+    const replacement = [heading, ...cleanedBullets.map((value) => `- ${value}`), ""]
+    const current = lines.slice(bounds.start, bounds.end)
+    if (!arraysEqual(current, replacement)) {
+      lines.splice(bounds.start, bounds.end - bounds.start, ...replacement)
+      changed = true
+    }
   }
 
   return {
@@ -480,9 +516,16 @@ function appendUniqueSectionBullets(content: string, heading: string, values: st
   }
 
   const lines = content.replaceAll("\r\n", "\n").split("\n")
+  let changed = false
+  const ensured = ensureSectionForAppend(lines, heading)
+  changed = ensured.changed
+
   const bounds = findSectionBounds(lines, heading)
   if (!bounds) {
-    return { content, changed: false }
+    return {
+      content: `${lines.join("\n").trimEnd()}\n`,
+      changed,
+    }
   }
 
   const existing = new Set<string>()
@@ -505,7 +548,6 @@ function appendUniqueSectionBullets(content: string, heading: string, values: st
     insertIndex -= 1
   }
 
-  let changed = false
   for (const value of uniqueValues) {
     const key = heading === "## Sessions" ? parseSessionId(value).toLowerCase() : normalizeBulletValue(value)
     if (key.length === 0 || existing.has(key)) {
@@ -593,7 +635,11 @@ function collectResultSessionEntries(result: BatchExtractionResult): SessionEntr
   const refs =
     result.conversationRefs.length > 0
       ? result.conversationRefs
-      : result.conversationIds.map((id) => ({ id, timestamp: undefined as string | undefined }))
+      : result.conversationIds.map((id) => ({
+          provider: result.providers[0] ?? "chatgpt",
+          id,
+          timestamp: undefined as string | undefined,
+        }))
 
   const byId = new Map<string, SessionEntry>()
   for (const ref of refs) {
@@ -602,7 +648,7 @@ function collectResultSessionEntries(result: BatchExtractionResult): SessionEntr
       continue
     }
 
-    const fullId = `${result.provider}:${id}`
+    const fullId = `${ref.provider}:${id}`
     const timestamp = ref.timestamp?.trim()
     const existing = byId.get(fullId)
     if (!existing || (!existing.timestamp && timestamp)) {
@@ -679,6 +725,78 @@ function findSectionBounds(lines: string[], heading: string): { start: number; e
   return { start, end }
 }
 
+function sectionHasBullets(lines: string[], bounds: { start: number; end: number }): boolean {
+  for (let index = bounds.start + 1; index < bounds.end; index += 1) {
+    if ((lines[index] ?? "").trim().startsWith("- ")) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function removeSection(lines: string[], heading: string): boolean {
+  const bounds = findSectionBounds(lines, heading)
+  if (!bounds) {
+    return false
+  }
+
+  let start = bounds.start
+  while (start > 0 && lines[start - 1]?.trim().length === 0) {
+    start -= 1
+  }
+
+  lines.splice(start, bounds.end - start)
+  return true
+}
+
+function ensureSectionForAppend(lines: string[], heading: string): { changed: boolean } {
+  if (findLineIndex(lines, heading) !== -1) {
+    return { changed: false }
+  }
+
+  let changed = false
+  if (heading === "## Sessions") {
+    const ensured = ensureSessionsFooter(lines)
+    return { changed: ensured.changed }
+  }
+
+  let sessionsIndex = findLineIndex(lines, "## Sessions")
+  if (sessionsIndex === -1) {
+    while (lines.length > 0 && lines[lines.length - 1]?.trim().length === 0) {
+      lines.pop()
+    }
+    if (lines.length > 0) {
+      lines.push("")
+    }
+    lines.push("---", "## Sessions", "")
+    changed = true
+    sessionsIndex = findLineIndex(lines, "## Sessions")
+  }
+
+  if (sessionsIndex === -1) {
+    return { changed }
+  }
+
+  let dividerIndex = findDividerBefore(lines, sessionsIndex)
+  if (dividerIndex === -1) {
+    lines.splice(sessionsIndex, 0, "---")
+    sessionsIndex += 1
+    dividerIndex = sessionsIndex - 1
+    changed = true
+  }
+
+  if (dividerIndex > 0 && lines[dividerIndex - 1]?.trim().length !== 0) {
+    lines.splice(dividerIndex, 0, "")
+    dividerIndex += 1
+    changed = true
+  }
+
+  lines.splice(dividerIndex, 0, heading, "")
+  changed = true
+  return { changed }
+}
+
 function findDividerBefore(lines: string[], index: number): number {
   for (let lineIndex = index - 1; lineIndex >= 0; lineIndex -= 1) {
     const trimmed = lines[lineIndex]?.trim() ?? ""
@@ -732,118 +850,6 @@ function ensureFrontmatterDate(content: string, field: "updated" | "created", va
   return `---\n${lines.join("\n")}\n---${body}`
 }
 
-async function writeZettelclawInboxDrafts(batchResults: BatchExtractionResult[], inboxPath: string): Promise<string[]> {
-  const candidates = collectZettelclawInboxCandidates(batchResults)
-  const usedFilenames = new Set<string>()
-  const writtenFiles: string[] = []
-  const todayDate = new Date().toISOString().slice(0, 10)
-
-  for (const candidate of candidates) {
-    const baseFilename = `${toTitleCase(candidate.title)}.md`
-    let filename = baseFilename
-    let suffix = 2
-
-    while (usedFilenames.has(filename.toLowerCase()) || (await pathExists(join(inboxPath, filename)))) {
-      filename = `${toTitleCase(candidate.title)} ${suffix}.md`
-      suffix += 1
-    }
-
-    usedFilenames.add(filename.toLowerCase())
-    const filePath = join(inboxPath, filename)
-    const content = buildZettelclawInboxNoteContent(candidate, todayDate)
-    await writeFile(filePath, content, "utf8")
-    writtenFiles.push(filePath)
-  }
-
-  return writtenFiles.sort((left, right) => left.localeCompare(right))
-}
-
-function collectZettelclawInboxCandidates(batchResults: BatchExtractionResult[]): ZettelclawInboxCandidate[] {
-  const candidates: ZettelclawInboxCandidate[] = []
-
-  for (const result of batchResults) {
-    const source = `reclaw:${result.provider}:${result.date}`
-    const created = result.date
-    const signals = extractSummarySignals(result.extraction.summary)
-
-    appendInboxCandidates(candidates, signals.interests, "interests", source, created)
-    appendInboxCandidates(candidates, signals.projects, "projects", source, created)
-    appendInboxCandidates(candidates, signals.facts, "facts", source, created)
-    appendInboxCandidates(candidates, signals.preferences, "preferences", source, created)
-    appendInboxCandidates(candidates, signals.people, "people", source, created)
-    appendInboxCandidates(candidates, signals.decisions, "decisions", source, created)
-    appendInboxCandidates(candidates, signals.open, "open", source, created)
-  }
-
-  return dedupeInboxCandidates(candidates)
-}
-
-function appendInboxCandidates(
-  candidates: ZettelclawInboxCandidate[],
-  values: string[],
-  categoryTag: string,
-  source: string,
-  created: string,
-): void {
-  for (const value of values) {
-    const summary = value.trim()
-    if (summary.length === 0) {
-      continue
-    }
-
-    candidates.push({
-      title: summary.slice(0, 120),
-      summary,
-      categoryTag,
-      source,
-      created,
-    })
-  }
-}
-
-function dedupeInboxCandidates(candidates: ZettelclawInboxCandidate[]): ZettelclawInboxCandidate[] {
-  const seen = new Set<string>()
-  const output: ZettelclawInboxCandidate[] = []
-
-  for (const candidate of candidates) {
-    const key = `${candidate.categoryTag}:${candidate.summary.toLowerCase()}`
-    if (seen.has(key)) {
-      continue
-    }
-
-    seen.add(key)
-    output.push(candidate)
-  }
-
-  return output
-}
-
-function buildZettelclawInboxNoteContent(candidate: ZettelclawInboxCandidate, updatedDate: string): string {
-  const escapedSummary = escapeYamlString(candidate.summary)
-  const escapedSource = escapeYamlString(candidate.source)
-  const title = toTitleCase(candidate.title)
-
-  return [
-    "---",
-    "type: evergreen",
-    `tags: [reclaw, imports, ${candidate.categoryTag}]`,
-    `summary: "${escapedSummary}"`,
-    `source: "${escapedSource}"`,
-    `created: ${candidate.created}`,
-    `updated: ${updatedDate}`,
-    "---",
-    "",
-    `# ${title}`,
-    "",
-    candidate.summary,
-    "",
-    "## Context",
-    `- Source: ${candidate.source}`,
-    "- Draft generated by Reclaw from legacy conversation history.",
-    "",
-  ].join("\n")
-}
-
 async function updateMemoryAndUserWithMainAgent(options: MainAgentDocUpdateOptions): Promise<void> {
   const prompt = buildMainAgentDocUpdatePrompt(options)
   const scheduled = await scheduleSubagentCronJob({
@@ -892,9 +898,12 @@ function buildMainAgentDocUpdatePrompt(options: MainAgentDocUpdateOptions): stri
     "",
     "Constraints:",
     "- Preserve all content outside managed sections.",
-    "- Backups already exist at .bak paths; do not modify backup files.",
+    "- Backups already exist next to target files (.bak or .bak.<timestamp>); do not modify backup files.",
     "- If target files do not exist, create them.",
     "- Keep outputs concise, durable, and high-signal.",
+    "- Re-filter aggressively: if an item is general knowledge (even if it appeared in subagent output), exclude it.",
+    "- Do not treat one-off questions as durable interests.",
+    "- If a fact is true for nearly all users of a technology, exclude it unless the item is specific to this user's setup/decision.",
     "",
     "Managed section requirements:",
     "- MEMORY.md section markers: <!-- reclaw-memory:start --> ... <!-- reclaw-memory:end -->",
@@ -943,7 +952,7 @@ function serializeBatchSummaries(batchResults: BatchExtractionResult[], maxChars
       return dateCompare
     }
 
-    const providerCompare = left.provider.localeCompare(right.provider)
+    const providerCompare = left.providers.join(",").localeCompare(right.providers.join(","))
     if (providerCompare !== 0) {
       return providerCompare
     }
@@ -963,7 +972,7 @@ function serializeBatchSummaries(batchResults: BatchExtractionResult[], maxChars
     const refs = collectResultSessionEntries(result)
       .map((entry) => (entry.timestamp ? `${entry.id}@${entry.timestamp}` : entry.id))
       .join(", ")
-    const line = `- ${result.date} | ${result.provider} | ${refs || "no-session-ref"} | ${summary}`
+    const line = `- ${result.date} | ${formatProviderList(result.providers)} | ${refs || "no-session-ref"} | ${summary}`
     if (consumed + line.length + 1 > maxChars) {
       lines.push(`- ... truncated after ${lines.length} summaries to stay within prompt budget.`)
       break
@@ -989,12 +998,24 @@ function appendSection(lines: string[], heading: string, values: string[]): void
 }
 
 function summarizeProviders(batchResults: BatchExtractionResult[]): string {
-  const counts = new Map<BatchExtractionResult["provider"], number>()
+  const counts = new Map<"chatgpt" | "claude" | "grok", number>()
   for (const result of batchResults) {
-    counts.set(result.provider, (counts.get(result.provider) ?? 0) + result.conversationCount)
+    if (result.conversationRefs.length > 0) {
+      for (const ref of result.conversationRefs) {
+        counts.set(ref.provider, (counts.get(ref.provider) ?? 0) + 1)
+      }
+      continue
+    }
+
+    const fallbackProvider = result.providers[0]
+    if (!fallbackProvider) {
+      continue
+    }
+    counts.set(fallbackProvider, (counts.get(fallbackProvider) ?? 0) + result.conversationCount)
   }
 
-  return [...counts.entries()].map(([provider, count]) => `${PROVIDER_LABELS[provider]} (${count})`).join(", ")
+  const summary = [...counts.entries()].map(([provider, count]) => `${PROVIDER_LABELS[provider]} (${count})`).join(", ")
+  return summary.length > 0 ? summary : "n/a"
 }
 
 function collectSessionRefs(batchResults: BatchExtractionResult[]): string[] {
@@ -1003,7 +1024,11 @@ function collectSessionRefs(batchResults: BatchExtractionResult[]): string[] {
     const conversationRefs =
       result.conversationRefs.length > 0
         ? result.conversationRefs
-        : result.conversationIds.map((id) => ({ id, timestamp: undefined as string | undefined }))
+        : result.conversationIds.map((id) => ({
+            provider: result.providers[0] ?? "chatgpt",
+            id,
+            timestamp: undefined as string | undefined,
+          }))
     for (const conversationRef of conversationRefs) {
       const normalized = conversationRef.id.trim()
       if (normalized.length === 0) {
@@ -1011,7 +1036,7 @@ function collectSessionRefs(batchResults: BatchExtractionResult[]): string[] {
       }
 
       const timestamp = conversationRef.timestamp?.trim() || "unknown"
-      refs.add(`${result.provider}:${normalized} — ${timestamp}`)
+      refs.add(`${conversationRef.provider}:${normalized} — ${timestamp}`)
     }
   }
 
@@ -1048,24 +1073,38 @@ function uniqueStrings(values: string[]): string[] {
   return output
 }
 
-function toTitleCase(value: string): string {
-  const sanitized = value
-    .normalize("NFKD")
-    .replaceAll(/[^a-zA-Z0-9\s-]/g, " ")
-    .replaceAll(/\s+/g, " ")
-    .trim()
-    .slice(0, 120)
+function arraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
 
-  const normalized = sanitized.length > 0 ? sanitized : "Reclaw Note"
-  return normalized
-    .split(" ")
-    .filter((chunk) => chunk.length > 0)
-    .map((chunk) => `${chunk.slice(0, 1).toUpperCase()}${chunk.slice(1).toLowerCase()}`)
-    .join(" ")
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false
+    }
+  }
+
+  return true
 }
 
-function escapeYamlString(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')
+function cleanJournalBullets(values: string[]): string[] {
+  return uniqueStrings(
+    values
+      .map((value) => stripInlineSignalPrefix(value))
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0),
+  )
+}
+
+function stripInlineSignalPrefix(value: string): string {
+  let output = value.trim()
+  while (true) {
+    const next = output.replace(/^(preference|project|fact|decision|interest|person|open)\s*:\s*/i, "").trim()
+    if (next === output) {
+      return output
+    }
+    output = next
+  }
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -1077,9 +1116,17 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function backupFileIfExists(path: string): Promise<void> {
+function formatProviderList(providers: BatchExtractionResult["providers"]): string {
+  if (providers.length === 0) {
+    return "unknown-provider"
+  }
+
+  return providers.map((provider) => PROVIDER_LABELS[provider]).join("+")
+}
+
+async function backupFileIfExists(path: string, mode: BackupMode, timestamp?: string): Promise<void> {
   try {
-    await copyFile(path, `${path}.bak`)
+    await copyFile(path, buildBackupPath(path, mode, timestamp))
   } catch (error) {
     const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: string }).code : ""
     if (code === "ENOENT") {
@@ -1088,4 +1135,24 @@ async function backupFileIfExists(path: string): Promise<void> {
 
     throw error
   }
+}
+
+function buildBackupPath(path: string, mode: BackupMode, timestamp?: string): string {
+  if (mode === "timestamped") {
+    const suffix = timestamp ?? formatBackupTimestamp(new Date())
+    return `${path}.bak.${suffix}`
+  }
+
+  return `${path}.bak`
+}
+
+function formatBackupTimestamp(now: Date): string {
+  const year = now.getFullYear().toString().padStart(4, "0")
+  const month = (now.getMonth() + 1).toString().padStart(2, "0")
+  const day = now.getDate().toString().padStart(2, "0")
+  const hour = now.getHours().toString().padStart(2, "0")
+  const minute = now.getMinutes().toString().padStart(2, "0")
+  const second = now.getSeconds().toString().padStart(2, "0")
+  const millis = now.getMilliseconds().toString().padStart(3, "0")
+  return `${year}${month}${day}-${hour}${minute}${second}-${millis}`
 }

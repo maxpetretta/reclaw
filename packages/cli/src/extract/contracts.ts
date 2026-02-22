@@ -1,10 +1,11 @@
 import type { NormalizedConversation } from "../types"
 
 export type ExtractionMode = "openclaw" | "zettelclaw"
+export type BackupMode = "overwrite" | "timestamped"
 
 export interface ConversationBatch {
   id: string
-  provider: NormalizedConversation["source"]
+  providers: NormalizedConversation["source"][]
   date: string
   index: number
   totalForDate: number
@@ -16,13 +17,14 @@ export interface SubagentExtraction {
 }
 
 export interface BatchConversationRef {
+  provider: NormalizedConversation["source"]
   id: string
   timestamp?: string
 }
 
 export interface BatchExtractionResult {
   batchId: string
-  provider: NormalizedConversation["source"]
+  providers: NormalizedConversation["source"][]
   date: string
   conversationIds: string[]
   conversationRefs: BatchConversationRef[]

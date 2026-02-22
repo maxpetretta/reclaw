@@ -2,9 +2,10 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import type { NormalizedConversation } from "../types"
 import type { ConversationBatch, ExtractionMode, SubagentExtraction } from "./contracts"
 
-const PROVIDER_LABELS: Record<ConversationBatch["provider"], string> = {
+const PROVIDER_LABELS: Record<NormalizedConversation["source"], string> = {
   chatgpt: "ChatGPT",
   claude: "Claude",
   grok: "Grok",
@@ -29,18 +30,19 @@ interface PromptOptions {
 }
 
 export function buildSubagentPrompt(batch: ConversationBatch, options: PromptOptions): string {
+  const providerLabel = formatProviderSummary(batch.conversations)
   const outputInstruction =
     options.mode === "openclaw"
       ? `Produce one concise MOST IMPORTANT summary for these conversation(s); the main Reclaw process will build memory/${batch.date}.md and update MEMORY.md/USER.md in ${options.outputPath}.`
-      : "Produce one concise MOST IMPORTANT summary for these conversation(s); the main Reclaw process will update Zettelclaw journal sections, inbox drafts, MEMORY.md, and USER.md."
+      : "Produce one concise MOST IMPORTANT summary for these conversation(s); the main Reclaw process will update Zettelclaw journal sections, MEMORY.md, and USER.md."
 
   const conversationsMarkdown = serializeBatchConversations(batch, options.maxPromptChars ?? 110_000)
   const agentPrompt = renderPromptTemplate(loadPromptTemplate(PROMPT_FILENAMES.agent), {
-    provider_label: PROVIDER_LABELS[batch.provider],
+    provider_label: providerLabel,
   })
   const subagentPrompt = renderPromptTemplate(loadPromptTemplate(PROMPT_FILENAMES.subagent), {
     output_instruction: outputInstruction,
-    provider: batch.provider,
+    providers: providerLabel,
     date: batch.date,
     batch_index: String(batch.index + 1),
     batch_total: String(batch.totalForDate),
@@ -161,6 +163,7 @@ function serializeConversation(conversation: ConversationBatch["conversations"][
 
   return [
     `### ${conversation.title}`,
+    `provider: ${conversation.source}`,
     `id: ${conversation.id}`,
     `created: ${conversation.createdAt}`,
     `messages: ${conversation.messageCount}`,
@@ -205,4 +208,16 @@ function parseEmbeddedJson(raw: string): unknown {
   } catch {
     return undefined
   }
+}
+
+function formatProviderSummary(conversations: ConversationBatch["conversations"]): string {
+  const counts = new Map<NormalizedConversation["source"], number>()
+  for (const conversation of conversations) {
+    counts.set(conversation.source, (counts.get(conversation.source) ?? 0) + 1)
+  }
+
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([provider, count]) => `${PROVIDER_LABELS[provider]} (${count})`)
+    .join(", ")
 }

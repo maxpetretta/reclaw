@@ -32,6 +32,11 @@ export function parseModels(json: string): ModelInfo[] {
       const key = typeof model.key === "string" ? model.key : ""
       const name = typeof model.name === "string" && model.name.length > 0 ? model.name : key
       const tags = asStringArray(model.tags)
+      const missing = model.missing === true || tags.includes("missing")
+      if (missing || key.length === 0) {
+        return null
+      }
+
       const alias = tags.find((tag) => tag.startsWith("alias:"))?.slice(6)
       const result: ModelInfo = {
         key,
@@ -45,7 +50,7 @@ export function parseModels(json: string): ModelInfo[] {
 
       return result
     })
-    .filter((model) => model.key.length > 0)
+    .filter((model): model is ModelInfo => model !== null)
 }
 
 export function readModelsFromOpenClaw(): ModelInfo[] {

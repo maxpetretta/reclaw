@@ -29,6 +29,7 @@ interface CronRunEntry {
   action?: string
   status?: string
   summary?: string
+  error?: string
   ts?: number
 }
 
@@ -116,7 +117,7 @@ export async function scheduleSubagentCronJob(params: ScheduleSubagentParams): P
     sessionName,
     "--message",
     params.message,
-    "--announce",
+    "--no-deliver",
     "--delete-after-run",
     "--timeout-seconds",
     String(timeoutSeconds),
@@ -155,7 +156,7 @@ export async function scheduleSubagentCronJob(params: ScheduleSubagentParams): P
     sessionName,
     "--message",
     params.message,
-    "--announce",
+    "--no-deliver",
     "--delete-after-run",
     "--timeout-seconds",
     String(timeoutSeconds),
@@ -264,10 +265,31 @@ export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): 
 
     if (finishedEntry) {
       if (finishedEntry.status && finishedEntry.status !== "ok") {
+        const errorText =
+          typeof finishedEntry.error === "string" && finishedEntry.error.trim().length > 0
+            ? finishedEntry.error.trim()
+            : ""
+        const summaryText =
+          typeof finishedEntry.summary === "string" && finishedEntry.summary.trim().length > 0
+            ? finishedEntry.summary
+            : ""
+        const normalizedError = errorText.toLowerCase()
+        const isDeliveryFailure =
+          normalizedError.includes("cron delivery target is missing") ||
+          normalizedError.includes("cron announce delivery failed")
+
+        if (isDeliveryFailure && summaryText.length > 0) {
+          return summaryText
+        }
+
+        const detail =
+          (errorText.length > 0 ? errorText : undefined) ??
+          (summaryText.length > 0 ? summaryText : undefined) ??
+          "no summary"
         throw new OpenClawError(
           "JOB_FAILED",
           `Subagent job ${jobId} finished with status '${finishedEntry.status}'.`,
-          finishedEntry.summary ?? "no summary",
+          detail,
         )
       }
 
