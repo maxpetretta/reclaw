@@ -1,7 +1,8 @@
-import { access, readFile, stat } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { readFile } from "node:fs/promises"
 
+import { toIsoTimestamp } from "../lib/timestamps"
 import type { NormalizedConversation, NormalizedMessage } from "../types"
+import { resolveConversationsFilePath } from "./shared"
 
 interface ChatGptNodeRaw {
   id?: string
@@ -43,30 +44,15 @@ export async function parseChatGptConversations(extractsDir: string): Promise<No
     throw new Error(`Expected ChatGPT export to be an array at ${filePath}`)
   }
 
+  if (!hasChatGptSignature(parsed)) {
+    throw new Error(`File does not match expected ChatGPT export schema: ${filePath}`)
+  }
+
   return parsed.map((conversation) => normalizeChatGptConversation(conversation as ChatGptConversationRaw))
 }
 
-async function resolveChatGptFilePath(extractsDir: string): Promise<string> {
-  if (await isFile(extractsDir)) {
-    return extractsDir
-  }
-
-  const parentDir = dirname(extractsDir)
-  const candidates = [
-    join(extractsDir, "chatgpt", "conversations.json"),
-    join(extractsDir, "conversations.json"),
-    join(parentDir, "chatgpt", "conversations.json"),
-  ]
-
-  for (const candidate of candidates) {
-    if (await pathExists(candidate)) {
-      return candidate
-    }
-  }
-
-  throw new Error(
-    `Could not find ChatGPT conversations.json. Tried: ${candidates.map((candidate) => `'${candidate}'`).join(", ")}`,
-  )
+function resolveChatGptFilePath(extractsDir: string): Promise<string> {
+  return resolveConversationsFilePath(extractsDir, "chatgpt", "ChatGPT")
 }
 
 function normalizeChatGptConversation(raw: ChatGptConversationRaw): NormalizedConversation {
@@ -305,23 +291,7 @@ function mapChatGptRole(role: string | undefined): NormalizedMessage["role"] {
 }
 
 function toIsoString(value: number | string | null | undefined): string | undefined {
-  if (typeof value === "number") {
-    return new Date(Math.trunc(value * 1000)).toISOString()
-  }
-
-  if (typeof value === "string") {
-    const asNumber = Number(value)
-    if (!Number.isNaN(asNumber) && value.trim() !== "") {
-      return new Date(Math.trunc(asNumber * 1000)).toISOString()
-    }
-
-    const parsed = Date.parse(value)
-    if (!Number.isNaN(parsed)) {
-      return new Date(parsed).toISOString()
-    }
-  }
-
-  return undefined
+  return toIsoTimestamp(value)
 }
 
 function toMilliseconds(value: number | string | null | undefined): number {
@@ -345,19 +315,19 @@ function toLimitedString(value: string, limit = 16_000): string {
   return `${value.slice(0, limit)}\n...`
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path)
+function hasChatGptSignature(value: unknown[]): boolean {
+  if (value.length === 0) {
     return true
-  } catch {
-    return false
   }
-}
 
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile()
-  } catch {
+  const firstRecord = value.find((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
+  if (!firstRecord || typeof firstRecord !== "object" || Array.isArray(firstRecord)) {
     return false
   }
+
+  const typed = firstRecord as Record<string, unknown>
+  const hasKnownChatGptField =
+    "mapping" in typed || "current_node" in typed || "default_model_slug" in typed || "create_time" in typed
+  const hasClaudeOnlyField = "chat_messages" in typed || "created_at" in typed
+  return hasKnownChatGptField && !hasClaudeOnlyField
 }

@@ -1,6 +1,8 @@
-import { readdir, readFile, stat } from "node:fs/promises"
+import { readdir, readFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
+import { isFilePath } from "../lib/fs"
+import { toIsoTimestamp } from "../lib/timestamps"
 import type { NormalizedConversation, NormalizedMessage } from "../types"
 
 interface GrokExportRaw {
@@ -37,11 +39,15 @@ export async function parseGrokConversations(extractsDir: string): Promise<Norma
     throw new Error(`Expected Grok export conversations array at ${backendPath}`)
   }
 
+  if (!hasGrokSignature(parsed.conversations)) {
+    throw new Error(`File does not match expected Grok export schema: ${backendPath}`)
+  }
+
   return parsed.conversations.map(normalizeGrokConversation)
 }
 
 async function resolveGrokBackendPath(extractsDir: string): Promise<string> {
-  if (await isFile(extractsDir)) {
+  if (await isFilePath(extractsDir)) {
     return extractsDir
   }
 
@@ -133,70 +139,11 @@ function mapGrokRole(sender: string | undefined): NormalizedMessage["role"] {
 }
 
 function normalizeGrokTimestamp(value: unknown): string | undefined {
-  if (!value) {
-    return undefined
-  }
-
-  if (typeof value === "string") {
-    const parsed = Date.parse(value)
-    if (!Number.isNaN(parsed)) {
-      return new Date(parsed).toISOString()
-    }
-
-    const numeric = Number(value)
-    if (!Number.isNaN(numeric)) {
-      return new Date(numeric).toISOString()
-    }
-
-    return undefined
-  }
-
-  if (typeof value === "number") {
-    return new Date(value).toISOString()
-  }
-
-  if (typeof value === "object") {
-    const typedValue = value as {
-      $date?: string | { $numberLong?: string }
-      $numberLong?: string
-    }
-
-    if (typeof typedValue.$numberLong === "string") {
-      const numeric = Number(typedValue.$numberLong)
-      if (!Number.isNaN(numeric)) {
-        return new Date(numeric).toISOString()
-      }
-    }
-
-    if (typeof typedValue.$date === "string") {
-      const parsed = Date.parse(typedValue.$date)
-      if (!Number.isNaN(parsed)) {
-        return new Date(parsed).toISOString()
-      }
-    }
-
-    if (typeof typedValue.$date === "object" && typeof typedValue.$date.$numberLong === "string") {
-      const numeric = Number(typedValue.$date.$numberLong)
-      if (!Number.isNaN(numeric)) {
-        return new Date(numeric).toISOString()
-      }
-    }
-  }
-
-  return undefined
+  return toIsoTimestamp(value)
 }
 
 function normalizeIso(value: string | null | undefined): string | undefined {
-  if (!value) {
-    return undefined
-  }
-
-  const parsed = Date.parse(value)
-  if (Number.isNaN(parsed)) {
-    return undefined
-  }
-
-  return new Date(parsed).toISOString()
+  return toIsoTimestamp(value)
 }
 
 function compareMaybeIsoDates(left: string | undefined, right: string | undefined): number {
@@ -241,10 +188,17 @@ async function findGrokBackendPath(grokDir: string): Promise<string> {
   throw new Error(`Could not find prod-grok-backend.json under ${grokDir}`)
 }
 
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile()
-  } catch {
+function hasGrokSignature(value: GrokConversationWrapperRaw[]): boolean {
+  if (value.length === 0) {
+    return true
+  }
+
+  const firstRecord = value.find((entry) => entry && typeof entry === "object")
+  if (!firstRecord) {
     return false
   }
+
+  const hasConversationObject = !!firstRecord.conversation && typeof firstRecord.conversation === "object"
+  const hasResponsesArray = Array.isArray(firstRecord.responses)
+  return hasConversationObject || hasResponsesArray
 }

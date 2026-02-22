@@ -1,7 +1,8 @@
-import { access, readFile, stat } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { readFile } from "node:fs/promises"
 
+import { toIsoTimestamp } from "../lib/timestamps"
 import type { NormalizedConversation, NormalizedMessage } from "../types"
+import { resolveConversationsFilePath } from "./shared"
 
 interface ClaudeConversationRaw {
   uuid?: string
@@ -29,30 +30,15 @@ export async function parseClaudeConversations(extractsDir: string): Promise<Nor
     throw new Error(`Expected Claude conversations export to be an array at ${filePath}`)
   }
 
+  if (!hasClaudeSignature(parsed)) {
+    throw new Error(`File does not match expected Claude export schema: ${filePath}`)
+  }
+
   return parsed.map((conversation) => normalizeClaudeConversation(conversation as ClaudeConversationRaw))
 }
 
-async function resolveClaudeConversationsPath(extractsDir: string): Promise<string> {
-  if (await isFile(extractsDir)) {
-    return extractsDir
-  }
-
-  const parentDir = dirname(extractsDir)
-  const candidates = [
-    join(extractsDir, "claude", "conversations.json"),
-    join(extractsDir, "conversations.json"),
-    join(parentDir, "claude", "conversations.json"),
-  ]
-
-  for (const candidate of candidates) {
-    if (await pathExists(candidate)) {
-      return candidate
-    }
-  }
-
-  throw new Error(
-    `Could not find Claude conversations.json. Tried: ${candidates.map((candidate) => `'${candidate}'`).join(", ")}`,
-  )
+function resolveClaudeConversationsPath(extractsDir: string): Promise<string> {
+  return resolveConversationsFilePath(extractsDir, "claude", "Claude")
 }
 
 function normalizeClaudeConversation(raw: ClaudeConversationRaw): NormalizedConversation {
@@ -210,16 +196,7 @@ function mapClaudeRole(sender: string | undefined): NormalizedMessage["role"] {
 }
 
 function normalizeIso(value: string | null | undefined): string | undefined {
-  if (!value) {
-    return undefined
-  }
-
-  const parsed = Date.parse(value)
-  if (Number.isNaN(parsed)) {
-    return undefined
-  }
-
-  return new Date(parsed).toISOString()
+  return toIsoTimestamp(value)
 }
 
 function readString(value: unknown): string {
@@ -234,19 +211,19 @@ function toLimitedString(value: string, limit = 16_000): string {
   return `${value.slice(0, limit)}\n...`
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path)
+function hasClaudeSignature(value: unknown[]): boolean {
+  if (value.length === 0) {
     return true
-  } catch {
-    return false
   }
-}
 
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile()
-  } catch {
+  const firstRecord = value.find((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
+  if (!firstRecord || typeof firstRecord !== "object" || Array.isArray(firstRecord)) {
     return false
   }
+
+  const typed = firstRecord as Record<string, unknown>
+  const hasKnownClaudeField =
+    "chat_messages" in typed || "created_at" in typed || "updated_at" in typed || "uuid" in typed
+  const hasChatGptOnlyField = "mapping" in typed || "current_node" in typed || "default_model_slug" in typed
+  return hasKnownClaudeField && !hasChatGptOnlyField
 }
