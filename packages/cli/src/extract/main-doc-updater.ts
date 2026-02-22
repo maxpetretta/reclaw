@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises"
 import { pathExists } from "../lib/fs"
 import { removeCronJob, scheduleSubagentCronJob, waitForCronSummary } from "../lib/openclaw"
 import type { AggregatedInsights, BatchExtractionResult, ExtractionMode } from "./contracts"
-import { collectResultSessionEntries, formatProviderList } from "./sessionRefs"
+import { collectResultSessionEntries, formatProviderList } from "./session-refs"
 
 const MEMORY_SECTION_START = "<!-- reclaw-memory:start -->"
 const MEMORY_SECTION_END = "<!-- reclaw-memory:end -->"

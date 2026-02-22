@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { enqueueSpawnResult, resetSpawnMock, setSpawnHook } from "../../test/spawnMock"
+import { enqueueSpawnResult, resetSpawnMock, setSpawnHook } from "../../test/spawn-mock"
 import type { NormalizedConversation } from "../../types"
 import type { ProviderConversations } from "../pipeline"
 

@@ -1,5 +1,5 @@
 import type { ExtractionMode } from "../extract/contracts"
-import type { LegacySessionMode } from "../lib/openclawSessions"
+import type { LegacySessionMode } from "../lib/openclaw-sessions"
 import type { Provider } from "./constants"
 
 export interface CliArgs {

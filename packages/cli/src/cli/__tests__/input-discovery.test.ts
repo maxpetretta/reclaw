@@ -3,13 +3,13 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { enqueueSpawnResult, getSpawnCalls, resetSpawnMock } from "../../test/spawnMock"
+import { enqueueSpawnResult, getSpawnCalls, resetSpawnMock } from "../../test/spawn-mock"
 
-let inputDiscovery: typeof import("../inputDiscovery")
+let inputDiscovery: typeof import("../input-discovery")
 
 describe("prepareInputSources", () => {
   beforeAll(async () => {
-    inputDiscovery = await import("../inputDiscovery")
+    inputDiscovery = await import("../input-discovery")
   })
 
   beforeEach(() => {

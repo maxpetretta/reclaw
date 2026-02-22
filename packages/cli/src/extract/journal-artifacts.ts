@@ -4,8 +4,8 @@ import { join } from "node:path"
 import { uniqueStrings } from "../lib/collections"
 import { formatLocalDate } from "../lib/timestamps"
 import type { BatchExtractionResult } from "./contracts"
-import { collectResultSessionEntries, collectSessionEntries } from "./sessionRefs"
-import { extractSummarySignals } from "./summarySignals"
+import { collectResultSessionEntries, collectSessionEntries } from "./session-refs"
+import { extractSummarySignals } from "./summary-signals"
 
 const ZETTELCLAW_JOURNAL_FOLDER = "03 Journal"
 

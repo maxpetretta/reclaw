@@ -1,9 +1,24 @@
 ---
-import Layout from "@/layouts/Layout.astro"
-import "@/styles/index-page.css"
+import "@fontsource-variable/inter/standard.css"
+import "@fontsource-variable/inter/standard-italic.css"
+import "@/styles/global.css"
+
+const title = "reclaw | Extract durable memory from AI chat history"
+const description =
+  "Reclaw extracts and summarizes conversations from ChatGPT, Claude, and Grok exports into durable memory artifacts."
 ---
 
-<Layout>
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0b0f14" />
+    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site ?? "https://reclaw.sh")} />
+  </head>
+  <body class="bg-background text-foreground antialiased">
   <!-- ════════════════════════════════════════════ STICKY GITHUB NAV -->
   <nav class="fixed top-0 right-0 z-50 p-4 sm:p-5">
     <a
@@ -418,9 +433,97 @@ import "@/styles/index-page.css"
       </div>
     </div>
   </footer>
-</Layout>
-<script>
-  import { attachCopyButtons } from "@/scripts/copyButtons"
+  <script>
+    function copyToClipboard(text: string, btn: HTMLElement) {
+      navigator.clipboard
+        .writeText(text)
+        .then(() => {
+          const copyIcon = btn.querySelector(".copy-icon")
+          const checkIcon = btn.querySelector(".check-icon")
+          const label = btn.querySelector(".copy-label")
 
-  attachCopyButtons()
-</script>
+          if (copyIcon) {
+            copyIcon.classList.add("hidden")
+          }
+          if (checkIcon) {
+            checkIcon.classList.remove("hidden")
+          }
+          if (label) {
+            label.textContent = "Copied!"
+          }
+
+          setTimeout(() => {
+            if (copyIcon) {
+              copyIcon.classList.remove("hidden")
+            }
+            if (checkIcon) {
+              checkIcon.classList.add("hidden")
+            }
+            if (label) {
+              label.textContent = "Copy"
+            }
+          }, 2000)
+        })
+        .catch(() => {
+          const label = btn.querySelector(".copy-label")
+          if (label) {
+            label.textContent = "Copy failed"
+            setTimeout(() => {
+              label.textContent = "Copy"
+            }, 2000)
+          }
+        })
+    }
+
+    const heroButton = document.getElementById("hero-copy-btn")
+    if (heroButton) {
+      heroButton.addEventListener("click", () => {
+        const textEl = heroButton.querySelector(".hero-copy-text")
+        const copyIcon = heroButton.querySelector(".copy-icon")
+        const checkIcon = heroButton.querySelector(".check-icon")
+
+        navigator.clipboard
+          .writeText("npx reclaw")
+          .then(() => {
+            if (textEl) {
+              textEl.textContent = "Copied!"
+            }
+            if (copyIcon) {
+              copyIcon.classList.add("hidden")
+            }
+            if (checkIcon) {
+              checkIcon.classList.remove("hidden")
+            }
+
+            setTimeout(() => {
+              if (textEl) {
+                textEl.textContent = "npx reclaw"
+              }
+              if (copyIcon) {
+                copyIcon.classList.remove("hidden")
+              }
+              if (checkIcon) {
+                checkIcon.classList.add("hidden")
+              }
+            }, 2000)
+          })
+          .catch(() => {
+            if (textEl) {
+              textEl.textContent = "Copy failed"
+              setTimeout(() => {
+                textEl.textContent = "npx reclaw"
+              }, 2000)
+            }
+          })
+      })
+    }
+
+    const terminalButton = document.getElementById("terminal-copy-btn")
+    if (terminalButton) {
+      terminalButton.addEventListener("click", () => {
+        copyToClipboard("npx reclaw", terminalButton)
+      })
+    }
+  </script>
+  </body>
+</html>

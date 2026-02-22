@@ -7,7 +7,7 @@ import {
   collectSessionRefs,
   formatProviderList,
   summarizeProviders,
-} from "../sessionRefs"
+} from "../session-refs"
 
 describe("sessionRefs", () => {
   it("summarizes provider counts using conversation refs and fallback counts", () => {

@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, mock } from "bun:test"
-import { enqueueSpawnResult, getSpawnCalls, resetSpawnMock } from "../../test/spawnMock"
+import { enqueueSpawnResult, getSpawnCalls, resetSpawnMock } from "../../test/spawn-mock"
 import type { ModelInfo } from "../models"
 
 let selectResult: string | symbol = "model-default"

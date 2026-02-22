@@ -2,14 +2,14 @@ import { beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { enqueueSpawnResult, resetSpawnMock } from "../../test/spawnMock"
+import { enqueueSpawnResult, resetSpawnMock } from "../../test/spawn-mock"
 import type { NormalizedConversation } from "../../types"
 
-let sessions: typeof import("../openclawSessions")
+let sessions: typeof import("../openclaw-sessions")
 
 describe("importLegacySessionsToOpenClawHistory", () => {
   beforeAll(async () => {
-    sessions = await import("../openclawSessions")
+    sessions = await import("../openclaw-sessions")
   })
 
   beforeEach(() => {

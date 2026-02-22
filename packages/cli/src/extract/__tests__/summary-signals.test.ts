@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { extractSummarySignals } from "../summarySignals"
+import { extractSummarySignals } from "../summary-signals"
 
 describe("extractSummarySignals", () => {
   it("extracts tagged categories and falls back unknown lines to facts", () => {

@@ -15,8 +15,8 @@ import {
   type Provider,
   providerLabels,
 } from "./cli/constants"
-import { prepareInputSources } from "./cli/inputDiscovery"
-import { resolveHomePath } from "./cli/pathUtils"
+import { prepareInputSources } from "./cli/input-discovery"
+import { resolveHomePath } from "./cli/path-utils"
 import type { BackupMode, ExtractionMode } from "./extract/contracts"
 import { type ProviderConversations, planExtractionBatches, runExtractionPipeline } from "./extract/pipeline"
 import { uniqueStrings } from "./lib/collections"
@@ -25,7 +25,7 @@ import {
   importLegacySessionsToOpenClawHistory,
   type LegacySessionImportResult,
   type LegacySessionMode,
-} from "./lib/openclawSessions"
+} from "./lib/openclaw-sessions"
 import { parseChatGptConversations } from "./providers/chatgpt"
 import { parseClaudeConversations } from "./providers/claude"
 import { parseGrokConversations } from "./providers/grok"

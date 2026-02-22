@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { homedir } from "node:os"
 import { resolve } from "node:path"
 
-import { resolveHomePath } from "../pathUtils"
+import { resolveHomePath } from "../path-utils"
 
 describe("resolveHomePath", () => {
   it("expands tilde home paths", () => {

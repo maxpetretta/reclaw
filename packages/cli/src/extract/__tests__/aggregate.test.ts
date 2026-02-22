@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { enqueueSpawnResult, resetSpawnMock, setSpawnHook } from "../../test/spawnMock"
+import { enqueueSpawnResult, resetSpawnMock, setSpawnHook } from "../../test/spawn-mock"
 import { writeExtractionArtifacts } from "../aggregate"
 import type { BatchExtractionResult } from "../contracts"
 

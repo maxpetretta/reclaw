@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test"
 
-import { enqueueSpawnResult, getSpawnCalls, resetSpawnMock } from "../../test/spawnMock"
+import { enqueueSpawnResult, getSpawnCalls, resetSpawnMock } from "../../test/spawn-mock"
 
 let openclaw: typeof import("../openclaw")
 

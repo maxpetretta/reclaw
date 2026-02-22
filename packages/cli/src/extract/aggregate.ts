@@ -9,10 +9,10 @@ import type {
   ExtractionArtifacts,
   ExtractionMode,
 } from "./contracts"
-import { writeZettelclawArtifacts } from "./journalArtifacts"
-import { updateMemoryAndUserWithMainAgent } from "./mainDocUpdater"
-import { collectSessionRefs, summarizeProviders } from "./sessionRefs"
-import { extractSummarySignals } from "./summarySignals"
+import { writeZettelclawArtifacts } from "./journal-artifacts"
+import { updateMemoryAndUserWithMainAgent } from "./main-doc-updater"
+import { collectSessionRefs, summarizeProviders } from "./session-refs"
+import { extractSummarySignals } from "./summary-signals"
 
 interface WriteArtifactsOptions {
   mode: ExtractionMode

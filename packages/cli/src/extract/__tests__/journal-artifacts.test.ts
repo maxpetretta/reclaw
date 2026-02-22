@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type { BatchExtractionResult } from "../contracts"
-import { writeZettelclawArtifacts } from "../journalArtifacts"
+import { writeZettelclawArtifacts } from "../journal-artifacts"
 
 describe("writeZettelclawArtifacts", () => {
   it("creates a new journal file with normalized sections", async () => {

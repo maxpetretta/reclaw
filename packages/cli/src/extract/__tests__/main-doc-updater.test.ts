@@ -3,14 +3,14 @@ import { writeFileSync } from "node:fs"
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { enqueueSpawnResult, getSpawnCalls, resetSpawnMock, setSpawnHook } from "../../test/spawnMock"
-import type { MainAgentDocUpdateOptions } from "../mainDocUpdater"
+import { enqueueSpawnResult, getSpawnCalls, resetSpawnMock, setSpawnHook } from "../../test/spawn-mock"
+import type { MainAgentDocUpdateOptions } from "../main-doc-updater"
 
-let updater: typeof import("../mainDocUpdater")
+let updater: typeof import("../main-doc-updater")
 
 describe("updateMemoryAndUserWithMainAgent", () => {
   beforeAll(async () => {
-    updater = await import("../mainDocUpdater")
+    updater = await import("../main-doc-updater")
   })
 
   beforeEach(() => {
