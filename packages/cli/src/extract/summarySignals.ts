@@ -1,3 +1,5 @@
+import { uniqueStrings } from "../lib/collections"
+
 export interface SummarySignals {
   interests: string[]
   projects: string[]
@@ -119,26 +121,4 @@ function parseTaggedLine(line: string): { key: keyof SummarySignals; value: stri
   }
 
   return { key, value }
-}
-
-function uniqueStrings(values: string[]): string[] {
-  const seen = new Set<string>()
-  const output: string[] = []
-
-  for (const value of values) {
-    const normalized = value.trim()
-    if (normalized.length === 0) {
-      continue
-    }
-
-    const key = normalized.toLowerCase()
-    if (seen.has(key)) {
-      continue
-    }
-
-    seen.add(key)
-    output.push(normalized)
-  }
-
-  return output
 }

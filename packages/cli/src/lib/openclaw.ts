@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process"
 
+import { parseJson as parseJsonWithError } from "./json"
+
 interface OpenClawCommandOptions {
   timeoutMs?: number
   allowFailure?: boolean
@@ -321,12 +323,10 @@ function parseCronAddJobId(stdout: string): string {
 }
 
 function parseJson<T>(value: string): T {
-  try {
-    return JSON.parse(value) as T
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    throw new OpenClawError("INVALID_JSON", "Could not parse OpenClaw JSON output.", message)
-  }
+  return parseJsonWithError(
+    value,
+    (message) => new OpenClawError("INVALID_JSON", "Could not parse OpenClaw JSON output.", message),
+  )
 }
 
 async function runOpenClawWithRetries(

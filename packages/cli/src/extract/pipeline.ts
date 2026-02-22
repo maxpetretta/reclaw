@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-
+import { runWithConcurrency } from "../lib/concurrency"
 import { OpenClawError, removeCronJob, scheduleSubagentCronJob, waitForCronSummary } from "../lib/openclaw"
+import { toLocalDateKey } from "../lib/timestamps"
 import type { NormalizedConversation } from "../types"
 import { writeExtractionArtifacts } from "./aggregate"
 import type {
@@ -111,7 +112,6 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
     let settledBatches = 0
     let settledConversations = 0
     let activeJobs = 0
-    let nextBatchIndex = 0
     let saveChain = Promise.resolve()
 
     const enqueueStateSave = async (): Promise<void> => {
@@ -119,42 +119,27 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
       await saveChain
     }
 
-    const worker = async (): Promise<void> => {
-      while (true) {
-        const batchIndex = nextBatchIndex
-        nextBatchIndex += 1
-        if (batchIndex >= pendingBatches.length) {
-          return
-        }
+    await runWithConcurrency(pendingBatches, parallelJobs, async (batch) => {
+      activeJobs += 1
 
-        const batch = pendingBatches[batchIndex]
-        if (!batch) {
-          return
-        }
-
-        activeJobs += 1
-
-        try {
-          const batchResult = await runBatchExtraction(batch, options)
-          state.completed[batch.id] = batchResult
-          state.updatedAt = new Date().toISOString()
-          await enqueueStateSave()
-          processedBatches += 1
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          failedBatchErrors.push(`Batch ${batch.id}: ${message}`)
-        } finally {
-          activeJobs -= 1
-          settledBatches += 1
-          settledConversations += batch.conversations.length
-          options.onProgress?.(
-            `Progress: ${settledConversations}/${totalPendingConversations} conversations complete (${settledBatches}/${pendingBatches.length} batches, ${failedBatchErrors.length} failed, ${activeJobs} active)`,
-          )
-        }
+      try {
+        const batchResult = await runBatchExtraction(batch, options)
+        state.completed[batch.id] = batchResult
+        state.updatedAt = new Date().toISOString()
+        await enqueueStateSave()
+        processedBatches += 1
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        failedBatchErrors.push(`Batch ${batch.id}: ${message}`)
+      } finally {
+        activeJobs -= 1
+        settledBatches += 1
+        settledConversations += batch.conversations.length
+        options.onProgress?.(
+          `Progress: ${settledConversations}/${totalPendingConversations} conversations complete (${settledBatches}/${pendingBatches.length} batches, ${failedBatchErrors.length} failed, ${activeJobs} active)`,
+        )
       }
-    }
-
-    await Promise.all(Array.from({ length: parallelJobs }, () => worker()))
+    })
     await saveChain
   }
 
@@ -251,7 +236,7 @@ function buildDateBatches(conversations: NormalizedConversation[]): Conversation
   const byDate = new Map<string, NormalizedConversation[]>()
 
   for (const conversation of conversations) {
-    const date = conversation.createdAt.slice(0, 10)
+    const date = toLocalDateKey(conversation.createdAt)
     const existing = byDate.get(date)
     if (existing) {
       existing.push(conversation)

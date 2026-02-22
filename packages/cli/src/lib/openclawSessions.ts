@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from "node:crypto"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
-
 import type { NormalizedConversation, NormalizedMessage } from "../types"
+import { parseJson as parseJsonWithError } from "./json"
 import { runOpenClaw } from "./openclaw"
 
 interface OpenClawStatusResponse {
@@ -154,29 +154,6 @@ function resolveSessionStoreTarget(workspacePath: string): SessionStoreTarget {
     return {
       agentId: directMatch.id,
       sessionsPath: directMatch.sessionsPath,
-    }
-  }
-
-  if (agents.length === 1) {
-    const onlyAgent = agents[0]
-    if (!onlyAgent) {
-      throw new Error("OpenClaw status did not include a valid agent record.")
-    }
-
-    return {
-      agentId: onlyAgent.id,
-      sessionsPath: onlyAgent.sessionsPath,
-    }
-  }
-
-  const defaultId = typeof agentsSection?.defaultId === "string" ? agentsSection.defaultId : undefined
-  if (defaultId) {
-    const defaultAgent = agents.find((agent) => agent.id === defaultId)
-    if (defaultAgent) {
-      return {
-        agentId: defaultAgent.id,
-        sessionsPath: defaultAgent.sessionsPath,
-      }
     }
   }
 
@@ -466,12 +443,7 @@ function buildConversationChecksum(conversation: NormalizedConversation): string
 }
 
 function parseJson<T>(value: string): T {
-  try {
-    return JSON.parse(value) as T
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`Could not parse JSON: ${message}`)
-  }
+  return parseJsonWithError(value, (message) => new Error(`Could not parse JSON: ${message}`))
 }
 
 function toUuidV4Like(hex32: string): string {
