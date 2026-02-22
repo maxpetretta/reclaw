@@ -16,6 +16,7 @@
     "cli": "bun run --cwd packages/cli dev",
     "cli:build": "bun run --cwd packages/cli build",
     "cli:help": "bun run --cwd packages/cli dev -- --help",
+    "test": "bun run --cwd packages/cli test",
     "lint": "bun run --cwd packages/cli lint && bun run --cwd packages/skill lint && bun run --cwd packages/website lint",
     "fix": "bun run --cwd packages/cli fix && bun run --cwd packages/skill fix && bun run --cwd packages/website fix"
   }

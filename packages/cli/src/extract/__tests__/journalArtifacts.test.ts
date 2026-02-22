@@ -1,0 +1,166 @@
+import { describe, expect, it } from "bun:test"
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import type { BatchExtractionResult } from "../contracts"
+import { writeZettelclawArtifacts } from "../journalArtifacts"
+
+describe("writeZettelclawArtifacts", () => {
+  it("creates a new journal file with normalized sections", async () => {
+    const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
+
+    const result = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault)
+    const journalPath = join(vault, "03 Journal", "2026-02-22.md")
+
+    expect(result.outputFiles).toEqual([journalPath])
+    const content = await readFile(journalPath, "utf8")
+    expect(content).toContain("type: journal")
+    expect(content).toContain("## Decisions")
+    expect(content).toContain("## Facts")
+    expect(content).toContain("## Interests")
+    expect(content).toContain("## Open")
+    expect(content).toContain("## Sessions")
+    expect(content).toContain("- chatgpt:cg-1 — 14:25")
+  })
+
+  it("cleans existing journals (remove done, normalize bullets, dedupe sessions)", async () => {
+    const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
+    const journalDir = join(vault, "03 Journal")
+    const journalPath = join(journalDir, "2026-02-22.md")
+    await mkdir(journalDir, { recursive: true })
+    await writeFile(
+      journalPath,
+      [
+        "---",
+        "type: journal",
+        "created: 2026-02-22",
+        "updated: 2026-02-20",
+        "---",
+        "",
+        "",
+        "## Done",
+        "- stale done item",
+        "",
+        "## Decisions",
+        "- decision: Ship v1",
+        "",
+        "## Facts",
+        "- fact: Uses bun test",
+        "- Fact: Uses bun test",
+        "",
+        "---",
+        "## Sessions",
+        "- chatgpt:cg-1 — 14:25",
+      ].join("\n"),
+      "utf8",
+    )
+
+    const result = await writeZettelclawArtifacts(
+      [batch("chatgpt", "cg-1", "14:25"), batch("claude", "cl-1", "2026-02-22T15:30:00.000Z")],
+      vault,
+    )
+    expect(result.outputFiles).toEqual([journalPath])
+
+    const content = await readFile(journalPath, "utf8")
+    expect(content).not.toContain("## Done")
+    expect(content.match(/Uses bun test/g)?.length).toBe(1)
+    expect(content).toContain("- chatgpt:cg-1 — 14:25")
+    expect(content).toContain("- claude:cl-1 —")
+    expect(content).toContain("## Decisions")
+    expect(content).toContain("## Sessions")
+  })
+
+  it("repairs malformed journal layout and normalizes unknown timestamps", async () => {
+    const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
+    const journalDir = join(vault, "03 Journal")
+    const journalPath = join(journalDir, "2026-02-22.md")
+    await mkdir(journalDir, { recursive: true })
+    await writeFile(
+      journalPath,
+      [
+        "---",
+        "type: journal",
+        "created: 2026-02-22",
+        "---",
+        "",
+        "",
+        "## Decisions",
+        "",
+        "## Sessions",
+        "- chatgpt:existing-no-time",
+      ].join("\n"),
+      "utf8",
+    )
+
+    const result = await writeZettelclawArtifacts(
+      [batch("chatgpt", "existing-no-time", "not-a-date"), batch("grok", "new-ref", "not-a-date")],
+      vault,
+    )
+    expect(result.outputFiles).toEqual([journalPath])
+
+    const content = await readFile(journalPath, "utf8")
+    expect(content).toContain("---\n## Sessions")
+    expect(content).toContain("- chatgpt:existing-no-time")
+    expect(content).toContain("- grok:new-ref — unknown")
+    expect(content).not.toContain("\n\n\n")
+  })
+
+  it("is idempotent after an initial normalization run", async () => {
+    const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
+    const journalDir = join(vault, "03 Journal")
+    const journalPath = join(journalDir, "2026-02-22.md")
+    await mkdir(journalDir, { recursive: true })
+    await writeFile(
+      journalPath,
+      [
+        "---",
+        "type: journal",
+        "created: 2026-02-22",
+        "updated: 2026-02-22",
+        "---",
+        "## Decisions",
+        "- Ship v1",
+        "",
+        "## Facts",
+        "- Uses bun test",
+        "",
+        "## Interests",
+        "- Quality",
+        "",
+        "## Open",
+        "- Follow up docs",
+        "",
+        "---",
+        "## Sessions",
+        "- chatgpt:cg-1 — 14:25",
+        "",
+      ].join("\n"),
+      "utf8",
+    )
+
+    const firstRun = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault)
+    expect(firstRun.outputFiles).toEqual([journalPath])
+
+    const secondRun = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault)
+    expect(secondRun.outputFiles).toEqual([])
+  })
+})
+
+function batch(
+  provider: BatchExtractionResult["providers"][number],
+  id: string,
+  timestamp: string,
+): BatchExtractionResult {
+  return {
+    batchId: `${provider}-${id}`,
+    providers: [provider],
+    date: "2026-02-22",
+    conversationIds: [id],
+    conversationRefs: [{ provider, id, timestamp }],
+    conversationCount: 1,
+    extraction: {
+      summary: "decision: Ship v1; fact: Uses bun test; interest: Quality; open: Follow up docs",
+    },
+  }
+}
