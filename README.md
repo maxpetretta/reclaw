@@ -1,6 +1,6 @@
 # Reclaw 🦞
 
-**Reclaim your AI conversations.**
+> Reclaim your AI conversations.
 
 Export your ChatGPT, Claude, and Grok history — normalize to markdown, bootstrap your agent's memory.
 
@@ -31,7 +31,7 @@ npx reclaw status --json
 
 - Subagent extraction runs **one merged batch per day** (all same-day conversations are processed together).
 - `--subagent-batch-size` is deprecated and ignored.
-- Subagent jobs run in parallel by default (`--parallel-jobs 5`).
+- Subagent jobs run in parallel by default (`--parallel-jobs 8`).
 - Individual batch failures do not stop the run; successful batches continue and failed batches are reported at the end.
 - Subagents return strict JSON with one field: `summary`.
 - The main process synthesizes memory signals from those summaries.
