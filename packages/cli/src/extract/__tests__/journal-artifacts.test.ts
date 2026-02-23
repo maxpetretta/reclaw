@@ -18,13 +18,13 @@ describe("writeZettelclawArtifacts", () => {
     expect(content).toContain("type: journal")
     expect(content).toContain("## Decisions")
     expect(content).toContain("## Facts")
-    expect(content).toContain("## Interests")
+    expect(content).not.toContain("## Interests")
     expect(content).toContain("## Open")
     expect(content).toContain("## Sessions")
     expect(content).toContain("- chatgpt:cg-1 — 14:25")
   })
 
-  it("cleans existing journals (remove done, normalize bullets, dedupe sessions)", async () => {
+  it("preserves Done section, normalizes bullets, dedupes sessions", async () => {
     const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
     const journalDir = join(vault, "03 Journal")
     const journalPath = join(journalDir, "2026-02-22.md")
@@ -40,7 +40,7 @@ describe("writeZettelclawArtifacts", () => {
         "",
         "",
         "## Done",
-        "- stale done item",
+        "- existing done item",
         "",
         "## Decisions",
         "- decision: Ship v1",
@@ -63,7 +63,8 @@ describe("writeZettelclawArtifacts", () => {
     expect(result.outputFiles).toEqual([journalPath])
 
     const content = await readFile(journalPath, "utf8")
-    expect(content).not.toContain("## Done")
+    expect(content).toContain("## Done")
+    expect(content).toContain("- existing done item")
     expect(content.match(/Uses bun test/g)?.length).toBe(1)
     expect(content).toContain("- chatgpt:cg-1 — 14:25")
     expect(content).toContain("- claude:cl-1 —")
@@ -124,8 +125,6 @@ describe("writeZettelclawArtifacts", () => {
         "",
         "## Facts",
         "- Uses bun test",
-        "",
-        "## Interests",
         "- Quality",
         "",
         "## Open",
