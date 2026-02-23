@@ -2,6 +2,28 @@
   "name": "reclaw",
   "version": "0.1.0",
   "description": "CLI for extracting core memories from AI chat exports",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maxpetretta/reclaw.git"
+  },
+  "homepage": "https://github.com/maxpetretta/reclaw#readme",
+  "bugs": {
+    "url": "https://github.com/maxpetretta/reclaw/issues"
+  },
+  "keywords": [
+    "ai",
+    "cli",
+    "chatgpt",
+    "claude",
+    "grok",
+    "openclaw",
+    "memory",
+    "summarization"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "bin": {
     "reclaw": "bin/reclaw.js"

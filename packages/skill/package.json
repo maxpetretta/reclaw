@@ -2,6 +2,7 @@
   "name": "@reclaw/skill",
   "version": "0.1.0",
   "description": "Reclaw skill package for OpenClaw and ClawHub",
+  "license": "MIT",
   "private": false,
   "type": "module",
   "files": [
