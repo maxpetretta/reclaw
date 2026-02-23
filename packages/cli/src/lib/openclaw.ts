@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process"
+import { readFile, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 
 import { parseJson as parseJsonWithError } from "./json"
 
@@ -67,6 +69,89 @@ export interface ScheduleSubagentParams {
 export interface ScheduledSubagent {
   jobId: string
   mode: "legacy" | "compatible"
+}
+
+export interface ExtractionConcurrencyPatchResult {
+  changed: boolean
+  cronMaxConcurrentRuns?: number
+  agentMaxConcurrent?: number
+  message?: string
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {}
+  }
+
+  return value as Record<string, unknown>
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const normalized = Math.floor(value)
+    return normalized > 0 ? normalized : undefined
+  }
+
+  if (typeof value === "string" && /^\d+$/u.test(value.trim())) {
+    const parsed = Number(value.trim())
+    const normalized = Number.isFinite(parsed) ? Math.floor(parsed) : 0
+    return normalized > 0 ? normalized : undefined
+  }
+
+  return undefined
+}
+
+export async function ensureExtractionConcurrencyConfig(
+  openclawDir: string,
+  minimumConcurrent: number,
+): Promise<ExtractionConcurrencyPatchResult> {
+  const configPath = join(openclawDir, "openclaw.json")
+  const normalizedMinimum = Number.isFinite(minimumConcurrent) ? Math.max(1, Math.floor(minimumConcurrent)) : 1
+
+  try {
+    const raw = await readFile(configPath, "utf8")
+    const config = asRecord(JSON.parse(raw))
+    let changed = false
+
+    const cron = asRecord(config.cron)
+    config.cron = cron
+    const agents = asRecord(config.agents)
+    config.agents = agents
+    const defaults = asRecord(agents.defaults)
+    agents.defaults = defaults
+
+    const currentCronMaxConcurrentRuns = readPositiveInteger(cron.maxConcurrentRuns)
+    const currentAgentMaxConcurrent = readPositiveInteger(defaults.maxConcurrent)
+
+    const targetCronMaxConcurrentRuns = Math.max(currentCronMaxConcurrentRuns ?? 0, normalizedMinimum)
+    const targetAgentMaxConcurrent = Math.max(currentAgentMaxConcurrent ?? 0, normalizedMinimum)
+
+    if (currentCronMaxConcurrentRuns !== targetCronMaxConcurrentRuns || typeof cron.maxConcurrentRuns !== "number") {
+      cron.maxConcurrentRuns = targetCronMaxConcurrentRuns
+      changed = true
+    }
+
+    if (currentAgentMaxConcurrent !== targetAgentMaxConcurrent || typeof defaults.maxConcurrent !== "number") {
+      defaults.maxConcurrent = targetAgentMaxConcurrent
+      changed = true
+    }
+
+    if (changed) {
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8")
+    }
+
+    return {
+      changed,
+      cronMaxConcurrentRuns: targetCronMaxConcurrentRuns,
+      agentMaxConcurrent: targetAgentMaxConcurrent,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      changed: false,
+      message: `Could not configure extraction concurrency in ${configPath}: ${message}`,
+    }
+  }
 }
 
 export function runOpenClaw(args: string[], options: OpenClawCommandOptions = {}): OpenClawCommandResult {

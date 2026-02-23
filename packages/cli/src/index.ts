@@ -22,11 +22,13 @@ import type { BackupMode, ExtractionMode } from "./extract/contracts"
 import { type ProviderConversations, planExtractionBatches, runExtractionPipeline } from "./extract/pipeline"
 import { uniqueStrings } from "./lib/collections"
 import { promptModelSelect, readModelsFromOpenClaw } from "./lib/models"
+import { ensureExtractionConcurrencyConfig, runOpenClaw } from "./lib/openclaw"
 import {
   importLegacySessionsToOpenClawHistory,
   type LegacySessionImportResult,
   type LegacySessionMode,
 } from "./lib/openclaw-sessions"
+import { configureOpenClawEnvForWorkspace } from "./lib/openclaw-workspace"
 import { parseChatGptConversations } from "./providers/chatgpt"
 import { parseClaudeConversations } from "./providers/claude"
 import { parseGrokConversations } from "./providers/grok"
@@ -35,6 +37,77 @@ import type { NormalizedConversation } from "./types"
 interface ParsedProviderResult {
   conversations: NormalizedConversation[]
   sourcePath: string
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  return value as Record<string, unknown>
+}
+
+async function waitForGatewayHealthy(maxWaitMs = 60_000, pollIntervalMs = 2_000): Promise<string | null> {
+  const deadline = Date.now() + maxWaitMs
+  let lastError = "Gateway did not report a healthy state."
+
+  while (Date.now() < deadline) {
+    try {
+      const health = runOpenClaw(["gateway", "health", "--json", "--timeout", "5000"], {
+        allowFailure: true,
+        timeoutMs: 10_000,
+      })
+
+      if (health.status === 0) {
+        try {
+          const parsed = asRecord(JSON.parse(health.stdout) as unknown)
+          if (parsed?.ok === true) {
+            return null
+          }
+
+          const reason = typeof parsed?.message === "string" ? parsed.message.trim() : ""
+          lastError = reason.length > 0 ? reason : "Gateway health check returned ok=false."
+        } catch {
+          const trimmed = health.stdout.trim()
+          lastError =
+            trimmed.length > 0 ? `Could not parse gateway health JSON: ${trimmed}` : "Malformed gateway health JSON."
+        }
+      } else {
+        lastError = health.stderr.trim() || health.stdout.trim() || `gateway health exit code ${health.status}`
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      lastError = message
+    }
+
+    await sleep(pollIntervalMs)
+  }
+
+  return `Gateway restart timed out after ${Math.round(maxWaitMs / 1000)}s. Last check: ${lastError}`
+}
+
+async function restartGatewayAndWait(): Promise<string | null> {
+  try {
+    const restart = runOpenClaw(["gateway", "restart", "--json"], {
+      allowFailure: true,
+      timeoutMs: 20_000,
+    })
+    if (restart.status !== 0) {
+      const detail = restart.stderr.trim() || restart.stdout.trim() || `exit code ${restart.status}`
+      return `Could not restart OpenClaw gateway: ${detail}`
+    }
+
+    return await waitForGatewayHealthy()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return `Could not restart OpenClaw gateway: ${message}`
+  }
 }
 
 async function main() {
@@ -130,6 +203,7 @@ async function main() {
   const legacySessionMode = resolveLegacySessionMode(cliArgs.legacySessions)
   const legacyWorkspacePath =
     mode === "openclaw" ? targetPath : resolveHomePath(cliArgs.workspace ?? DEFAULT_OPENCLAW_WORKSPACE_PATH)
+  const openclawEnv = configureOpenClawEnvForWorkspace(legacyWorkspacePath)
   if (typeof cliArgs.subagentBatchSize === "number" && cliArgs.subagentBatchSize !== 1) {
     log.info("Ignoring --subagent-batch-size; Reclaw now runs one merged extraction batch per day.")
   }
@@ -174,6 +248,31 @@ async function main() {
       `Dry run complete. Parsed ${totalConversations} conversations (${totalMessages} messages); no extraction was executed.`,
     )
     return
+  }
+
+  const concurrencySpin = spinner()
+  concurrencySpin.start(`Configuring OpenClaw extraction concurrency (target ${parallelJobs})`)
+  const concurrencyResult = await ensureExtractionConcurrencyConfig(openclawEnv.stateDir, parallelJobs)
+  if (concurrencyResult.message) {
+    concurrencySpin.stop("Could not configure OpenClaw extraction concurrency")
+    log.error(concurrencyResult.message)
+  } else if (concurrencyResult.changed) {
+    const configuredCron = concurrencyResult.cronMaxConcurrentRuns ?? parallelJobs
+    const configuredAgent = concurrencyResult.agentMaxConcurrent ?? parallelJobs
+    concurrencySpin.message("Restarting OpenClaw gateway to apply concurrency settings")
+    const restartError = await restartGatewayAndWait()
+    if (restartError) {
+      concurrencySpin.stop("OpenClaw concurrency updated; gateway restart check failed")
+      log.error(restartError)
+    } else {
+      concurrencySpin.stop(
+        `OpenClaw extraction concurrency ready (cron=${configuredCron}, maxConcurrent=${configuredAgent})`,
+      )
+    }
+  } else {
+    concurrencySpin.stop(
+      `OpenClaw concurrency already sufficient (cron=${concurrencyResult.cronMaxConcurrentRuns}, maxConcurrent=${concurrencyResult.agentMaxConcurrent})`,
+    )
   }
 
   const modelSpin = spinner()
