@@ -262,6 +262,73 @@ describe("pipeline", () => {
     expect(result.processedBatches).toBe(1)
     expect(await readFile(statePath, "utf8")).toContain('"runKey"')
   })
+
+  it("writes zettel journals to vault but updates memory docs in the workspace path", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "reclaw-pipeline-zettel-paths-test-"))
+    const statePath = join(tempDir, "state.json")
+    const targetPath = join(tempDir, "vault")
+    const memoryWorkspacePath = join(tempDir, "workspace")
+    await mkdir(targetPath, { recursive: true })
+    await mkdir(memoryWorkspacePath, { recursive: true })
+    await writeFile(join(memoryWorkspacePath, "MEMORY.md"), "baseline memory", "utf8")
+    await writeFile(join(memoryWorkspacePath, "USER.md"), "baseline user", "utf8")
+
+    setSpawnHook((_, args) => {
+      const idIndex = args.indexOf("--id")
+      const jobId = idIndex >= 0 ? args[idIndex + 1] : undefined
+      if (jobId === "job-main") {
+        void writeFile(
+          join(memoryWorkspacePath, "MEMORY.md"),
+          "<!-- reclaw-memory:start -->\nworkspace memory\n<!-- reclaw-memory:end -->\n",
+          "utf8",
+        )
+        void writeFile(
+          join(memoryWorkspacePath, "USER.md"),
+          "<!-- reclaw-user:start -->\nworkspace user\n<!-- reclaw-user:end -->\n",
+          "utf8",
+        )
+      }
+    })
+
+    enqueueSpawnResult({ status: 0, stdout: '{"id":"job-batch"}', stderr: "" })
+    enqueueSpawnResult({
+      status: 0,
+      stdout: JSON.stringify({
+        entries: [{ action: "finished", status: "ok", summary: '{"summary":"Batch summary"}', ts: 1 }],
+      }),
+      stderr: "",
+    })
+    enqueueSpawnResult({ status: 0, stdout: '{"id":"job-main"}', stderr: "" })
+    enqueueSpawnResult({
+      status: 0,
+      stdout: JSON.stringify({
+        entries: [{ action: "finished", status: "ok", summary: "ok", ts: 2 }],
+      }),
+      stderr: "",
+    })
+
+    const result = await pipeline.runExtractionPipeline({
+      providerConversations: {
+        chatgpt: [buildConversation("chatgpt", "c1", localIso(2026, 2, 24, 10, 0))],
+        claude: [],
+        grok: [],
+      },
+      selectedProviders: ["chatgpt"],
+      mode: "zettelclaw",
+      model: "gpt-5",
+      targetPath,
+      memoryWorkspacePath,
+      statePath,
+      maxParallelJobs: 1,
+    })
+
+    expect(result.failedBatches).toBe(0)
+    expect(await readFile(join(targetPath, "03 Journal", "2026-02-24.md"), "utf8")).toContain("## Sessions")
+    expect(await readFile(join(memoryWorkspacePath, "MEMORY.md"), "utf8")).toContain("workspace memory")
+    expect(await readFile(join(memoryWorkspacePath, "USER.md"), "utf8")).toContain("workspace user")
+    await expect(readFile(join(targetPath, "MEMORY.md"), "utf8")).rejects.toThrow()
+    await expect(readFile(join(targetPath, "USER.md"), "utf8")).rejects.toThrow()
+  })
 })
 
 function buildConversation(

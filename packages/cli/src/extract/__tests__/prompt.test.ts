@@ -8,6 +8,7 @@ describe("prompt", () => {
     const prompt = buildSubagentPrompt(buildBatch(), {
       mode: "openclaw",
       outputPath: "/tmp/workspace",
+      memoryWorkspacePath: "/tmp/workspace",
     })
 
     expect(prompt).toContain("ChatGPT (1), Claude (1)")
@@ -21,6 +22,7 @@ describe("prompt", () => {
     const prompt = buildSubagentPrompt(large, {
       mode: "zettelclaw",
       outputPath: "/tmp/vault",
+      memoryWorkspacePath: "/tmp/openclaw-workspace",
       maxPromptChars: 600,
     })
 

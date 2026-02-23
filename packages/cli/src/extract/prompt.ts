@@ -26,6 +26,7 @@ const TEMPLATE_CACHE = new Map<string, string>()
 interface PromptOptions {
   mode: ExtractionMode
   outputPath: string
+  memoryWorkspacePath: string
   maxPromptChars?: number
 }
 
@@ -33,8 +34,8 @@ export function buildSubagentPrompt(batch: ConversationBatch, options: PromptOpt
   const providerLabel = formatProviderSummary(batch.conversations)
   const outputInstruction =
     options.mode === "openclaw"
-      ? `Produce one concise MOST IMPORTANT summary for these conversation(s); the main Reclaw process will build memory/${batch.date}.md and update MEMORY.md/USER.md in ${options.outputPath}.`
-      : "Produce one concise MOST IMPORTANT summary for these conversation(s); the main Reclaw process will update Zettelclaw journal sections, MEMORY.md, and USER.md."
+      ? `Produce one concise MOST IMPORTANT summary for these conversation(s); the main Reclaw process will build memory/${batch.date}.md and update MEMORY.md/USER.md in ${options.memoryWorkspacePath}.`
+      : `Produce one concise MOST IMPORTANT summary for these conversation(s); the main Reclaw process will update Zettelclaw journal sections in ${options.outputPath} and update MEMORY.md/USER.md in ${options.memoryWorkspacePath}.`
 
   const conversationsMarkdown = serializeBatchConversations(batch, options.maxPromptChars ?? 110_000)
   const agentPrompt = renderPromptTemplate(loadPromptTemplate(PROMPT_FILENAMES.agent), {

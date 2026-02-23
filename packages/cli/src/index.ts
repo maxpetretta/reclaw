@@ -203,6 +203,7 @@ async function main() {
   const legacySessionMode = resolveLegacySessionMode(cliArgs.legacySessions)
   const legacyWorkspacePath =
     mode === "openclaw" ? targetPath : resolveHomePath(cliArgs.workspace ?? DEFAULT_OPENCLAW_WORKSPACE_PATH)
+  const memoryWorkspacePath = legacyWorkspacePath
   const openclawEnv = configureOpenClawEnvForWorkspace(legacyWorkspacePath)
   if (typeof cliArgs.subagentBatchSize === "number" && cliArgs.subagentBatchSize !== 1) {
     log.info("Ignoring --subagent-batch-size; Reclaw now runs one merged extraction batch per day.")
@@ -219,6 +220,7 @@ async function main() {
       mode: ExtractionMode
       targetPath: string
       legacyWorkspacePath: string
+      memoryWorkspacePath: string
       providerConversations: ProviderConversations
       selectedProviders: Provider[]
       plan: ReturnType<typeof planExtractionBatches>
@@ -236,6 +238,7 @@ async function main() {
       plan: extractionPlan,
       statePath,
       legacySessionMode,
+      memoryWorkspacePath,
       parallelJobs,
       backupMode,
     }
@@ -359,6 +362,7 @@ async function main() {
     mode,
     model: selectedModel.key,
     targetPath,
+    memoryWorkspacePath,
     statePath,
     backupMode,
     maxParallelJobs: parallelJobs,
@@ -604,6 +608,7 @@ function printDryRunPlan(options: {
   mode: ExtractionMode
   targetPath: string
   legacyWorkspacePath: string
+  memoryWorkspacePath: string
   providerConversations: ProviderConversations
   selectedProviders: Provider[]
   plan: ReturnType<typeof planExtractionBatches>
@@ -618,6 +623,7 @@ function printDryRunPlan(options: {
     "Reclaw dry-run plan (no writes, no subagents):",
     `- Mode: ${options.mode}`,
     `- Target: ${options.targetPath}`,
+    `- Memory workspace: ${options.memoryWorkspacePath}`,
     `- State file: ${options.statePath}`,
     `- Model: ${options.model ? `${options.model} (provided, not validated)` : "not selected in dry-run"}`,
     "- Batch strategy: one subagent per day (all same-day conversations merged before extraction)",
@@ -661,10 +667,10 @@ function printDryRunPlan(options: {
     lines.push(`- Zettelclaw journal output: ${join(options.targetPath, "03 Journal")}`)
     lines.push("- Zettelclaw inbox notes: none")
     lines.push("- Planned typed-note updates: none (handled by user/nightly agent workflows)")
-    lines.push(`- Planned main-agent update: ${join(options.targetPath, "MEMORY.md")}`)
-    lines.push(`- Planned main-agent update: ${join(options.targetPath, "USER.md")}`)
-    lines.push(`- Planned backup: ${join(options.targetPath, `MEMORY.md${backupPathSuffix}`)}`)
-    lines.push(`- Planned backup: ${join(options.targetPath, `USER.md${backupPathSuffix}`)}`)
+    lines.push(`- Planned main-agent update: ${join(options.memoryWorkspacePath, "MEMORY.md")}`)
+    lines.push(`- Planned main-agent update: ${join(options.memoryWorkspacePath, "USER.md")}`)
+    lines.push(`- Planned backup: ${join(options.memoryWorkspacePath, `MEMORY.md${backupPathSuffix}`)}`)
+    lines.push(`- Planned backup: ${join(options.memoryWorkspacePath, `USER.md${backupPathSuffix}`)}`)
     lines.push(`- Legacy sessions: ${options.legacySessionMode}`)
     if (options.legacySessionMode !== "off") {
       lines.push(`- Planned legacy session imports: ${options.plan.conversationCount}`)

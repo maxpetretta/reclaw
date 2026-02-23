@@ -45,6 +45,7 @@ describe("writeExtractionArtifacts", () => {
     const result = await writeExtractionArtifacts([batch("chatgpt"), batch("claude")], {
       mode: "openclaw",
       targetPath,
+      memoryWorkspacePath: targetPath,
       model: "gpt-5",
       backupMode: "overwrite",
     })
@@ -60,20 +61,21 @@ describe("writeExtractionArtifacts", () => {
 
   it("writes zettel artifacts and timestamped backups", async () => {
     const targetPath = await mkdtemp(join(tmpdir(), "reclaw-aggregate-zettel-test-"))
-    await writeFile(join(targetPath, "MEMORY.md"), "old memory", "utf8")
-    await writeFile(join(targetPath, "USER.md"), "old user", "utf8")
+    const memoryWorkspacePath = await mkdtemp(join(tmpdir(), "reclaw-aggregate-zettel-workspace-test-"))
+    await writeFile(join(memoryWorkspacePath, "MEMORY.md"), "old memory", "utf8")
+    await writeFile(join(memoryWorkspacePath, "USER.md"), "old user", "utf8")
 
     setSpawnHook((_, args) => {
       const idIndex = args.indexOf("--id")
       const jobId = idIndex >= 0 ? args[idIndex + 1] : ""
       if (jobId === "job-main") {
         writeFileSync(
-          join(targetPath, "MEMORY.md"),
+          join(memoryWorkspacePath, "MEMORY.md"),
           "<!-- reclaw-memory:start -->\nupdated-z\n<!-- reclaw-memory:end -->\n",
           "utf8",
         )
         writeFileSync(
-          join(targetPath, "USER.md"),
+          join(memoryWorkspacePath, "USER.md"),
           "<!-- reclaw-user:start -->\nupdated-z\n<!-- reclaw-user:end -->\n",
           "utf8",
         )
@@ -89,14 +91,17 @@ describe("writeExtractionArtifacts", () => {
     const result = await writeExtractionArtifacts([batch("grok")], {
       mode: "zettelclaw",
       targetPath,
+      memoryWorkspacePath,
       model: "gpt-5",
       backupMode: "timestamped",
     })
 
     expect(result.outputFiles).toEqual([join(targetPath, "03 Journal", "2026-02-22.md")])
-    const files = await readdir(targetPath)
+    const files = await readdir(memoryWorkspacePath)
     expect(files.some((entry) => /^MEMORY\.md\.bak\.\d{8}-\d{6}-\d{3}$/.test(entry))).toBeTrue()
     expect(files.some((entry) => /^USER\.md\.bak\.\d{8}-\d{6}-\d{3}$/.test(entry))).toBeTrue()
+    expect((await readdir(targetPath)).includes("MEMORY.md")).toBeFalse()
+    expect((await readdir(targetPath)).includes("USER.md")).toBeFalse()
   })
 })
 

@@ -14,6 +14,7 @@ const USER_SECTION_END = "<!-- reclaw-user:end -->"
 export interface MainAgentDocUpdateOptions {
   mode: ExtractionMode
   targetPath: string
+  memoryWorkspacePath: string
   model: string
   insights: AggregatedInsights
   batchResults: BatchExtractionResult[]
@@ -132,7 +133,8 @@ function buildMainAgentDocUpdatePrompt(options: MainAgentDocUpdateOptions): stri
     "",
     "Run context:",
     `- Output mode: ${options.mode}`,
-    `- Target path: ${options.targetPath}`,
+    `- Output target path: ${options.targetPath}`,
+    `- Memory workspace path: ${options.memoryWorkspacePath}`,
     "",
     "Aggregated signal hints:",
     insights,

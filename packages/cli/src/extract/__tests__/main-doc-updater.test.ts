@@ -133,6 +133,7 @@ function buildOptions(targetPath: string, memoryFilePath: string, userFilePath: 
   return {
     mode: "openclaw",
     targetPath,
+    memoryWorkspacePath: targetPath,
     model: "gpt-5",
     insights: {
       summary: "summary",

@@ -17,6 +17,7 @@ import { extractSummarySignals } from "./summary-signals"
 interface WriteArtifactsOptions {
   mode: ExtractionMode
   targetPath: string
+  memoryWorkspacePath: string
   model: string
   backupMode: BackupMode
 }
@@ -33,14 +34,15 @@ export async function writeExtractionArtifacts(
       ? await writeOpenClawMemoryFiles(batchResults, options.targetPath)
       : (await writeZettelclawArtifacts(batchResults, options.targetPath)).outputFiles
 
-  const memoryFilePath = join(options.targetPath, "MEMORY.md")
-  const userFilePath = join(options.targetPath, "USER.md")
+  const memoryFilePath = join(options.memoryWorkspacePath, "MEMORY.md")
+  const userFilePath = join(options.memoryWorkspacePath, "USER.md")
   await backupFileIfExists(memoryFilePath, options.backupMode, backupTimestamp)
   await backupFileIfExists(userFilePath, options.backupMode, backupTimestamp)
 
   await updateMemoryAndUserWithMainAgent({
     mode: options.mode,
     targetPath: options.targetPath,
+    memoryWorkspacePath: options.memoryWorkspacePath,
     model: options.model,
     insights,
     batchResults,

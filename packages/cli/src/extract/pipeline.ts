@@ -29,6 +29,7 @@ export interface RunExtractionPipelineOptions {
   mode: ExtractionMode
   model: string
   targetPath: string
+  memoryWorkspacePath?: string
   statePath: string
   backupMode?: BackupMode
   maxParallelJobs?: number
@@ -65,6 +66,7 @@ export function planExtractionBatches(options: {
 }
 
 export async function runExtractionPipeline(options: RunExtractionPipelineOptions): Promise<ExtractionPipelineResult> {
+  const memoryWorkspacePath = options.memoryWorkspacePath ?? options.targetPath
   const plan = planExtractionBatches({
     providerConversations: options.providerConversations,
     selectedProviders: options.selectedProviders,
@@ -74,6 +76,7 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
     mode: options.mode,
     model: options.model,
     targetPath: options.targetPath,
+    memoryWorkspacePath,
     selectedProviders: options.selectedProviders,
     batches: plan.batches,
   })
@@ -84,6 +87,7 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
     mode: options.mode,
     model: options.model,
     targetPath: options.targetPath,
+    memoryWorkspacePath,
   })
 
   const pendingBatches: ConversationBatch[] = []
@@ -155,6 +159,7 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
   const artifacts = await writeExtractionArtifacts(allResults, {
     mode: options.mode,
     targetPath: options.targetPath,
+    memoryWorkspacePath,
     model: options.model,
     backupMode: options.backupMode ?? "overwrite",
   })
@@ -172,11 +177,12 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
 
 async function runBatchExtraction(
   batch: ConversationBatch,
-  options: Pick<RunExtractionPipelineOptions, "mode" | "targetPath" | "model">,
+  options: Pick<RunExtractionPipelineOptions, "mode" | "targetPath" | "memoryWorkspacePath" | "model">,
 ): Promise<BatchExtractionResult> {
   const prompt = buildSubagentPrompt(batch, {
     mode: options.mode,
     outputPath: options.targetPath,
+    memoryWorkspacePath: options.memoryWorkspacePath ?? options.targetPath,
   })
 
   const scheduled = await scheduleSubagentCronJob({
@@ -309,6 +315,7 @@ function buildRunKey(input: {
   mode: ExtractionMode
   model: string
   targetPath: string
+  memoryWorkspacePath: string
   selectedProviders: NormalizedConversation["source"][]
   batches: ConversationBatch[]
 }): string {
@@ -316,6 +323,7 @@ function buildRunKey(input: {
   hash.update(input.mode)
   hash.update(input.model)
   hash.update(input.targetPath)
+  hash.update(input.memoryWorkspacePath)
   hash.update(input.selectedProviders.join(","))
   hash.update(String(input.batches.length))
 
@@ -332,6 +340,7 @@ async function loadState(input: {
   mode: ExtractionMode
   model: string
   targetPath: string
+  memoryWorkspacePath: string
 }): Promise<ReclawState> {
   let parsed: ReclawState | null = null
 
@@ -354,6 +363,7 @@ async function loadState(input: {
     mode: input.mode,
     model: input.model,
     targetPath: input.targetPath,
+    memoryWorkspacePath: input.memoryWorkspacePath,
     createdAt: now,
     updatedAt: now,
     completed: {},
@@ -410,6 +420,7 @@ function parseState(value: unknown): ReclawState | null {
     mode: record.mode,
     model: record.model,
     targetPath: record.targetPath,
+    memoryWorkspacePath: typeof record.memoryWorkspacePath === "string" ? record.memoryWorkspacePath : record.targetPath,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     completed,

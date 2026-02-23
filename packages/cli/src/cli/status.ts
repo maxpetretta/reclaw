@@ -30,6 +30,12 @@ interface StatusPaths {
   targetPathExists: boolean
   outputDirPath: string
   outputDirExists: boolean
+  memoryWorkspacePath: string
+  memoryWorkspacePathExists: boolean
+  memoryFilePath: string
+  memoryFileExists: boolean
+  userFilePath: string
+  userFileExists: boolean
 }
 
 interface StateSnapshot {
@@ -125,12 +131,18 @@ export async function buildStatusReport(statePath: string, now: Date = new Date(
     }
   }
 
+  const memoryWorkspacePath = parsedState.memoryWorkspacePath
   const targetPathExists = await pathExists(parsedState.targetPath)
   const outputDirPath =
     parsedState.mode === "openclaw"
       ? join(parsedState.targetPath, "memory")
       : join(parsedState.targetPath, "03 Journal")
   const outputDirExists = await pathExists(outputDirPath)
+  const memoryWorkspacePathExists = await pathExists(memoryWorkspacePath)
+  const memoryFilePath = join(memoryWorkspacePath, "MEMORY.md")
+  const userFilePath = join(memoryWorkspacePath, "USER.md")
+  const memoryFileExists = await pathExists(memoryFilePath)
+  const userFileExists = await pathExists(userFilePath)
 
   if (!targetPathExists) {
     notes.push(`Target path does not exist: ${parsedState.targetPath}`)
@@ -138,6 +150,17 @@ export async function buildStatusReport(statePath: string, now: Date = new Date(
 
   if (!outputDirExists) {
     notes.push(`Expected output directory is missing: ${outputDirPath}`)
+  }
+
+  if (!memoryWorkspacePathExists) {
+    notes.push(`Memory workspace path does not exist: ${memoryWorkspacePath}`)
+  } else {
+    if (!memoryFileExists) {
+      notes.push(`Expected memory file is missing: ${memoryFilePath}`)
+    }
+    if (!userFileExists) {
+      notes.push(`Expected user file is missing: ${userFilePath}`)
+    }
   }
 
   const createdAtDate = new Date(parsedState.createdAt)
@@ -155,6 +178,12 @@ export async function buildStatusReport(statePath: string, now: Date = new Date(
       targetPathExists,
       outputDirPath,
       outputDirExists,
+      memoryWorkspacePath,
+      memoryWorkspacePathExists,
+      memoryFilePath,
+      memoryFileExists,
+      userFilePath,
+      userFileExists,
     },
     metrics: summarizeCompleted(parsedState.completed),
   }
@@ -220,6 +249,11 @@ function printHumanStatus(report: StatusReport): void {
   lines.push(`- Updated: ${state.updatedAt.local} (${state.updatedAt.iso})`)
   lines.push(`- Target path: ${state.paths.targetPath} (${state.paths.targetPathExists ? "exists" : "missing"})`)
   lines.push(`- Output dir: ${state.paths.outputDirPath} (${state.paths.outputDirExists ? "exists" : "missing"})`)
+  lines.push(
+    `- Memory workspace: ${state.paths.memoryWorkspacePath} (${state.paths.memoryWorkspacePathExists ? "exists" : "missing"})`,
+  )
+  lines.push(`- MEMORY.md: ${state.paths.memoryFilePath} (${state.paths.memoryFileExists ? "exists" : "missing"})`)
+  lines.push(`- USER.md: ${state.paths.userFilePath} (${state.paths.userFileExists ? "exists" : "missing"})`)
   lines.push(`- Completed batches: ${state.metrics.completedBatches}`)
   lines.push(`- Completed conversations: ${state.metrics.completedConversations}`)
 
@@ -334,6 +368,7 @@ function parseStateSnapshot(value: unknown): {
   mode: "openclaw" | "zettelclaw"
   model: string
   targetPath: string
+  memoryWorkspacePath: string
   createdAt: string
   updatedAt: string
   completed: Record<string, unknown>
@@ -369,6 +404,7 @@ function parseStateSnapshot(value: unknown): {
     mode,
     model: record.model,
     targetPath: record.targetPath,
+    memoryWorkspacePath: typeof record.memoryWorkspacePath === "string" ? record.memoryWorkspacePath : record.targetPath,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     completed,

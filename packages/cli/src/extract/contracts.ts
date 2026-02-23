@@ -55,6 +55,7 @@ export interface ReclawState {
   mode: ExtractionMode
   model: string
   targetPath: string
+  memoryWorkspacePath: string
   createdAt: string
   updatedAt: string
   completed: Record<string, BatchExtractionResult>
