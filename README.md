@@ -1,8 +1,12 @@
-# reclaw
+# Reclaw 🦞
 
-Reclaw imports ChatGPT, Claude, and Grok exports into durable memory artifacts for:
-- OpenClaw (`memory/`, `MEMORY.md`, `USER.md`)
-- Zettelclaw (`03 Journal/`, plus `MEMORY.md` and `USER.md`)
+**Reclaim your AI conversations.**
+
+Export your ChatGPT, Claude, and Grok history — normalize to markdown, bootstrap your agent's memory.
+
+Outputs to:
+- **OpenClaw** (`memory/`, `MEMORY.md`, `USER.md`)
+- **Zettelclaw** (`03 Journal/`, plus `MEMORY.md` and `USER.md`)
 
 ## Install / Run
 

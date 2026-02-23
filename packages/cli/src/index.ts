@@ -53,7 +53,7 @@ async function main() {
     return
   }
 
-  intro("🦞 Reclaw - Recover durable knowledge from old chats")
+  intro("🦞 Reclaw - Reclaim your AI conversations")
 
   const extractsDir = await chooseInputPath(cliArgs.input, cliArgs.yes)
   log.info(`Input: ${extractsDir}`)

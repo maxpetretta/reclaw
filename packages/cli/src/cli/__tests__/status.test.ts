@@ -106,7 +106,7 @@ describe("buildStatusReport", () => {
     }
 
     const rendered = output.join("\n")
-    expect(rendered).toContain("🦞 Reclaw Status")
+    expect(rendered).toContain("🦞 Reclaw - Status check")
     expect(rendered).toContain(`State file: ${statePath}`)
     expect(rendered).toContain("No state file found yet")
   })

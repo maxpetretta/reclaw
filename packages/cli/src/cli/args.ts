@@ -169,7 +169,7 @@ export function parseCliArgs(args: string[]): CliArgs {
 export function printHelp(): void {
   console.log(
     [
-      "🦞 Reclaw - Recover durable knowledge from old chats",
+      "🦞 Reclaw - Reclaim your AI conversations",
       "",
       "Usage:",
       "  reclaw [flags]",

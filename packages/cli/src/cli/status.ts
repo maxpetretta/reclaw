@@ -182,7 +182,7 @@ export async function buildStatusReport(statePath: string, now: Date = new Date(
 
 function printHumanStatus(report: StatusReport): void {
   const lines = [
-    "🦞 Reclaw Status",
+    "🦞 Reclaw - Status check",
     `- Checked: ${report.checkedAt.local} (${report.checkedAt.iso})`,
     `- State file: ${report.stateFile.path} (${report.stateFile.exists ? "present" : "missing"})`,
   ]
