@@ -104,7 +104,9 @@ describe("pipeline", () => {
     expect(result.processedBatches).toBe(1)
     expect(result.failedBatches).toBe(0)
     expect(await readFile(statePath, "utf8")).toContain("Batch summary")
-    expect(await readFile(join(targetPath, "memory", "2026-02-20.md"), "utf8")).toContain("# Reclaw Import 2026-02-20")
+    expect(await readFile(join(targetPath, "memory", "2026-02-20.md"), "utf8")).toContain(
+      "# Reclaw Memory Import 2026-02-20",
+    )
 
     const savedState = JSON.parse(await readFile(statePath, "utf8")) as {
       completed?: Record<string, Record<string, unknown>>

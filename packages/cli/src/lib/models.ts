@@ -98,7 +98,7 @@ export async function promptModelSelect(models: ModelInfo[], requestedModel?: st
 
   const selectedKey = unwrapPrompt(
     await select({
-      message: "Select model for extraction subagents",
+      message: "Select model for extraction subagents (Recommended: Claude Haiku 4.5, Gemini 3 Flash)",
       initialValue: defaultModel.key,
       options: models.map((model) => {
         const baseLabel = model.alias ? `${model.name} (${model.alias})` : `${model.name} (${model.key})`

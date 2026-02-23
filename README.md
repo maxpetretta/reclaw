@@ -16,6 +16,13 @@ See all flags:
 npx reclaw --help
 ```
 
+Check current resumable run state:
+
+```bash
+npx reclaw status
+npx reclaw status --json
+```
+
 ## Key Behavior (Current)
 
 - Subagent extraction runs **one merged batch per day** (all same-day conversations are processed together).
@@ -82,6 +89,7 @@ For scripted/non-interactive runs:
 - `--timestamped-backups`
 - `--legacy-sessions <on|off|required>` (default: `on`)
 - `--dry-run` / `--plan`
+- `reclaw status [--state-path <path>] [--json]`
 
 ## Resumability
 

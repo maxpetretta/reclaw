@@ -54,7 +54,7 @@ describe("writeExtractionArtifacts", () => {
     expect(await readFile(join(targetPath, "USER.md.bak"), "utf8")).toBe("old user")
 
     const daily = await readFile(join(targetPath, "memory", "2026-02-22.md"), "utf8")
-    expect(daily).toContain("# Reclaw Import 2026-02-22")
+    expect(daily).toContain("# Reclaw Memory Import 2026-02-22")
     expect(daily).toContain("## Sessions")
   })
 

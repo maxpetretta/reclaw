@@ -6,8 +6,11 @@
   "scripts": {
     "clone": "./scripts/clone-openclaw-workspace.sh",
     "cli": "bun run --cwd packages/cli start",
+    "cli:status": "bun run cli -- status",
     "cli:build": "bun run --cwd packages/cli build",
     "cli:test": "bun run --cwd packages/cli test",
+    "smoke": "./scripts/run-local-smoke-tests.sh",
+    "smoke:inference": "./scripts/run-local-smoke-tests.sh --with-inference",
     "web": "bun run --cwd packages/website dev",
     "web:dev": "bun run --cwd packages/website dev",
     "web:build": "bun run --cwd packages/website build",

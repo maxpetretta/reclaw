@@ -3,6 +3,7 @@ import type { LegacySessionMode } from "../lib/openclaw-sessions"
 import type { Provider } from "./constants"
 
 export interface CliArgs {
+  command?: "status"
   mode?: ExtractionMode
   model?: string
   provider?: Provider
@@ -13,6 +14,7 @@ export interface CliArgs {
   legacySessions?: LegacySessionMode
   subagentBatchSize?: number
   parallelJobs?: number
+  json?: boolean
   timestampedBackups: boolean
   yes: boolean
   dryRun: boolean
@@ -55,6 +57,16 @@ export function parseCliArgs(args: string[]): CliArgs {
 
     if (arg === "--timestamped-backups") {
       parsed.timestampedBackups = true
+      continue
+    }
+
+    if (arg === "--json") {
+      parsed.json = true
+      continue
+    }
+
+    if (arg === "status") {
+      parsed.command = "status"
       continue
     }
 
@@ -157,10 +169,11 @@ export function parseCliArgs(args: string[]): CliArgs {
 export function printHelp(): void {
   console.log(
     [
-      "reclaw — extract durable memory from AI chat exports",
+      "🦞 Reclaw - Recover durable knowledge from old chats",
       "",
       "Usage:",
       "  reclaw [flags]",
+      "  reclaw status [--state-path <path>] [--json]",
       "",
       "Core flags:",
       "  --provider <chatgpt|claude|grok>   Parse only one provider",
@@ -176,10 +189,13 @@ export function printHelp(): void {
       "  --legacy-sessions <on|off|required> Import legacy conversations into OpenClaw session history (default: on)",
       "  --yes, -y                          Non-interactive defaults; auto-confirm execution",
       "  --dry-run, --plan                  Parse and preview plan; do not schedule extraction or write files",
+      "  --json                             Emit JSON output (for 'status')",
       "  -h, --help                         Show help",
       "",
       "Examples:",
       "  reclaw",
+      "  reclaw status",
+      "  reclaw status --state-path ./tmp/reclaw-run-1.json --json",
       "  reclaw --provider chatgpt --input ./conversations.json",
       "  reclaw --parallel-jobs 5",
       "  reclaw --state-path ./tmp/reclaw-run-1.json --timestamped-backups",

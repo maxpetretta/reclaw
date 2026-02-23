@@ -54,6 +54,14 @@ describe("parseCliArgs", () => {
     expect(parsed.parallelJobs).toBe(2)
   })
 
+  it("parses the status command and json flag", () => {
+    const parsed = parseCliArgs(["status", "--state-path", "./tmp/state.json", "--json"])
+
+    expect(parsed.command).toBe("status")
+    expect(parsed.statePath).toBe("./tmp/state.json")
+    expect(parsed.json).toBe(true)
+  })
+
   it("rejects invalid provider values", () => {
     expect(() => parseCliArgs(["--provider", "openai"])).toThrow(
       "Invalid --provider value 'openai'. Expected 'chatgpt', 'claude', or 'grok'.",
@@ -116,5 +124,6 @@ describe("parseCliArgs", () => {
 
     expect(output).toContain("Usage:")
     expect(output).toContain("--provider <chatgpt|claude|grok>")
+    expect(output).toContain("reclaw status [--state-path <path>] [--json]")
   })
 })

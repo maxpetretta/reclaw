@@ -2,7 +2,7 @@
 
 import { join, resolve } from "node:path"
 
-import { cancel, confirm, intro, isCancel, log, multiselect, note, outro, select, spinner, text } from "@clack/prompts"
+import { cancel, confirm, intro, isCancel, log, multiselect, outro, select, spinner, text } from "@clack/prompts"
 
 import { parseCliArgs, printHelp } from "./cli/args"
 import {
@@ -17,6 +17,7 @@ import {
 } from "./cli/constants"
 import { prepareInputSources } from "./cli/input-discovery"
 import { resolveHomePath } from "./cli/path-utils"
+import { printStatus } from "./cli/status"
 import type { BackupMode, ExtractionMode } from "./extract/contracts"
 import { type ProviderConversations, planExtractionBatches, runExtractionPipeline } from "./extract/pipeline"
 import { uniqueStrings } from "./lib/collections"
@@ -43,7 +44,16 @@ async function main() {
     return
   }
 
-  intro("reclaw - Phase 2 extraction pipeline")
+  const statePath = cliArgs.statePath ? resolveHomePath(cliArgs.statePath) : resolve(DEFAULT_STATE_PATH)
+  if (cliArgs.command === "status") {
+    await printStatus({
+      statePath,
+      json: cliArgs.json === true,
+    })
+    return
+  }
+
+  intro("🦞 Reclaw - Recover durable knowledge from old chats")
 
   const extractsDir = await chooseInputPath(cliArgs.input, cliArgs.yes)
   log.info(`Input: ${extractsDir}`)
@@ -130,8 +140,6 @@ async function main() {
     providerConversations,
     selectedProviders: successfulProviders,
   })
-  const statePath = cliArgs.statePath ? resolveHomePath(cliArgs.statePath) : resolve(DEFAULT_STATE_PATH)
-
   if (cliArgs.dryRun) {
     const dryRunOptions: {
       mode: ExtractionMode
@@ -172,8 +180,6 @@ async function main() {
   modelSpin.start("Loading available models")
   const models = readModelsFromOpenClaw()
   modelSpin.stop("Model list loaded")
-
-  note("Recommended: Claude Haiku, Gemini Flash.", "Model Tip")
 
   const selectedModel =
     cliArgs.yes && !cliArgs.model ? resolveDefaultModel(models) : await promptModelSelect(models, cliArgs.model)
@@ -302,9 +308,14 @@ async function main() {
 
   log.message(summaryLines.join("\n"))
 
-  outro(
-    `Done. Parsed ${totalConversations} conversations (${totalMessages} messages) and extracted durable memory artifacts.`,
-  )
+  const outroLines = [
+    `Recovery complete. Parsed ${totalConversations} conversations (${totalMessages} messages) and extracted durable memory artifacts.`,
+  ]
+  if (mode === "openclaw" && result.failedBatches === 0) {
+    outroLines.push("Try Zettelclaw for journal-first memory workflows: https://zettelclaw.com")
+  }
+
+  outro(outroLines.join("\n"))
 }
 
 async function chooseOutputMode(
@@ -323,7 +334,7 @@ async function chooseOutputMode(
     message: "Select output mode",
     initialValue: "openclaw",
     options: [
-      { value: "openclaw", label: "OpenClaw" },
+      { value: "openclaw", label: "OpenClaw (Default)" },
       { value: "zettelclaw", label: "Zettelclaw" },
     ],
   })
@@ -505,7 +516,7 @@ function printDryRunPlan(options: {
 }): void {
   const backupPathSuffix = options.backupMode === "timestamped" ? ".bak.<timestamp>" : ".bak"
   const lines = [
-    "Dry-run plan (no writes, no subagents):",
+    "Reclaw dry-run plan (no writes, no subagents):",
     `- Mode: ${options.mode}`,
     `- Target: ${options.targetPath}`,
     `- State file: ${options.statePath}`,

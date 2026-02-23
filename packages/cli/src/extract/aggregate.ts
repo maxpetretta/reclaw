@@ -133,7 +133,7 @@ function buildOpenClawDailyMemoryContent(date: string, batchResults: BatchExtrac
   )
   const open = uniqueStrings(batchResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).open))
 
-  const lines = [`# Reclaw Import ${date}`, "", `Source providers: ${providerSummary}`, ""]
+  const lines = [`# Reclaw Memory Import ${date}`, "", `Source providers: ${providerSummary}`, ""]
   appendSection(lines, "## Decisions", decisions)
   appendSection(lines, "## Facts", facts)
   appendSection(lines, "## Interests", interests)
