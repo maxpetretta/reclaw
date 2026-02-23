@@ -20,6 +20,7 @@ Save:
 - Personal facts and relationships.
 - Project-specific architecture and decisions tied to the user's work.
 - Interest signals stated briefly (what they explored), not encyclopedia content.
+- Conclusions and outcomes, not the reasoning process.
 
 Never save:
 - General knowledge, definitions, or textbook facts.
@@ -28,6 +29,14 @@ Never save:
 - Any content that is broadly true and not specific to this user.
 - One-off questions as interests. Only keep interests when repeated, explored in depth, or explicitly important to the user.
 - Technology facts true for all users (for example, standard default schemas/features of a platform).
+- Step-by-step process descriptions. Save the decision/outcome, not the journey.
+- Benchmark data or comparison tables unless the user made a selection based on them.
+
+Zettelclaw note quality (apply when output feeds into vault notes):
+- Each summary line should map to exactly one atomic idea.
+- Prefer actionable statements: "Decided X", "Selected Y because Z", "Project X does Y".
+- Avoid compound lines that pack multiple unrelated facts together.
+- When a decision was made, state what was chosen AND what was rejected (briefly).
 
 Return STRICT JSON only (no markdown fences, no extra prose) with exactly this key:
 {
@@ -39,6 +48,7 @@ Summary format guidance:
 - Prefix lines with tags when possible: `Decision:`, `Fact:`, `Preference:`, `Person:`, `Project:`, `Interest:`, `Open:`.
 - Include only top-priority user-specific information.
 - Do not include duplicate lines.
+- Priority order when cutting for space: Decisions > Projects > Facts > Preferences > Interests > Open.
 
 Date batch metadata:
 - providers: {{providers}}
