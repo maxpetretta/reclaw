@@ -358,7 +358,7 @@ const description =
             </div>
           </div>
           <p class="text-sm text-muted-foreground leading-relaxed">
-            Writes daily memory files with session IDs, then a main synthesis agent updates MEMORY.md and USER.md (with .bak backups).
+            Writes structured daily memory files with decisions, facts, and session provenance. A synthesis agent updates MEMORY.md and USER.md (with .bak backups).
           </p>
         </div>
 
@@ -378,7 +378,7 @@ const description =
             </div>
           </div>
           <p class="text-sm text-muted-foreground leading-relaxed">
-            Creates daily recap journals with a Sessions footer, then updates MEMORY.md and USER.md.
+            Creates template-compatible journal entries that feed directly into Zettelclaw&rsquo;s nightly maintenance pipeline. Updates MEMORY.md and USER.md in your workspace.
           </p>
         </div>
       </div>
@@ -414,7 +414,7 @@ const description =
               </svg>
             </div>
             <p class="mt-3 text-base text-muted-foreground leading-relaxed max-w-lg">
-              Zettelclaw is an AI-native Zettelkasten with journal-first capture. Reclaw&rsquo;s Zettelclaw mode feeds daily journals and core memory synthesis into it.
+              Zettelclaw is an AI-native Zettelkasten with journal-first capture. Reclaw&rsquo;s journals are template-compatible &mdash; they feed directly into Zettelclaw&rsquo;s nightly maintenance pipeline, where knowledge gets promoted into linked evergreen notes.
             </p>
             <span class="inline-block mt-4 text-sm font-medium text-violet-400/80 group-hover:text-violet-300 transition-colors">
               zettelclaw.com &rarr;
