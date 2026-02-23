@@ -86,22 +86,23 @@ npx reclaw --plan --provider claude --input ./path/to/claude-export/
 
 ### `--mode zettelclaw`
 - Writes daily journals to `03 Journal/YYYY-MM-DD.md`.
-- Journal format is day-level recap with:
+- Journal format matches Zettelclaw journal template:
+  - `## Done` (preserved if already present from session hooks)
   - `## Decisions`
-  - `## Facts`
-  - `## Interests`
+  - `## Facts` (includes interests and other user-specific signals)
   - `## Open`
   - `---`
   - `## Sessions` (bullets as `provider:conversationId — HH:MM`)
-- Does not write inbox notes.
+- Preserves existing journal content (append-only). Legacy `## Interests` sections are migrated into `## Facts`.
+- Does not write inbox notes or typed notes — those are handled by Zettelclaw's nightly maintenance or supervised sessions.
 - Imports legacy conversations into OpenClaw session history by default (`--legacy-sessions on`) using `--workspace` or `~/.openclaw/workspace`.
-- Updates `MEMORY.md` and `USER.md` via a main synthesis agent run.
+- Updates `MEMORY.md` and `USER.md` in the OpenClaw workspace via a main synthesis agent run.
 
 ## 4) Subagent Model
 
 - Default is **one merged subagent task per day** (all same-day conversations grouped together).
 - `--subagent-batch-size` is deprecated and ignored.
-- Subagent jobs run in parallel by default (`--parallel-jobs 5`).
+- Subagent jobs run in parallel by default (`--parallel-jobs 8`).
 - Individual batch failures do not stop the run; successful batches continue and failed batches are reported at the end.
 - Subagents return strict JSON with one field:
   - `summary`
@@ -171,7 +172,16 @@ npx reclaw --mode openclaw --model anthropic/claude-3.5-haiku
 npx reclaw --mode zettelclaw --model openrouter/google/gemini-3-flash-preview
 ```
 
-## 10) What Reclaw Produces
+## 10) Content Quality
+
+Reclaw's subagent extraction applies a hard memory filter:
+- **Keep:** User-specific decisions, preferences, project details, relationships, and explored interests.
+- **Drop:** General knowledge, textbook facts, trivia, and anything a general-purpose LLM could answer without user context.
+- **Test:** "Would I need to know this person to know this?" If no, don't keep it.
+
+In zettelclaw mode, output journals are compatible with the Zettelclaw nightly maintenance pass, which promotes durable knowledge into typed notes (`01 Notes/`).
+
+## 11) What Reclaw Produces
 
 OpenClaw mode:
 - `memory/YYYY-MM-DD.md`
@@ -179,7 +189,7 @@ OpenClaw mode:
 - updated `USER.md` (+ `USER.md.bak`)
 
 Zettelclaw mode:
-- `03 Journal/YYYY-MM-DD.md`
+- `03 Journal/YYYY-MM-DD.md` (template-compatible journals)
 - updated `MEMORY.md` (+ `MEMORY.md.bak`)
 - updated `USER.md` (+ `USER.md.bak`)
 
