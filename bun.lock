@@ -33,7 +33,7 @@
     },
     "packages/website": {
       "name": "@reclaw/website",
-      "version": "1.0.0",
+      "version": "0.1.0",
       "dependencies": {
         "@astrojs/sitemap": "3.6.0",
         "@astrojs/vercel": "8.0.4",
