@@ -4,99 +4,66 @@
 
 Export your ChatGPT, Claude, and Grok history — normalize to markdown, bootstrap your agent's memory.
 
-Outputs to:
-- **OpenClaw** (`memory/`, `MEMORY.md`, `USER.md`)
-- **Zettelclaw** (`03 Journal/`, plus `MEMORY.md` and `USER.md`)
-
-## Install / Run
+## Quick Start
 
 ```bash
 npx reclaw
 ```
 
-See all flags:
+The interactive wizard walks you through provider selection, export path, model choice, and output mode.
+
+For a direct run:
 
 ```bash
-npx reclaw --help
+npx reclaw --provider chatgpt --input ./conversations.json
 ```
 
-Check current resumable run state:
+Check run status or resume an interrupted run:
 
 ```bash
 npx reclaw status
-npx reclaw status --json
 ```
 
-## Key Behavior (Current)
+## Output Modes
 
-- Subagent extraction runs **one merged batch per day** (all same-day conversations are processed together).
-- `--subagent-batch-size` is deprecated and ignored.
-- Subagent jobs run in parallel by default (`--parallel-jobs 8`).
-- Individual batch failures do not stop the run; successful batches continue and failed batches are reported at the end.
-- Subagents return strict JSON with one field: `summary`.
-- The main process synthesizes memory signals from those summaries.
+### OpenClaw (default)
 
-Before updating root memory files, Reclaw writes backups:
-- `MEMORY.md.bak`
-- `USER.md.bak`
+Writes daily memory files to `memory/YYYY-MM-DD.md` with structured sections (`Decisions`, `Facts`, `Interests`, `Open`, `Sessions`). Updates `MEMORY.md` and `USER.md` via a synthesis agent.
 
-Then a dedicated main synthesis agent updates `MEMORY.md` and `USER.md` using tools.
+```bash
+npx reclaw --mode openclaw --provider claude --input ./claude-export/
+```
 
-For repeated test runs, enable timestamped backups:
-- `--timestamped-backups` -> `MEMORY.md.bak.<timestamp>`, `USER.md.bak.<timestamp>`
+### Zettelclaw
 
-For scripted/non-interactive runs:
-- `--workspace <path>` is the OpenClaw output workspace in openclaw mode.
-- In zettelclaw mode, `--workspace <path>` sets where legacy sessions are imported (defaults to `~/.openclaw/workspace`).
-- `--target-path <path>` remains available for explicit output roots.
-- `--yes` auto-accepts defaults and execution confirmation.
+Writes Zettelclaw-compatible journal entries to `03 Journal/YYYY-MM-DD.md` matching the vault template (`Done`, `Decisions`, `Facts`, `Open`, `Sessions`). Updates `MEMORY.md` and `USER.md` in the OpenClaw workspace.
 
-## Modes
+```bash
+npx reclaw --mode zettelclaw --provider chatgpt --input ./conversations.json --vault ~/zettelclaw
+```
 
-### `--mode openclaw` (default)
+## How It Works
 
-- Writes daily memory files: `memory/YYYY-MM-DD.md`
-- Daily format includes:
-  - `## Decisions`
-  - `## Facts`
-  - `## Interests`
-  - `## Open`
-  - `---`
-  - `## Sessions` (`provider:conversationId — timestamp`)
-- Imports legacy sessions into OpenClaw history by default (`--legacy-sessions on`).
+1. **Parse** — reads provider export files and normalizes conversations
+2. **Extract** — groups conversations by day, runs parallel subagent jobs to distill durable memory (decisions, facts, preferences, project details)
+3. **Write** — builds daily files/journals from extraction summaries
+4. **Synthesize** — a final agent pass updates `MEMORY.md` and `USER.md`
 
-### `--mode zettelclaw`
+Reclaw applies a hard content filter: only user-specific information survives extraction. General knowledge, trivia, and anything a general-purpose LLM could answer without user context is dropped.
 
-- Writes daily journals: `03 Journal/YYYY-MM-DD.md`
-- Journal format includes:
-  - `## Decisions`
-  - `## Facts`
-  - `## Interests`
-  - `## Open`
-  - `---`
-  - `## Sessions` (`provider:conversationId — HH:MM`)
-- Does not create inbox notes.
-- Imports legacy sessions into OpenClaw history by default (`--legacy-sessions on`) using `--workspace` or `~/.openclaw/workspace`.
+Runs are resumable — if interrupted, rerun the same command to continue from where it left off.
 
-## Useful Flags
+## Exporting Your Data
 
-- `--provider <chatgpt|claude|grok>`
-- `--input <path>`
-- `--state-path <path>`
-- `--mode <openclaw|zettelclaw>`
-- `--workspace <path>` (OpenClaw output path in openclaw mode; legacy import target in zettelclaw mode)
-- `--target-path <path>`
-- `--model <model-id>`
-- `--yes`
-- `--subagent-batch-size <n>` (deprecated; ignored)
-- `--parallel-jobs <n>`
-- `--timestamped-backups`
-- `--legacy-sessions <on|off|required>` (default: `on`)
-- `--dry-run` / `--plan`
-- `reclaw status [--state-path <path>] [--json]`
+- **ChatGPT:** Settings → Data Controls → Export Data → unzip → `conversations.json`
+- **Claude:** Settings → Account → Export Data → unzip → `conversations.json`
+- **Grok:** Settings → Account → Download Your Data → unzip
 
-## Resumability
+## Links
 
-Runs are resumable using `.reclaw-state.json`.
+- [GitHub](https://github.com/maxpetretta/reclaw)
+- [zettelclaw.com](https://zettelclaw.com)
 
-If interrupted, rerun the same command to continue.
+## License
+
+MIT

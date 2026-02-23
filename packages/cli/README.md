@@ -1,20 +1,12 @@
 # reclaw
 
-Extract durable memory from ChatGPT, Claude, and Grok exports.
+> Reclaim your AI conversations.
 
-## Install
+Extract durable memory from ChatGPT, Claude, and Grok exports.
 
 ```bash
 npx reclaw
-```
-
-## Help
-
-```bash
 npx reclaw --help
 ```
 
-## Docs
-
-- Repository: https://github.com/maxpetretta/reclaw
-- Issues: https://github.com/maxpetretta/reclaw/issues
+See the [project README](https://github.com/maxpetretta/reclaw) for full documentation.
