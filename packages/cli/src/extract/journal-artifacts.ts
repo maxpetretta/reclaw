@@ -97,13 +97,11 @@ async function writeZettelclawJournalImports(
           )
         : dateResults
 
-      const decisions = uniqueStrings(
-        pendingResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).decisions),
-      )
-      const facts = uniqueStrings(
+      const logItems = uniqueStrings(
         pendingResults.flatMap((entry) => {
           const signals = extractSummarySignals(entry.extraction.summary)
           return [
+            ...signals.decisions,
             ...signals.facts,
             ...signals.projects,
             ...signals.people,
@@ -115,22 +113,12 @@ async function writeZettelclawJournalImports(
       const open = uniqueStrings(
         pendingResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).open),
       )
-      const cleanedDecisions = cleanJournalBullets(decisions)
-      const cleanedFacts = cleanJournalBullets(facts)
+      const cleanedLog = cleanJournalBullets(logItems)
       const cleanedOpen = cleanJournalBullets(open)
 
-      const decisionsUpdate = appendUniqueSectionBullets(
-        content,
-        "## Decisions",
-        cleanedDecisions,
-        includeSessionFooters,
-      )
-      content = decisionsUpdate.content
-      changed = changed || decisionsUpdate.changed
-
-      const factsUpdate = appendUniqueSectionBullets(content, "## Facts", cleanedFacts, includeSessionFooters)
-      content = factsUpdate.content
-      changed = changed || factsUpdate.changed
+      const logUpdate = appendUniqueSectionBullets(content, "## Log", cleanedLog, includeSessionFooters)
+      content = logUpdate.content
+      changed = changed || logUpdate.changed
 
       const openUpdate = appendUniqueSectionBullets(content, "## Open", cleanedOpen, includeSessionFooters)
       content = openUpdate.content
@@ -202,7 +190,7 @@ function ensureDailyJournalSections(content: string, includeSessionFooters: bool
       changed = true
     }
 
-    for (const heading of ["## Done", "## Decisions", "## Facts", "## Open"]) {
+    for (const heading of ["## Log", "## Open"]) {
       const bounds = findSectionBounds(lines, heading)
       if (!bounds || bounds.start >= dividerIndex) {
         continue
@@ -233,7 +221,7 @@ function ensureDailyJournalSections(content: string, includeSessionFooters: bool
     if (removeTrailingDivider(lines)) {
       changed = true
     }
-    for (const heading of ["## Done", "## Decisions", "## Facts", "## Open"]) {
+    for (const heading of ["## Log", "## Open"]) {
       const bounds = findSectionBounds(lines, heading)
       if (!bounds || sectionHasBullets(lines, bounds)) {
         continue
@@ -243,20 +231,23 @@ function ensureDailyJournalSections(content: string, includeSessionFooters: bool
     }
   }
 
-  // Migrate legacy ## Interests → ## Facts
-  const interestsBounds = findSectionBounds(lines, "## Interests")
-  if (interestsBounds) {
+  // Migrate legacy sections (Done, Decisions, Facts, Interests) → ## Log
+  for (const legacyHeading of ["## Done", "## Decisions", "## Facts", "## Interests"]) {
+    const legacyBounds = findSectionBounds(lines, legacyHeading)
+    if (!legacyBounds) {
+      continue
+    }
     const bullets = lines
-      .slice(interestsBounds.start + 1, interestsBounds.end)
+      .slice(legacyBounds.start + 1, legacyBounds.end)
       .filter((line) => line.trim().startsWith("- "))
     if (bullets.length > 0) {
-      const factsValues = bullets.map((line) => line.trim().slice(2))
-      removeSection(lines, "## Interests")
+      const values = bullets.map((line) => line.trim().slice(2))
+      removeSection(lines, legacyHeading)
       changed = true
       const migrated = appendUniqueSectionBullets(
         `${lines.join("\n")}\n`,
-        "## Facts",
-        factsValues,
+        "## Log",
+        values,
         includeSessionFooters,
       )
       const migratedLines = migrated.content.replaceAll("\r\n", "\n").split("\n")
@@ -266,7 +257,7 @@ function ensureDailyJournalSections(content: string, includeSessionFooters: bool
         lines.pop()
       }
     } else {
-      removeSection(lines, "## Interests")
+      removeSection(lines, legacyHeading)
       changed = true
     }
   }
@@ -307,7 +298,7 @@ function normalizeJournalSections(content: string): ContentUpdateResult {
   const lines = content.replaceAll("\r\n", "\n").split("\n")
   let changed = false
 
-  for (const heading of ["## Done", "## Decisions", "## Facts", "## Open"]) {
+  for (const heading of ["## Log", "## Open", "## Done", "## Decisions", "## Facts", "## Interests"]) {
     const bounds = findSectionBounds(lines, heading)
     if (!bounds) {
       continue

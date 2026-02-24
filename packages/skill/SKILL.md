@@ -88,14 +88,12 @@ npx reclaw --plan --provider claude --input ./path/to/claude-export/
 ### `--mode zettelclaw`
 - Writes daily journals to `03 Journal/YYYY-MM-DD.md`.
 - Journal format matches Zettelclaw journal template:
-  - `## Done` (preserved if already present from session hooks)
-  - `## Decisions`
-  - `## Facts` (includes interests and other user-specific signals)
+  - `## Log` (decisions, facts, interests, and other user-specific signals merged)
   - `## Open`
   - Optional footer (only when legacy session import is enabled):
     - `---`
     - `## Sessions` (bullets as `provider:conversationId — HH:MM`)
-- Preserves existing journal content (append-only). Legacy `## Interests` sections are migrated into `## Facts`.
+- Preserves existing journal content (append-only). Legacy sections (`## Done`, `## Decisions`, `## Facts`, `## Interests`) are migrated into `## Log`.
 - Does not write inbox notes or typed notes — those are handled by Zettelclaw's nightly maintenance or supervised sessions.
 - Legacy session import is **off by default**; enable with `--legacy-sessions on` (or `required`) using `--workspace` or `~/.openclaw/workspace`.
 - Updates `MEMORY.md` and `USER.md` in the OpenClaw workspace via a main synthesis agent run.

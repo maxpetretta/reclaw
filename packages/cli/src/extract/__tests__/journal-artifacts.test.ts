@@ -7,7 +7,7 @@ import type { BatchExtractionResult } from "../contracts"
 import { writeZettelclawArtifacts } from "../journal-artifacts"
 
 describe("writeZettelclawArtifacts", () => {
-  it("creates a new journal file with normalized sections", async () => {
+  it("creates a new journal file with Log/Open/Sessions sections", async () => {
     const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
 
     const result = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault, {
@@ -18,15 +18,16 @@ describe("writeZettelclawArtifacts", () => {
     expect(result.outputFiles).toEqual([journalPath])
     const content = await readFile(journalPath, "utf8")
     expect(content).toContain("type: journal")
-    expect(content).toContain("## Decisions")
-    expect(content).toContain("## Facts")
-    expect(content).not.toContain("## Interests")
+    expect(content).toContain("## Log")
     expect(content).toContain("## Open")
     expect(content).toContain("## Sessions")
+    expect(content).not.toContain("## Decisions")
+    expect(content).not.toContain("## Facts")
+    expect(content).not.toContain("## Interests")
     expect(content).toContain("- chatgpt:cg-1 — 14:25")
   })
 
-  it("preserves Done section, normalizes bullets, dedupes sessions", async () => {
+  it("migrates legacy Done/Decisions/Facts sections into Log", async () => {
     const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
     const journalDir = join(vault, "03 Journal")
     const journalPath = join(journalDir, "2026-02-22.md")
@@ -66,12 +67,15 @@ describe("writeZettelclawArtifacts", () => {
     expect(result.outputFiles).toEqual([journalPath])
 
     const content = await readFile(journalPath, "utf8")
-    expect(content).toContain("## Done")
+    expect(content).toContain("## Log")
     expect(content).toContain("- existing done item")
+    expect(content).toContain("- Ship v1")
     expect(content.match(/Uses bun test/g)?.length).toBe(1)
+    expect(content).not.toContain("## Done")
+    expect(content).not.toContain("## Decisions")
+    expect(content).not.toContain("## Facts")
     expect(content).toContain("- chatgpt:cg-1 — 14:25")
     expect(content).toContain("- claude:cl-1 —")
-    expect(content).toContain("## Decisions")
     expect(content).toContain("## Sessions")
   })
 
@@ -89,7 +93,7 @@ describe("writeZettelclawArtifacts", () => {
         "---",
         "",
         "",
-        "## Decisions",
+        "## Log",
         "",
         "## Sessions",
         "- chatgpt:existing-no-time",
@@ -124,10 +128,8 @@ describe("writeZettelclawArtifacts", () => {
         "created: 2026-02-22",
         "updated: 2026-02-22",
         "---",
-        "## Decisions",
+        "## Log",
         "- Ship v1",
-        "",
-        "## Facts",
         "- Uses bun test",
         "- Quality",
         "",
@@ -163,8 +165,7 @@ describe("writeZettelclawArtifacts", () => {
 
     expect(result.outputFiles).toEqual([journalPath])
     const content = await readFile(journalPath, "utf8")
-    expect(content).toContain("## Decisions")
-    expect(content).toContain("## Facts")
+    expect(content).toContain("## Log")
     expect(content).toContain("## Open")
     expect(content).not.toContain("## Sessions")
   })
