@@ -24,6 +24,7 @@ import { uniqueStrings } from "./lib/collections"
 import { promptModelSelect, readModelsFromOpenClaw } from "./lib/models"
 import { ensureExtractionConcurrencyConfig, runOpenClaw } from "./lib/openclaw"
 import {
+  cleanupLegacySessionsFromOpenClawHistory,
   importLegacySessionsToOpenClawHistory,
   type LegacySessionImportResult,
   type LegacySessionMode,
@@ -122,6 +123,16 @@ async function main() {
     await printStatus({
       statePath,
       json: cliArgs.json === true,
+    })
+    return
+  }
+
+  if (cliArgs.command === "cleanup") {
+    await runCleanupCommand({
+      workspace: cliArgs.workspace,
+      orphans: cliArgs.orphans === true,
+      dryRun: cliArgs.dryRun,
+      yes: cliArgs.yes,
     })
     return
   }
@@ -366,6 +377,7 @@ async function main() {
     statePath,
     backupMode,
     maxParallelJobs: parallelJobs,
+    includeSessionFooters: legacySessionMode !== "off",
     onProgress: (message) => extractionSpin.message(message),
   })
 
@@ -403,11 +415,11 @@ async function main() {
   }
 
   summaryLines.push(`State: ${result.statePath}`)
-  summaryLines.push(
-    legacyImportResult
-      ? `Legacy sessions: ${legacyImportResult.imported} imported, ${legacyImportResult.updated} updated, ${legacyImportResult.skipped} skipped, ${legacyImportResult.failed} failed (${legacyImportResult.sessionStorePath})`
-      : "Legacy sessions: disabled",
-  )
+  if (legacyImportResult) {
+    summaryLines.push(
+      `Legacy sessions: ${legacyImportResult.imported} imported, ${legacyImportResult.updated} updated, ${legacyImportResult.skipped} skipped, ${legacyImportResult.failed} failed (${legacyImportResult.sessionStorePath})`,
+    )
+  }
 
   log.message(summaryLines.join("\n"))
 
@@ -448,6 +460,118 @@ async function chooseOutputMode(
   }
 
   return selectedMode as ExtractionMode
+}
+
+async function runCleanupCommand(options: {
+  workspace: string | undefined
+  orphans: boolean
+  dryRun: boolean
+  yes: boolean
+}): Promise<void> {
+  intro("🦞 Reclaw - Cleanup legacy session imports")
+
+  const workspacePath = resolveHomePath(options.workspace ?? DEFAULT_OPENCLAW_WORKSPACE_PATH)
+  configureOpenClawEnvForWorkspace(workspacePath)
+  log.info(`Workspace: ${workspacePath}`)
+
+  const previewSpin = spinner()
+  previewSpin.start(
+    options.orphans
+      ? "Scanning OpenClaw session store for Reclaw legacy imports and orphan transcript files"
+      : "Scanning OpenClaw session store for Reclaw legacy imports",
+  )
+  const preview = await cleanupLegacySessionsFromOpenClawHistory({
+    workspacePath,
+    dryRun: true,
+    includeOrphans: options.orphans,
+  })
+  previewSpin.stop(
+    options.orphans
+      ? `Found ${preview.matched} legacy session entr${preview.matched === 1 ? "y" : "ies"} and ${preview.orphanCandidates} orphan transcript file${preview.orphanCandidates === 1 ? "" : "s"} in ${preview.sessionStorePath}`
+      : `Found ${preview.matched} legacy session entr${preview.matched === 1 ? "y" : "ies"} in ${preview.sessionStorePath}`,
+  )
+
+  if (preview.matched === 0 && preview.orphanCandidates === 0) {
+    outro("No Reclaw legacy-imported sessions found. Nothing to remove.")
+    return
+  }
+
+  if (options.dryRun) {
+    if (preview.orphanSample.length > 0) {
+      log.message(["Orphan transcript sample:", ...preview.orphanSample.map((path) => `- ${path}`)].join("\n"))
+    }
+    outro(
+      options.orphans
+        ? "Dry run complete. Re-run `reclaw cleanup --workspace <path> --orphans --yes` to remove matched entries."
+        : "Dry run complete. Re-run `reclaw cleanup --workspace <path> --yes` to remove matched sessions.",
+    )
+    return
+  }
+
+  if (!options.yes) {
+    const confirmed = await confirm({
+      message: options.orphans
+        ? `Remove ${preview.matched} legacy session entr${preview.matched === 1 ? "y" : "ies"} and ${preview.orphanCandidates} orphan transcript file${preview.orphanCandidates === 1 ? "" : "s"} now?`
+        : `Remove ${preview.matched} legacy session entr${preview.matched === 1 ? "y" : "ies"} now?`,
+      initialValue: false,
+    })
+    if (isCancel(confirmed) || !confirmed) {
+      cancel("Cancelled")
+      process.exit(0)
+    }
+  } else {
+    log.info("Auto-confirm enabled (--yes); proceeding without prompt.")
+  }
+
+  const cleanupSpin = spinner()
+  cleanupSpin.start(
+    options.orphans
+      ? "Removing legacy sessions and orphan transcript files from OpenClaw history"
+      : "Removing legacy sessions from OpenClaw history",
+  )
+  const result = await cleanupLegacySessionsFromOpenClawHistory({
+    workspacePath,
+    dryRun: false,
+    includeOrphans: options.orphans,
+  })
+  cleanupSpin.stop(
+    options.orphans
+      ? `Removed ${result.removedFromStore} store entr${result.removedFromStore === 1 ? "y" : "ies"} and ${result.removedOrphanFiles} orphan transcript file${result.removedOrphanFiles === 1 ? "" : "s"}`
+      : `Removed ${result.removedFromStore} session entr${result.removedFromStore === 1 ? "y" : "ies"} from store`,
+  )
+
+  if (result.backupPath) {
+    log.info(`Backup: ${result.backupPath}`)
+  }
+  log.message(
+    [
+      `Removed session files: ${result.removedSessionFiles}`,
+      `Missing session files: ${result.missingSessionFiles}`,
+      `Orphan transcript files removed: ${result.removedOrphanFiles}`,
+      `Orphan transcript files missing: ${result.missingOrphanFiles}`,
+      `Store path: ${result.sessionStorePath}`,
+    ].join("\n"),
+  )
+
+  if (result.failedSessionFiles.length > 0) {
+    for (const failure of result.failedSessionFiles.slice(0, 8)) {
+      log.error(`Could not remove session file ${failure.path}: ${failure.reason}`)
+    }
+    if (result.failedSessionFiles.length > 8) {
+      log.error(`...and ${result.failedSessionFiles.length - 8} more file deletion error(s).`)
+    }
+  }
+
+  if (result.failedOrphanFiles.length > 0) {
+    for (const failure of result.failedOrphanFiles.slice(0, 8)) {
+      log.error(`Could not remove orphan transcript file ${failure.path}: ${failure.reason}`)
+    }
+    if (result.failedOrphanFiles.length > 8) {
+      log.error(`...and ${result.failedOrphanFiles.length - 8} more orphan deletion error(s).`)
+    }
+  }
+
+  outro("Cleanup complete.")
 }
 
 async function chooseProviders(
@@ -592,7 +716,7 @@ function resolveLegacySessionMode(requestedMode: LegacySessionMode | undefined):
     return requestedMode
   }
 
-  return "on"
+  return "off"
 }
 
 function clipLogText(value: string, maxChars: number): string {
@@ -657,8 +781,8 @@ function printDryRunPlan(options: {
     lines.push(`- Planned main-agent update: ${join(options.targetPath, "USER.md")}`)
     lines.push(`- Planned backup: ${join(options.targetPath, `MEMORY.md${backupPathSuffix}`)}`)
     lines.push(`- Planned backup: ${join(options.targetPath, `USER.md${backupPathSuffix}`)}`)
-    lines.push(`- Legacy sessions: ${options.legacySessionMode}`)
     if (options.legacySessionMode !== "off") {
+      lines.push(`- Legacy sessions: ${options.legacySessionMode}`)
       lines.push(`- Planned legacy session imports: ${options.plan.conversationCount}`)
       lines.push(`- Legacy import workspace: ${options.legacyWorkspacePath}`)
       lines.push("- Legacy markers: origin.label=reclaw-legacy-import, customType=reclaw:legacy-source")
@@ -671,8 +795,8 @@ function printDryRunPlan(options: {
     lines.push(`- Planned main-agent update: ${join(options.memoryWorkspacePath, "USER.md")}`)
     lines.push(`- Planned backup: ${join(options.memoryWorkspacePath, `MEMORY.md${backupPathSuffix}`)}`)
     lines.push(`- Planned backup: ${join(options.memoryWorkspacePath, `USER.md${backupPathSuffix}`)}`)
-    lines.push(`- Legacy sessions: ${options.legacySessionMode}`)
     if (options.legacySessionMode !== "off") {
+      lines.push(`- Legacy sessions: ${options.legacySessionMode}`)
       lines.push(`- Planned legacy session imports: ${options.plan.conversationCount}`)
       lines.push(`- Legacy import workspace: ${options.legacyWorkspacePath}`)
       lines.push("- Legacy markers: origin.label=reclaw-legacy-import, customType=reclaw:legacy-source")

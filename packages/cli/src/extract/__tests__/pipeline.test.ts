@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test"
+import { writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -60,12 +61,12 @@ describe("pipeline", () => {
       if (jobId === "job-main") {
         mainDocWriteCount += 1
         const suffix = `run-${mainDocWriteCount}`
-        void writeFile(
+        writeFileSync(
           join(targetPath, "MEMORY.md"),
           `<!-- reclaw-memory:start -->\n${suffix}\n<!-- reclaw-memory:end -->\n`,
           "utf8",
         )
-        void writeFile(
+        writeFileSync(
           join(targetPath, "USER.md"),
           `<!-- reclaw-user:start -->\n${suffix}\n<!-- reclaw-user:end -->\n`,
           "utf8",
@@ -213,12 +214,12 @@ describe("pipeline", () => {
       const idIndex = args.indexOf("--id")
       const jobId = idIndex >= 0 ? args[idIndex + 1] : undefined
       if (jobId === "job-main") {
-        void writeFile(
+        writeFileSync(
           join(targetPath, "MEMORY.md"),
           "<!-- reclaw-memory:start -->\nrebuilt\n<!-- reclaw-memory:end -->\n",
           "utf8",
         )
-        void writeFile(
+        writeFileSync(
           join(targetPath, "USER.md"),
           "<!-- reclaw-user:start -->\nrebuilt\n<!-- reclaw-user:end -->\n",
           "utf8",
@@ -277,12 +278,12 @@ describe("pipeline", () => {
       const idIndex = args.indexOf("--id")
       const jobId = idIndex >= 0 ? args[idIndex + 1] : undefined
       if (jobId === "job-main") {
-        void writeFile(
+        writeFileSync(
           join(memoryWorkspacePath, "MEMORY.md"),
           "<!-- reclaw-memory:start -->\nworkspace memory\n<!-- reclaw-memory:end -->\n",
           "utf8",
         )
-        void writeFile(
+        writeFileSync(
           join(memoryWorkspacePath, "USER.md"),
           "<!-- reclaw-user:start -->\nworkspace user\n<!-- reclaw-user:end -->\n",
           "utf8",
@@ -323,7 +324,7 @@ describe("pipeline", () => {
     })
 
     expect(result.failedBatches).toBe(0)
-    expect(await readFile(join(targetPath, "03 Journal", "2026-02-24.md"), "utf8")).toContain("## Sessions")
+    expect(await readFile(join(targetPath, "03 Journal", "2026-02-24.md"), "utf8")).not.toContain("## Sessions")
     expect(await readFile(join(memoryWorkspacePath, "MEMORY.md"), "utf8")).toContain("workspace memory")
     expect(await readFile(join(memoryWorkspacePath, "USER.md"), "utf8")).toContain("workspace user")
     await expect(readFile(join(targetPath, "MEMORY.md"), "utf8")).rejects.toThrow()

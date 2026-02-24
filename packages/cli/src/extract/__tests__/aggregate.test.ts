@@ -48,6 +48,7 @@ describe("writeExtractionArtifacts", () => {
       memoryWorkspacePath: targetPath,
       model: "gpt-5",
       backupMode: "overwrite",
+      includeSessionFooters: true,
     })
 
     expect(result.outputFiles).toEqual([join(targetPath, "memory", "2026-02-22.md")])
@@ -94,6 +95,7 @@ describe("writeExtractionArtifacts", () => {
       memoryWorkspacePath,
       model: "gpt-5",
       backupMode: "timestamped",
+      includeSessionFooters: false,
     })
 
     expect(result.outputFiles).toEqual([join(targetPath, "03 Journal", "2026-02-22.md")])
@@ -102,6 +104,48 @@ describe("writeExtractionArtifacts", () => {
     expect(files.some((entry) => /^USER\.md\.bak\.\d{8}-\d{6}-\d{3}$/.test(entry))).toBeTrue()
     expect((await readdir(targetPath)).includes("MEMORY.md")).toBeFalse()
     expect((await readdir(targetPath)).includes("USER.md")).toBeFalse()
+  })
+
+  it("omits session footer when includeSessionFooters is disabled", async () => {
+    const targetPath = await mkdtemp(join(tmpdir(), "reclaw-aggregate-no-sessions-test-"))
+    await mkdir(join(targetPath, "memory"), { recursive: true })
+    await writeFile(join(targetPath, "MEMORY.md"), "old memory", "utf8")
+    await writeFile(join(targetPath, "USER.md"), "old user", "utf8")
+
+    setSpawnHook((_, args) => {
+      const idIndex = args.indexOf("--id")
+      const jobId = idIndex >= 0 ? args[idIndex + 1] : ""
+      if (jobId === "job-main") {
+        writeFileSync(
+          join(targetPath, "MEMORY.md"),
+          "<!-- reclaw-memory:start -->\nupdated\n<!-- reclaw-memory:end -->\n",
+          "utf8",
+        )
+        writeFileSync(
+          join(targetPath, "USER.md"),
+          "<!-- reclaw-user:start -->\nupdated\n<!-- reclaw-user:end -->\n",
+          "utf8",
+        )
+      }
+    })
+    enqueueSpawnResult({ status: 0, stdout: '{"id":"job-main"}', stderr: "" })
+    enqueueSpawnResult({
+      status: 0,
+      stdout: JSON.stringify({ entries: [{ action: "finished", status: "ok", summary: "done", ts: 1 }] }),
+      stderr: "",
+    })
+
+    await writeExtractionArtifacts([batch("chatgpt")], {
+      mode: "openclaw",
+      targetPath,
+      memoryWorkspacePath: targetPath,
+      model: "gpt-5",
+      backupMode: "overwrite",
+      includeSessionFooters: false,
+    })
+
+    const daily = await readFile(join(targetPath, "memory", "2026-02-22.md"), "utf8")
+    expect(daily).not.toContain("## Sessions")
   })
 })
 

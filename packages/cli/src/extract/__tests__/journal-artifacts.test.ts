@@ -10,7 +10,9 @@ describe("writeZettelclawArtifacts", () => {
   it("creates a new journal file with normalized sections", async () => {
     const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
 
-    const result = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault)
+    const result = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault, {
+      includeSessionFooters: true,
+    })
     const journalPath = join(vault, "03 Journal", "2026-02-22.md")
 
     expect(result.outputFiles).toEqual([journalPath])
@@ -59,6 +61,7 @@ describe("writeZettelclawArtifacts", () => {
     const result = await writeZettelclawArtifacts(
       [batch("chatgpt", "cg-1", "14:25"), batch("claude", "cl-1", "2026-02-22T15:30:00.000Z")],
       vault,
+      { includeSessionFooters: true },
     )
     expect(result.outputFiles).toEqual([journalPath])
 
@@ -97,6 +100,7 @@ describe("writeZettelclawArtifacts", () => {
     const result = await writeZettelclawArtifacts(
       [batch("chatgpt", "existing-no-time", "not-a-date"), batch("grok", "new-ref", "not-a-date")],
       vault,
+      { includeSessionFooters: true },
     )
     expect(result.outputFiles).toEqual([journalPath])
 
@@ -138,11 +142,31 @@ describe("writeZettelclawArtifacts", () => {
       "utf8",
     )
 
-    const firstRun = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault)
+    const firstRun = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault, {
+      includeSessionFooters: true,
+    })
     expect(firstRun.outputFiles).toEqual([journalPath])
 
-    const secondRun = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault)
+    const secondRun = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault, {
+      includeSessionFooters: true,
+    })
     expect(secondRun.outputFiles).toEqual([])
+  })
+
+  it("omits the sessions footer when includeSessionFooters is disabled", async () => {
+    const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
+
+    const result = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault, {
+      includeSessionFooters: false,
+    })
+    const journalPath = join(vault, "03 Journal", "2026-02-22.md")
+
+    expect(result.outputFiles).toEqual([journalPath])
+    const content = await readFile(journalPath, "utf8")
+    expect(content).toContain("## Decisions")
+    expect(content).toContain("## Facts")
+    expect(content).toContain("## Open")
+    expect(content).not.toContain("## Sessions")
   })
 })
 

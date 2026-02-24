@@ -3,7 +3,7 @@ import type { LegacySessionMode } from "../lib/openclaw-sessions"
 import type { Provider } from "./constants"
 
 export interface CliArgs {
-  command?: "status"
+  command?: "status" | "cleanup"
   mode?: ExtractionMode
   model?: string
   provider?: Provider
@@ -15,6 +15,7 @@ export interface CliArgs {
   subagentBatchSize?: number
   parallelJobs?: number
   json?: boolean
+  orphans?: boolean
   timestampedBackups: boolean
   yes: boolean
   dryRun: boolean
@@ -65,8 +66,18 @@ export function parseCliArgs(args: string[]): CliArgs {
       continue
     }
 
+    if (arg === "--orphans") {
+      parsed.orphans = true
+      continue
+    }
+
     if (arg === "status") {
       parsed.command = "status"
+      continue
+    }
+
+    if (arg === "cleanup") {
+      parsed.command = "cleanup"
       continue
     }
 
@@ -174,6 +185,7 @@ export function printHelp(): void {
       "Usage:",
       "  reclaw [flags]",
       "  reclaw status [--state-path <path>] [--json]",
+      "  reclaw cleanup [--workspace <path>] [--orphans] [--dry-run] [--yes]",
       "",
       "Core flags:",
       "  --provider <chatgpt|claude|grok>   Parse only one provider",
@@ -186,7 +198,7 @@ export function printHelp(): void {
       "  --subagent-batch-size <n>          Deprecated (ignored; batching is one merged day per job)",
       "  --parallel-jobs <n>                Parallel subagent jobs (default: 8)",
       "  --timestamped-backups              Write MEMORY/USER backups as .bak.<timestamp>",
-      "  --legacy-sessions <on|off|required> Import legacy conversations into OpenClaw session history (default: on)",
+      "  --orphans                         (cleanup) also remove orphan session transcript files under sessions/",
       "  --yes, -y                          Non-interactive defaults; auto-confirm execution",
       "  --dry-run, --plan                  Parse and preview plan; do not schedule extraction or write files",
       "  --json                             Emit JSON output (for 'status')",
@@ -195,6 +207,8 @@ export function printHelp(): void {
       "Examples:",
       "  reclaw",
       "  reclaw status",
+      "  reclaw cleanup --workspace ~/.openclaw/workspace --dry-run",
+      "  reclaw cleanup --workspace ~/.openclaw/workspace --orphans --yes",
       "  reclaw status --state-path ./tmp/reclaw-run-1.json --json",
       "  reclaw --provider chatgpt --input ./conversations.json",
       "  reclaw --parallel-jobs 8",

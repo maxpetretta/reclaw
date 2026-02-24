@@ -62,6 +62,16 @@ describe("parseCliArgs", () => {
     expect(parsed.json).toBe(true)
   })
 
+  it("parses the cleanup command", () => {
+    const parsed = parseCliArgs(["cleanup", "--workspace", "./workspace", "--orphans", "--dry-run", "--yes"])
+
+    expect(parsed.command).toBe("cleanup")
+    expect(parsed.workspace).toBe("./workspace")
+    expect(parsed.orphans).toBe(true)
+    expect(parsed.dryRun).toBe(true)
+    expect(parsed.yes).toBe(true)
+  })
+
   it("rejects invalid provider values", () => {
     expect(() => parseCliArgs(["--provider", "openai"])).toThrow(
       "Invalid --provider value 'openai'. Expected 'chatgpt', 'claude', or 'grok'.",
@@ -125,5 +135,7 @@ describe("parseCliArgs", () => {
     expect(output).toContain("Usage:")
     expect(output).toContain("--provider <chatgpt|claude|grok>")
     expect(output).toContain("reclaw status [--state-path <path>] [--json]")
+    expect(output).toContain("reclaw cleanup [--workspace <path>] [--orphans] [--dry-run] [--yes]")
+    expect(output).not.toContain("--legacy-sessions")
   })
 })

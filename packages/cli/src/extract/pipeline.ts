@@ -33,6 +33,7 @@ export interface RunExtractionPipelineOptions {
   statePath: string
   backupMode?: BackupMode
   maxParallelJobs?: number
+  includeSessionFooters?: boolean
   onProgress?: (message: string) => void
 }
 
@@ -162,6 +163,7 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
     memoryWorkspacePath,
     model: options.model,
     backupMode: options.backupMode ?? "overwrite",
+    includeSessionFooters: options.includeSessionFooters === true,
   })
 
   return {
@@ -420,7 +422,8 @@ function parseState(value: unknown): ReclawState | null {
     mode: record.mode,
     model: record.model,
     targetPath: record.targetPath,
-    memoryWorkspacePath: typeof record.memoryWorkspacePath === "string" ? record.memoryWorkspacePath : record.targetPath,
+    memoryWorkspacePath:
+      typeof record.memoryWorkspacePath === "string" ? record.memoryWorkspacePath : record.targetPath,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     completed,

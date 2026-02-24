@@ -20,6 +20,7 @@ interface WriteArtifactsOptions {
   memoryWorkspacePath: string
   model: string
   backupMode: BackupMode
+  includeSessionFooters: boolean
 }
 
 export async function writeExtractionArtifacts(
@@ -31,8 +32,12 @@ export async function writeExtractionArtifacts(
 
   const outputFiles =
     options.mode === "openclaw"
-      ? await writeOpenClawMemoryFiles(batchResults, options.targetPath)
-      : (await writeZettelclawArtifacts(batchResults, options.targetPath)).outputFiles
+      ? await writeOpenClawMemoryFiles(batchResults, options.targetPath, options.includeSessionFooters)
+      : (
+          await writeZettelclawArtifacts(batchResults, options.targetPath, {
+            includeSessionFooters: options.includeSessionFooters,
+          })
+        ).outputFiles
 
   const memoryFilePath = join(options.memoryWorkspacePath, "MEMORY.md")
   const userFilePath = join(options.memoryWorkspacePath, "USER.md")
@@ -93,7 +98,11 @@ function aggregateInsights(batchResults: BatchExtractionResult[]): AggregatedIns
   }
 }
 
-async function writeOpenClawMemoryFiles(batchResults: BatchExtractionResult[], targetPath: string): Promise<string[]> {
+async function writeOpenClawMemoryFiles(
+  batchResults: BatchExtractionResult[],
+  targetPath: string,
+  includeSessionFooters: boolean,
+): Promise<string[]> {
   const memoryDir = join(targetPath, "memory")
   await mkdir(memoryDir, { recursive: true })
 
@@ -110,7 +119,7 @@ async function writeOpenClawMemoryFiles(batchResults: BatchExtractionResult[], t
   const outputFiles: string[] = []
   for (const [date, group] of groups.entries()) {
     const filePath = join(memoryDir, `${date}.md`)
-    const content = buildOpenClawDailyMemoryContent(date, group)
+    const content = buildOpenClawDailyMemoryContent(date, group, includeSessionFooters)
     await writeFile(filePath, content, "utf8")
     outputFiles.push(filePath)
   }
@@ -118,9 +127,12 @@ async function writeOpenClawMemoryFiles(batchResults: BatchExtractionResult[], t
   return outputFiles.sort((left, right) => left.localeCompare(right))
 }
 
-function buildOpenClawDailyMemoryContent(date: string, batchResults: BatchExtractionResult[]): string {
+function buildOpenClawDailyMemoryContent(
+  date: string,
+  batchResults: BatchExtractionResult[],
+  includeSessionFooters: boolean,
+): string {
   const providerSummary = summarizeProviders(batchResults)
-  const sessionRefs = collectSessionRefs(batchResults)
   const decisions = uniqueStrings(
     batchResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).decisions),
   )
@@ -141,15 +153,18 @@ function buildOpenClawDailyMemoryContent(date: string, batchResults: BatchExtrac
   appendSection(lines, "## Interests", interests)
   appendSection(lines, "## Open", open)
 
-  lines.push("---", "", "## Sessions")
-  if (sessionRefs.length === 0) {
-    lines.push("- n/a")
-  } else {
-    for (const ref of sessionRefs) {
-      lines.push(`- ${ref}`)
+  if (includeSessionFooters) {
+    const sessionRefs = collectSessionRefs(batchResults)
+    lines.push("---", "", "## Sessions")
+    if (sessionRefs.length === 0) {
+      lines.push("- n/a")
+    } else {
+      for (const ref of sessionRefs) {
+        lines.push(`- ${ref}`)
+      }
     }
+    lines.push("")
   }
-  lines.push("")
 
   return `${lines.join("\n").trimEnd()}\n`
 }

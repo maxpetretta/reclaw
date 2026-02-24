@@ -18,20 +18,30 @@ export interface ZettelclawArtifactsResult {
   outputFiles: string[]
 }
 
+export interface WriteZettelclawOptions {
+  includeSessionFooters?: boolean
+}
+
 export async function writeZettelclawArtifacts(
   batchResults: BatchExtractionResult[],
   vaultPath: string,
+  options?: WriteZettelclawOptions,
 ): Promise<ZettelclawArtifactsResult> {
   const journalPath = join(vaultPath, ZETTELCLAW_JOURNAL_FOLDER)
   await mkdir(journalPath, { recursive: true })
 
-  const journalFiles = await writeZettelclawJournalImports(batchResults, journalPath)
+  const journalFiles = await writeZettelclawJournalImports(
+    batchResults,
+    journalPath,
+    options?.includeSessionFooters === true,
+  )
   return { outputFiles: journalFiles.sort((left, right) => left.localeCompare(right)) }
 }
 
 async function writeZettelclawJournalImports(
   batchResults: BatchExtractionResult[],
   journalPath: string,
+  includeSessionFooters: boolean,
 ): Promise<string[]> {
   const byDate = new Map<string, BatchExtractionResult[]>()
   for (const result of batchResults) {
@@ -53,8 +63,8 @@ async function writeZettelclawJournalImports(
     }
 
     const filePath = join(journalPath, `${date}.md`)
-    let content = await readOrCreateJournalFile(filePath, date, todayDate)
-    const ensured = ensureDailyJournalSections(content)
+    let content = await readOrCreateJournalFile(filePath, date, todayDate, includeSessionFooters)
+    const ensured = ensureDailyJournalSections(content, includeSessionFooters)
     content = ensured.content
     let changed = ensured.changed
 
@@ -62,25 +72,30 @@ async function writeZettelclawJournalImports(
     content = normalizedSections.content
     changed = changed || normalizedSections.changed
 
-    const existingSessionIds = collectSessionIds(content)
-    const sessionEntries = collectSessionEntries(dateResults)
     const sessionIdsToAppend = new Set<string>()
     const footerEntriesToAppend: string[] = []
-    for (const sessionEntry of sessionEntries) {
-      const key = sessionEntry.id.toLowerCase()
-      if (existingSessionIds.has(key)) {
-        continue
-      }
+    if (includeSessionFooters) {
+      const existingSessionIds = collectSessionIds(content)
+      const sessionEntries = collectSessionEntries(dateResults)
+      for (const sessionEntry of sessionEntries) {
+        const key = sessionEntry.id.toLowerCase()
+        if (existingSessionIds.has(key)) {
+          continue
+        }
 
-      existingSessionIds.add(key)
-      sessionIdsToAppend.add(key)
-      footerEntriesToAppend.push(`${sessionEntry.id} — ${formatSessionClock(sessionEntry.timestamp)}`)
+        existingSessionIds.add(key)
+        sessionIdsToAppend.add(key)
+        footerEntriesToAppend.push(`${sessionEntry.id} — ${formatSessionClock(sessionEntry.timestamp)}`)
+      }
     }
 
-    if (sessionIdsToAppend.size > 0) {
-      const pendingResults = dateResults.filter((result) =>
-        collectResultSessionEntries(result).some((entry) => sessionIdsToAppend.has(entry.id.toLowerCase())),
-      )
+    const shouldAppendInsights = includeSessionFooters ? sessionIdsToAppend.size > 0 : true
+    if (shouldAppendInsights) {
+      const pendingResults = includeSessionFooters
+        ? dateResults.filter((result) =>
+            collectResultSessionEntries(result).some((entry) => sessionIdsToAppend.has(entry.id.toLowerCase())),
+          )
+        : dateResults
 
       const decisions = uniqueStrings(
         pendingResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).decisions),
@@ -88,7 +103,13 @@ async function writeZettelclawJournalImports(
       const facts = uniqueStrings(
         pendingResults.flatMap((entry) => {
           const signals = extractSummarySignals(entry.extraction.summary)
-          return [...signals.facts, ...signals.projects, ...signals.people, ...signals.preferences, ...signals.interests]
+          return [
+            ...signals.facts,
+            ...signals.projects,
+            ...signals.people,
+            ...signals.preferences,
+            ...signals.interests,
+          ]
         }),
       )
       const open = uniqueStrings(
@@ -98,21 +119,28 @@ async function writeZettelclawJournalImports(
       const cleanedFacts = cleanJournalBullets(facts)
       const cleanedOpen = cleanJournalBullets(open)
 
-      const decisionsUpdate = appendUniqueSectionBullets(content, "## Decisions", cleanedDecisions)
+      const decisionsUpdate = appendUniqueSectionBullets(
+        content,
+        "## Decisions",
+        cleanedDecisions,
+        includeSessionFooters,
+      )
       content = decisionsUpdate.content
       changed = changed || decisionsUpdate.changed
 
-      const factsUpdate = appendUniqueSectionBullets(content, "## Facts", cleanedFacts)
+      const factsUpdate = appendUniqueSectionBullets(content, "## Facts", cleanedFacts, includeSessionFooters)
       content = factsUpdate.content
       changed = changed || factsUpdate.changed
 
-      const openUpdate = appendUniqueSectionBullets(content, "## Open", cleanedOpen)
+      const openUpdate = appendUniqueSectionBullets(content, "## Open", cleanedOpen, includeSessionFooters)
       content = openUpdate.content
       changed = changed || openUpdate.changed
 
-      const sessionsUpdate = appendUniqueSectionBullets(content, "## Sessions", footerEntriesToAppend)
-      content = sessionsUpdate.content
-      changed = changed || sessionsUpdate.changed
+      if (includeSessionFooters) {
+        const sessionsUpdate = appendUniqueSectionBullets(content, "## Sessions", footerEntriesToAppend, true)
+        content = sessionsUpdate.content
+        changed = changed || sessionsUpdate.changed
+      }
     }
 
     if (!changed) {
@@ -127,73 +155,90 @@ async function writeZettelclawJournalImports(
   return writtenFiles.sort((left, right) => left.localeCompare(right))
 }
 
-async function readOrCreateJournalFile(filePath: string, date: string, updatedDate: string): Promise<string> {
+async function readOrCreateJournalFile(
+  filePath: string,
+  date: string,
+  updatedDate: string,
+  includeSessionFooters: boolean,
+): Promise<string> {
   try {
     return await readFile(filePath, "utf8")
   } catch {
-    const template = buildJournalTemplate(date, updatedDate)
+    const template = buildJournalTemplate(date, updatedDate, includeSessionFooters)
     await writeFile(filePath, template, "utf8")
     return template
   }
 }
 
-function buildJournalTemplate(date: string, updatedDate: string): string {
-  return [
-    "---",
-    "type: journal",
-    "tags: [journals]",
-    `created: ${date}`,
-    `updated: ${updatedDate}`,
-    "---",
-    "---",
-    "## Sessions",
-    "",
-  ].join("\n")
+function buildJournalTemplate(date: string, updatedDate: string, includeSessionFooters: boolean): string {
+  const lines = ["---", "type: journal", "tags: [journals]", `created: ${date}`, `updated: ${updatedDate}`, "---"]
+
+  if (includeSessionFooters) {
+    lines.push("---", "## Sessions", "")
+  }
+
+  return lines.join("\n")
 }
 
-function ensureDailyJournalSections(content: string): ContentUpdateResult {
+function ensureDailyJournalSections(content: string, includeSessionFooters: boolean): ContentUpdateResult {
   const lines = content.replaceAll("\r\n", "\n").split("\n")
   let changed = stripBlankLinesAfterFrontmatter(lines)
+  if (includeSessionFooters) {
+    const sessionsFooter = ensureSessionsFooter(lines)
+    changed = changed || sessionsFooter.changed
 
-  const sessionsFooter = ensureSessionsFooter(lines)
-  changed = changed || sessionsFooter.changed
-
-  let sessionsIndex = findLineIndex(lines, "## Sessions")
-  if (sessionsIndex === -1) {
-    lines.push("---", "## Sessions", "")
-    sessionsIndex = findLineIndex(lines, "## Sessions")
-    changed = true
-  }
-
-  let dividerIndex = findDividerBefore(lines, sessionsIndex)
-  if (dividerIndex === -1) {
-    lines.splice(sessionsIndex, 0, "---")
-    dividerIndex = sessionsIndex
-    sessionsIndex += 1
-    changed = true
-  }
-
-  for (const heading of ["## Done", "## Decisions", "## Facts", "## Open"]) {
-    const bounds = findSectionBounds(lines, heading)
-    if (!bounds || bounds.start >= dividerIndex) {
-      continue
-    }
-
-    if (sectionHasBullets(lines, bounds)) {
-      continue
-    }
-
-    removeSection(lines, heading)
-    changed = true
-    sessionsIndex = findLineIndex(lines, "## Sessions")
+    let sessionsIndex = findLineIndex(lines, "## Sessions")
     if (sessionsIndex === -1) {
-      break
+      lines.push("---", "## Sessions", "")
+      sessionsIndex = findLineIndex(lines, "## Sessions")
+      changed = true
     }
-    dividerIndex = findDividerBefore(lines, sessionsIndex)
+
+    let dividerIndex = findDividerBefore(lines, sessionsIndex)
     if (dividerIndex === -1) {
       lines.splice(sessionsIndex, 0, "---")
       dividerIndex = sessionsIndex
       sessionsIndex += 1
+      changed = true
+    }
+
+    for (const heading of ["## Done", "## Decisions", "## Facts", "## Open"]) {
+      const bounds = findSectionBounds(lines, heading)
+      if (!bounds || bounds.start >= dividerIndex) {
+        continue
+      }
+
+      if (sectionHasBullets(lines, bounds)) {
+        continue
+      }
+
+      removeSection(lines, heading)
+      changed = true
+      sessionsIndex = findLineIndex(lines, "## Sessions")
+      if (sessionsIndex === -1) {
+        break
+      }
+      dividerIndex = findDividerBefore(lines, sessionsIndex)
+      if (dividerIndex === -1) {
+        lines.splice(sessionsIndex, 0, "---")
+        dividerIndex = sessionsIndex
+        sessionsIndex += 1
+        changed = true
+      }
+    }
+  } else {
+    if (removeSection(lines, "## Sessions")) {
+      changed = true
+    }
+    if (removeTrailingDivider(lines)) {
+      changed = true
+    }
+    for (const heading of ["## Done", "## Decisions", "## Facts", "## Open"]) {
+      const bounds = findSectionBounds(lines, heading)
+      if (!bounds || sectionHasBullets(lines, bounds)) {
+        continue
+      }
+      removeSection(lines, heading)
       changed = true
     }
   }
@@ -208,7 +253,12 @@ function ensureDailyJournalSections(content: string): ContentUpdateResult {
       const factsValues = bullets.map((line) => line.trim().slice(2))
       removeSection(lines, "## Interests")
       changed = true
-      const migrated = appendUniqueSectionBullets(lines.join("\n") + "\n", "## Facts", factsValues)
+      const migrated = appendUniqueSectionBullets(
+        `${lines.join("\n")}\n`,
+        "## Facts",
+        factsValues,
+        includeSessionFooters,
+      )
       const migratedLines = migrated.content.replaceAll("\r\n", "\n").split("\n")
       lines.length = 0
       lines.push(...migratedLines)
@@ -320,7 +370,12 @@ function ensureSessionsFooter(lines: string[]): { changed: boolean } {
   return { changed }
 }
 
-function appendUniqueSectionBullets(content: string, heading: string, values: string[]): ContentUpdateResult {
+function appendUniqueSectionBullets(
+  content: string,
+  heading: string,
+  values: string[],
+  includeSessionFooters: boolean,
+): ContentUpdateResult {
   const uniqueValues = uniqueStrings(values)
   if (uniqueValues.length === 0) {
     return { content, changed: false }
@@ -328,7 +383,7 @@ function appendUniqueSectionBullets(content: string, heading: string, values: st
 
   const lines = content.replaceAll("\r\n", "\n").split("\n")
   let changed = false
-  const ensured = ensureSectionForAppend(lines, heading)
+  const ensured = ensureSectionForAppend(lines, heading, includeSessionFooters)
   changed = ensured.changed
 
   const bounds = findSectionBounds(lines, heading)
@@ -490,15 +545,33 @@ function removeSection(lines: string[], heading: string): boolean {
   return true
 }
 
-function ensureSectionForAppend(lines: string[], heading: string): { changed: boolean } {
+function ensureSectionForAppend(
+  lines: string[],
+  heading: string,
+  includeSessionFooters: boolean,
+): { changed: boolean } {
   if (findLineIndex(lines, heading) !== -1) {
     return { changed: false }
   }
 
   let changed = false
   if (heading === "## Sessions") {
+    if (!includeSessionFooters) {
+      return { changed: false }
+    }
     const ensured = ensureSessionsFooter(lines)
     return { changed: ensured.changed }
+  }
+
+  if (!includeSessionFooters) {
+    while (lines.length > 0 && lines[lines.length - 1]?.trim().length === 0) {
+      lines.pop()
+    }
+    if (lines.length > 0) {
+      lines.push("")
+    }
+    lines.push(heading, "")
+    return { changed: true }
   }
 
   let sessionsIndex = findLineIndex(lines, "## Sessions")
@@ -547,6 +620,26 @@ function findDividerBefore(lines: string[], index: number): number {
   }
 
   return -1
+}
+
+function removeTrailingDivider(lines: string[]): boolean {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const trimmed = lines[index]?.trim() ?? ""
+    if (trimmed.length === 0) {
+      continue
+    }
+    if (trimmed !== "---") {
+      return false
+    }
+
+    lines.splice(index, 1)
+    while (lines.length > 0 && lines[lines.length - 1]?.trim().length === 0) {
+      lines.pop()
+    }
+    return true
+  }
+
+  return false
 }
 
 function findLineIndex(lines: string[], target: string): number {
