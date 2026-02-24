@@ -27,7 +27,7 @@ describe("writeZettelclawArtifacts", () => {
     expect(content).toContain("- chatgpt:cg-1 — 14:25")
   })
 
-  it("migrates legacy Done/Decisions/Facts sections into Log", async () => {
+  it("appends to existing Log section and dedupes sessions", async () => {
     const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
     const journalDir = join(vault, "03 Journal")
     const journalPath = join(journalDir, "2026-02-22.md")
@@ -40,17 +40,8 @@ describe("writeZettelclawArtifacts", () => {
         "created: 2026-02-22",
         "updated: 2026-02-20",
         "---",
-        "",
-        "",
-        "## Done",
-        "- existing done item",
-        "",
-        "## Decisions",
-        "- decision: Ship v1",
-        "",
-        "## Facts",
-        "- fact: Uses bun test",
-        "- Fact: Uses bun test",
+        "## Log",
+        "- existing log item",
         "",
         "---",
         "## Sessions",
@@ -68,12 +59,7 @@ describe("writeZettelclawArtifacts", () => {
 
     const content = await readFile(journalPath, "utf8")
     expect(content).toContain("## Log")
-    expect(content).toContain("- existing done item")
-    expect(content).toContain("- Ship v1")
-    expect(content.match(/Uses bun test/g)?.length).toBe(1)
-    expect(content).not.toContain("## Done")
-    expect(content).not.toContain("## Decisions")
-    expect(content).not.toContain("## Facts")
+    expect(content).toContain("- existing log item")
     expect(content).toContain("- chatgpt:cg-1 — 14:25")
     expect(content).toContain("- claude:cl-1 —")
     expect(content).toContain("## Sessions")

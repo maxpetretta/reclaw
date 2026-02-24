@@ -44,7 +44,7 @@ npx reclaw --mode openclaw --provider claude --input ./claude-export/
 
 ### Zettelclaw
 
-Writes Zettelclaw-compatible journal entries to `03 Journal/YYYY-MM-DD.md` matching the vault template (`Log`, `Open`, `Sessions`). Migrates legacy sections automatically. Updates `MEMORY.md` and `USER.md` in the OpenClaw workspace.
+Writes Zettelclaw-compatible journal entries to `03 Journal/YYYY-MM-DD.md` matching the vault template (`Log`, `Open`, `Sessions`). Updates `MEMORY.md` and `USER.md` in the OpenClaw workspace.
 
 ```bash
 npx reclaw --mode zettelclaw --provider chatgpt --input ./conversations.json --vault ~/zettelclaw

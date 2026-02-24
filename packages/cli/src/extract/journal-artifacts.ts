@@ -231,37 +231,6 @@ function ensureDailyJournalSections(content: string, includeSessionFooters: bool
     }
   }
 
-  // Migrate legacy sections (Done, Decisions, Facts, Interests) → ## Log
-  for (const legacyHeading of ["## Done", "## Decisions", "## Facts", "## Interests"]) {
-    const legacyBounds = findSectionBounds(lines, legacyHeading)
-    if (!legacyBounds) {
-      continue
-    }
-    const bullets = lines
-      .slice(legacyBounds.start + 1, legacyBounds.end)
-      .filter((line) => line.trim().startsWith("- "))
-    if (bullets.length > 0) {
-      const values = bullets.map((line) => line.trim().slice(2))
-      removeSection(lines, legacyHeading)
-      changed = true
-      const migrated = appendUniqueSectionBullets(
-        `${lines.join("\n")}\n`,
-        "## Log",
-        values,
-        includeSessionFooters,
-      )
-      const migratedLines = migrated.content.replaceAll("\r\n", "\n").split("\n")
-      lines.length = 0
-      lines.push(...migratedLines)
-      if (migratedLines.length > 0 && migratedLines[migratedLines.length - 1] === "") {
-        lines.pop()
-      }
-    } else {
-      removeSection(lines, legacyHeading)
-      changed = true
-    }
-  }
-
   return {
     content: `${lines.join("\n").trimEnd()}\n`,
     changed,
@@ -298,7 +267,7 @@ function normalizeJournalSections(content: string): ContentUpdateResult {
   const lines = content.replaceAll("\r\n", "\n").split("\n")
   let changed = false
 
-  for (const heading of ["## Log", "## Open", "## Done", "## Decisions", "## Facts", "## Interests"]) {
+  for (const heading of ["## Log", "## Open"]) {
     const bounds = findSectionBounds(lines, heading)
     if (!bounds) {
       continue
