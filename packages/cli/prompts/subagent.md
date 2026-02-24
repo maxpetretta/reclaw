@@ -50,7 +50,7 @@ Summary format guidance:
 - Prefix lines with tags when possible: `Decision:`, `Fact:`, `Preference:`, `Person:`, `Project:`, `Interest:`, `Todo:`.
 - Include only top-priority user-specific information.
 - Do not include duplicate lines.
-- Priority order when cutting for space: Decisions > Projects > Facts > Preferences > Interests > Open.
+- Priority order when cutting for space: Decisions > Projects > Facts > Preferences > Interests > Todo.
 
 Date batch metadata:
 - providers: {{providers}}

@@ -7,7 +7,7 @@ import type { BatchExtractionResult } from "../contracts"
 import { writeZettelclawArtifacts } from "../journal-artifacts"
 
 describe("writeZettelclawArtifacts", () => {
-  it("creates a new journal file with Log/Open/Sessions sections", async () => {
+  it("creates a new journal file with Log/Todo/Sessions sections", async () => {
     const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
 
     const result = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault, {
@@ -139,6 +139,77 @@ describe("writeZettelclawArtifacts", () => {
       includeSessionFooters: true,
     })
     expect(secondRun.outputFiles).toEqual([])
+  })
+
+  it("migrates legacy Open section content into Todo", async () => {
+    const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
+    const journalDir = join(vault, "03 Journal")
+    const journalPath = join(journalDir, "2026-02-22.md")
+    await mkdir(journalDir, { recursive: true })
+    await writeFile(
+      journalPath,
+      [
+        "---",
+        "type: journal",
+        "created: 2026-02-22",
+        "updated: 2026-02-22",
+        "---",
+        "## Log",
+        "- Ship v1",
+        "",
+        "## Open",
+        "- Follow up docs",
+        "",
+        "## Todo",
+        "- Existing todo",
+        "",
+      ].join("\n"),
+      "utf8",
+    )
+
+    const result = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault, {
+      includeSessionFooters: false,
+    })
+    expect(result.outputFiles).toEqual([journalPath])
+
+    const content = await readFile(journalPath, "utf8")
+    expect(content).not.toContain("## Open")
+    expect(content).toContain("## Todo")
+    expect(content).toContain("- Follow up docs")
+    expect(content.match(/- Follow up docs/g)?.length).toBe(1)
+    expect(content).toContain("- Existing todo")
+  })
+
+  it("normalizes Todo prefixes and avoids duplicate Todo entries", async () => {
+    const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
+    const journalDir = join(vault, "03 Journal")
+    const journalPath = join(journalDir, "2026-02-22.md")
+    await mkdir(journalDir, { recursive: true })
+    await writeFile(
+      journalPath,
+      [
+        "---",
+        "type: journal",
+        "created: 2026-02-22",
+        "updated: 2026-02-22",
+        "---",
+        "## Todo",
+        "- Todo: Follow up docs",
+        "",
+      ].join("\n"),
+      "utf8",
+    )
+
+    const result = await writeZettelclawArtifacts([batch("chatgpt", "cg-1", "14:25")], vault, {
+      includeSessionFooters: false,
+    })
+    expect(result.outputFiles).toEqual([journalPath])
+
+    const content = await readFile(journalPath, "utf8")
+    expect(content).toContain("## Todo")
+    expect(content).toContain("- Follow up docs")
+    expect(content).not.toContain("- Todo: Follow up docs")
+    expect(content.match(/- Follow up docs/g)?.length).toBe(1)
   })
 
   it("omits the sessions footer when includeSessionFooters is disabled", async () => {

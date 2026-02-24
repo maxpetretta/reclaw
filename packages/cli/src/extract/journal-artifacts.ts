@@ -171,6 +171,9 @@ function buildJournalTemplate(date: string, updatedDate: string, includeSessionF
 function ensureDailyJournalSections(content: string, includeSessionFooters: boolean): ContentUpdateResult {
   const lines = content.replaceAll("\r\n", "\n").split("\n")
   let changed = stripBlankLinesAfterFrontmatter(lines)
+
+  const migratedOpen = migrateLegacyOpenSection(lines, includeSessionFooters)
+  changed = changed || migratedOpen.changed
   if (includeSessionFooters) {
     const sessionsFooter = ensureSessionsFooter(lines)
     changed = changed || sessionsFooter.changed
@@ -235,6 +238,37 @@ function ensureDailyJournalSections(content: string, includeSessionFooters: bool
     content: `${lines.join("\n").trimEnd()}\n`,
     changed,
   }
+}
+
+function migrateLegacyOpenSection(
+  lines: string[],
+  includeSessionFooters: boolean,
+): { changed: boolean } {
+  const legacyOpen = findSectionBounds(lines, "## Open")
+  if (!legacyOpen) {
+    return { changed: false }
+  }
+
+  const legacyValues = lines
+    .slice(legacyOpen.start + 1, legacyOpen.end)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.slice(2))
+
+  removeSection(lines, "## Open")
+  if (legacyValues.length === 0) {
+    return { changed: true }
+  }
+
+  const merged = appendUniqueSectionBullets(`${lines.join("\n")}\n`, "## Todo", legacyValues, includeSessionFooters)
+  const mergedLines = merged.content.replaceAll("\r\n", "\n").split("\n")
+  lines.length = 0
+  lines.push(...mergedLines)
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
+    lines.pop()
+  }
+
+  return { changed: true }
 }
 
 function stripBlankLinesAfterFrontmatter(lines: string[]): boolean {
@@ -449,7 +483,7 @@ function formatSessionClock(timestamp?: string): string {
 }
 
 function normalizeBulletValue(value: string): string {
-  return value.trim().toLowerCase()
+  return stripInlineSignalPrefix(value).trim().toLowerCase()
 }
 
 function parseSessionId(value: string): string {
@@ -669,7 +703,9 @@ function cleanJournalBullets(values: string[]): string[] {
 function stripInlineSignalPrefix(value: string): string {
   let output = value.trim()
   while (true) {
-    const next = output.replace(/^(preference|project|fact|decision|interest|person|open)\s*:\s*/i, "").trim()
+    const next = output
+      .replace(/^(preference|project|fact|decision|interest|person|open|todo|next|followup|follow-up)\s*:\s*/i, "")
+      .trim()
     if (next === output) {
       return output
     }
