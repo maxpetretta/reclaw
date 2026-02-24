@@ -7,7 +7,7 @@ export interface SummarySignals {
   preferences: string[]
   people: string[]
   decisions: string[]
-  open: string[]
+  todo: string[]
 }
 
 const TAG_ALIASES: Record<string, keyof SummarySignals> = {
@@ -23,11 +23,11 @@ const TAG_ALIASES: Record<string, keyof SummarySignals> = {
   people: "people",
   decision: "decisions",
   decisions: "decisions",
-  open: "open",
-  next: "open",
-  todo: "open",
-  followup: "open",
-  "follow-up": "open",
+  open: "todo",
+  next: "todo",
+  todo: "todo",
+  followup: "todo",
+  "follow-up": "todo",
 }
 
 export function extractSummarySignals(summary: string): SummarySignals {
@@ -39,7 +39,7 @@ export function extractSummarySignals(summary: string): SummarySignals {
     preferences: [],
     people: [],
     decisions: [],
-    open: [],
+    todo: [],
   }
 
   for (const line of lines) {
@@ -59,7 +59,7 @@ export function extractSummarySignals(summary: string): SummarySignals {
     preferences: uniqueStrings(signals.preferences),
     people: uniqueStrings(signals.people),
     decisions: uniqueStrings(signals.decisions),
-    open: uniqueStrings(signals.open),
+    todo: uniqueStrings(signals.todo),
   }
 }
 

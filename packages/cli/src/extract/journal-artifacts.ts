@@ -110,19 +110,19 @@ async function writeZettelclawJournalImports(
           ]
         }),
       )
-      const open = uniqueStrings(
-        pendingResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).open),
+      const todo = uniqueStrings(
+        pendingResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).todo),
       )
       const cleanedLog = cleanJournalBullets(logItems)
-      const cleanedOpen = cleanJournalBullets(open)
+      const cleanedTodo = cleanJournalBullets(todo)
 
       const logUpdate = appendUniqueSectionBullets(content, "## Log", cleanedLog, includeSessionFooters)
       content = logUpdate.content
       changed = changed || logUpdate.changed
 
-      const openUpdate = appendUniqueSectionBullets(content, "## Open", cleanedOpen, includeSessionFooters)
-      content = openUpdate.content
-      changed = changed || openUpdate.changed
+      const todoUpdate = appendUniqueSectionBullets(content, "## Todo", cleanedTodo, includeSessionFooters)
+      content = todoUpdate.content
+      changed = changed || todoUpdate.changed
 
       if (includeSessionFooters) {
         const sessionsUpdate = appendUniqueSectionBullets(content, "## Sessions", footerEntriesToAppend, true)
@@ -190,7 +190,7 @@ function ensureDailyJournalSections(content: string, includeSessionFooters: bool
       changed = true
     }
 
-    for (const heading of ["## Log", "## Open"]) {
+    for (const heading of ["## Log", "## Todo"]) {
       const bounds = findSectionBounds(lines, heading)
       if (!bounds || bounds.start >= dividerIndex) {
         continue
@@ -221,7 +221,7 @@ function ensureDailyJournalSections(content: string, includeSessionFooters: bool
     if (removeTrailingDivider(lines)) {
       changed = true
     }
-    for (const heading of ["## Log", "## Open"]) {
+    for (const heading of ["## Log", "## Todo"]) {
       const bounds = findSectionBounds(lines, heading)
       if (!bounds || sectionHasBullets(lines, bounds)) {
         continue
@@ -267,7 +267,7 @@ function normalizeJournalSections(content: string): ContentUpdateResult {
   const lines = content.replaceAll("\r\n", "\n").split("\n")
   let changed = false
 
-  for (const heading of ["## Log", "## Open"]) {
+  for (const heading of ["## Log", "## Todo"]) {
     const bounds = findSectionBounds(lines, heading)
     if (!bounds) {
       continue

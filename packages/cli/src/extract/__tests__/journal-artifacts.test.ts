@@ -19,7 +19,7 @@ describe("writeZettelclawArtifacts", () => {
     const content = await readFile(journalPath, "utf8")
     expect(content).toContain("type: journal")
     expect(content).toContain("## Log")
-    expect(content).toContain("## Open")
+    expect(content).toContain("## Todo")
     expect(content).toContain("## Sessions")
     expect(content).not.toContain("## Decisions")
     expect(content).not.toContain("## Facts")
@@ -119,7 +119,7 @@ describe("writeZettelclawArtifacts", () => {
         "- Uses bun test",
         "- Quality",
         "",
-        "## Open",
+        "## Todo",
         "- Follow up docs",
         "",
         "---",
@@ -152,7 +152,7 @@ describe("writeZettelclawArtifacts", () => {
     expect(result.outputFiles).toEqual([journalPath])
     const content = await readFile(journalPath, "utf8")
     expect(content).toContain("## Log")
-    expect(content).toContain("## Open")
+    expect(content).toContain("## Todo")
     expect(content).not.toContain("## Sessions")
   })
 })

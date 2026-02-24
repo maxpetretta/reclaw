@@ -19,7 +19,7 @@ describe("extractSummarySignals", () => {
     expect(signals.preferences).toEqual(["strict provider"])
     expect(signals.people).toEqual(["Max"])
     expect(signals.decisions).toEqual(["Keep local time"])
-    expect(signals.open).toEqual(["Add docs"])
+    expect(signals.todo).toEqual(["Add docs"])
     expect(signals.facts).toEqual(["misc line without tag"])
   })
 
@@ -37,7 +37,7 @@ describe("extractSummarySignals", () => {
       preferences: [],
       people: [],
       decisions: [],
-      open: [],
+      todo: [],
     })
   })
 })

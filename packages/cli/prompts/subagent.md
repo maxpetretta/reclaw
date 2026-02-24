@@ -47,7 +47,7 @@ Return STRICT JSON only (no markdown fences, no extra prose) with exactly this k
 
 Summary format guidance:
 - 3-8 short lines separated by newline characters.
-- Prefix lines with tags when possible: `Decision:`, `Fact:`, `Preference:`, `Person:`, `Project:`, `Interest:`, `Open:`.
+- Prefix lines with tags when possible: `Decision:`, `Fact:`, `Preference:`, `Person:`, `Project:`, `Interest:`, `Todo:`.
 - Include only top-priority user-specific information.
 - Do not include duplicate lines.
 - Priority order when cutting for space: Decisions > Projects > Facts > Preferences > Interests > Open.

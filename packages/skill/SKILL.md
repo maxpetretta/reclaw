@@ -78,7 +78,7 @@ npx reclaw --plan --provider claude --input ./path/to/claude-export/
   - `## Decisions`
   - `## Facts`
   - `## Interests`
-  - `## Open`
+  - `## Todo`
 - Optional footer (only when legacy session import is enabled via hidden CLI flag):
   - `---`
   - `## Sessions` (bullets as `provider:conversationId — timestamp`)
@@ -89,7 +89,7 @@ npx reclaw --plan --provider claude --input ./path/to/claude-export/
 - Writes daily journals to `03 Journal/YYYY-MM-DD.md`.
 - Journal format matches Zettelclaw journal template:
   - `## Log` (decisions, facts, interests, and other user-specific signals merged)
-  - `## Open`
+  - `## Todo`
   - Optional footer (only when legacy session import is enabled):
     - `---`
     - `## Sessions` (bullets as `provider:conversationId — HH:MM`)

@@ -145,13 +145,13 @@ function buildOpenClawDailyMemoryContent(
   const interests = uniqueStrings(
     batchResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).interests),
   )
-  const open = uniqueStrings(batchResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).open))
+  const todo = uniqueStrings(batchResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).todo))
 
   const lines = [`# Reclaw Memory Import ${date}`, "", `Source providers: ${providerSummary}`, ""]
   appendSection(lines, "## Decisions", decisions)
   appendSection(lines, "## Facts", facts)
   appendSection(lines, "## Interests", interests)
-  appendSection(lines, "## Open", open)
+  appendSection(lines, "## Todo", todo)
 
   if (includeSessionFooters) {
     const sessionRefs = collectSessionRefs(batchResults)
