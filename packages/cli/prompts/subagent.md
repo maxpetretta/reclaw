@@ -34,7 +34,7 @@ Never save:
 
 Zettelclaw note quality (apply when output feeds into vault notes):
 - Each summary line should map to exactly one atomic **claim** — a statement someone can learn from without further context.
-- Prefer statements that could be note titles: "Selected Drizzle ORM because it generates typed queries from schema", not "Uses Drizzle ORM for database."
+- Prefer statements that could be note titles: "Selected SQLite because it eliminates connection pooling complexity", not "Uses SQLite for database."
 - Avoid topic summaries ("Discussed tech stack options") — extract the decision or insight instead.
 - Avoid compound lines that pack multiple unrelated facts together.
 - When a decision was made, state what was chosen AND what was rejected (briefly).
