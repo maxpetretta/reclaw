@@ -7,6 +7,7 @@
     "clone": "./scripts/clone-openclaw-workspace.sh",
     "cli": "bun run --cwd packages/cli start",
     "cli:status": "bun run cli -- status",
+    "cli:cleanup": "bun run cli -- cleanup",
     "cli:build": "bun run --cwd packages/cli build",
     "cli:test": "bun run --cwd packages/cli test",
     "smoke": "./scripts/run-local-smoke-tests.sh",

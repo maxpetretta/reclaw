@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import type { NormalizedConversation, NormalizedMessage } from "../types"
 import { parseJson as parseJsonWithError } from "./json"
@@ -59,6 +59,29 @@ export interface LegacySessionImportResult {
   skipped: number
   failed: number
   errors: LegacySessionImportError[]
+}
+
+export interface CleanupLegacySessionsOptions {
+  workspacePath: string
+  dryRun?: boolean
+  includeOrphans?: boolean
+}
+
+export interface CleanupLegacySessionsResult {
+  agentId: string
+  sessionStorePath: string
+  backupPath?: string
+  dryRun: boolean
+  matched: number
+  removedFromStore: number
+  removedSessionFiles: number
+  missingSessionFiles: number
+  failedSessionFiles: Array<{ path: string; reason: string }>
+  orphanCandidates: number
+  orphanSample: string[]
+  removedOrphanFiles: number
+  missingOrphanFiles: number
+  failedOrphanFiles: Array<{ path: string; reason: string }>
 }
 
 interface SessionStoreTarget {
@@ -139,6 +162,130 @@ export async function importLegacySessionsToOpenClawHistory(
   }
 }
 
+export async function cleanupLegacySessionsFromOpenClawHistory(
+  options: CleanupLegacySessionsOptions,
+): Promise<CleanupLegacySessionsResult> {
+  const target = resolveSessionStoreTarget(options.workspacePath)
+  const sessionsDir = dirname(target.sessionsPath)
+  const store = await readSessionStore(target.sessionsPath)
+  const matchedEntries = Object.entries(store).filter(([, entry]) => isReclawLegacyEntry(entry))
+  const orphanCandidates = options.includeOrphans
+    ? await findOrphanSessionArtifactPaths(sessionsDir, collectReferencedSessionArtifactPaths(store, sessionsDir))
+    : []
+
+  if (options.dryRun) {
+    return {
+      agentId: target.agentId,
+      sessionStorePath: target.sessionsPath,
+      dryRun: true,
+      matched: matchedEntries.length,
+      removedFromStore: 0,
+      removedSessionFiles: 0,
+      missingSessionFiles: 0,
+      failedSessionFiles: [],
+      orphanCandidates: orphanCandidates.length,
+      orphanSample: orphanCandidates.slice(0, 12),
+      removedOrphanFiles: 0,
+      missingOrphanFiles: 0,
+      failedOrphanFiles: [],
+    }
+  }
+
+  if (matchedEntries.length === 0 && orphanCandidates.length === 0) {
+    return {
+      agentId: target.agentId,
+      sessionStorePath: target.sessionsPath,
+      dryRun: false,
+      matched: 0,
+      removedFromStore: 0,
+      removedSessionFiles: 0,
+      missingSessionFiles: 0,
+      failedSessionFiles: [],
+      orphanCandidates: 0,
+      orphanSample: [],
+      removedOrphanFiles: 0,
+      missingOrphanFiles: 0,
+      failedOrphanFiles: [],
+    }
+  }
+
+  const backupPath = buildSessionsBackupPath(target.sessionsPath)
+  await copyFile(target.sessionsPath, backupPath).catch((error) => {
+    const maybeNodeError = error as NodeJS.ErrnoException
+    if (maybeNodeError.code !== "ENOENT") {
+      throw error
+    }
+  })
+
+  let removedSessionFiles = 0
+  let missingSessionFiles = 0
+  const failedSessionFiles: Array<{ path: string; reason: string }> = []
+  let removedOrphanFiles = 0
+  let missingOrphanFiles = 0
+  const failedOrphanFiles: Array<{ path: string; reason: string }> = []
+
+  for (const [key, entry] of matchedEntries) {
+    delete store[key]
+    const sessionFile = asString(entry.sessionFile)
+    if (!sessionFile) {
+      continue
+    }
+
+    try {
+      await unlink(sessionFile)
+      removedSessionFiles += 1
+    } catch (error) {
+      const maybeNodeError = error as NodeJS.ErrnoException
+      if (maybeNodeError.code === "ENOENT") {
+        missingSessionFiles += 1
+        continue
+      }
+
+      failedSessionFiles.push({
+        path: sessionFile,
+        reason: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  for (const orphanPath of orphanCandidates) {
+    try {
+      await unlink(orphanPath)
+      removedOrphanFiles += 1
+    } catch (error) {
+      const maybeNodeError = error as NodeJS.ErrnoException
+      if (maybeNodeError.code === "ENOENT") {
+        missingOrphanFiles += 1
+        continue
+      }
+
+      failedOrphanFiles.push({
+        path: orphanPath,
+        reason: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  await writeSessionStore(target.sessionsPath, store)
+
+  return {
+    agentId: target.agentId,
+    sessionStorePath: target.sessionsPath,
+    backupPath,
+    dryRun: false,
+    matched: matchedEntries.length,
+    removedFromStore: matchedEntries.length,
+    removedSessionFiles,
+    missingSessionFiles,
+    failedSessionFiles,
+    orphanCandidates: orphanCandidates.length,
+    orphanSample: orphanCandidates.slice(0, 12),
+    removedOrphanFiles,
+    missingOrphanFiles,
+    failedOrphanFiles,
+  }
+}
+
 function resolveSessionStoreTarget(workspacePath: string): SessionStoreTarget {
   const status = parseJson<OpenClawStatusResponse>(runOpenClaw(["status", "--json"]).stdout)
   const agentsSection = status.agents
@@ -188,6 +335,75 @@ function parseAgentStatuses(value: unknown): OpenClawAgentStatus[] {
   }
 
   return output
+}
+
+function isReclawLegacyEntry(entry: SessionStoreEntry): boolean {
+  if (entry.origin && typeof entry.origin === "object" && !Array.isArray(entry.origin)) {
+    const originLabel = asString((entry.origin as Record<string, unknown>).label)
+    if (originLabel === "reclaw-legacy-import") {
+      return true
+    }
+  }
+
+  if (entry.reclawLegacy && typeof entry.reclawLegacy === "object" && !Array.isArray(entry.reclawLegacy)) {
+    const legacy = (entry.reclawLegacy as Record<string, unknown>).legacy
+    if (legacy === true) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function buildSessionsBackupPath(sessionsPath: string): string {
+  const now = new Date()
+  const year = now.getFullYear().toString().padStart(4, "0")
+  const month = (now.getMonth() + 1).toString().padStart(2, "0")
+  const day = now.getDate().toString().padStart(2, "0")
+  const hour = now.getHours().toString().padStart(2, "0")
+  const minute = now.getMinutes().toString().padStart(2, "0")
+  const second = now.getSeconds().toString().padStart(2, "0")
+  const millis = now.getMilliseconds().toString().padStart(3, "0")
+  return `${sessionsPath}.bak.${year}${month}${day}-${hour}${minute}${second}-${millis}`
+}
+
+function collectReferencedSessionArtifactPaths(store: SessionStore, sessionsDir: string): Set<string> {
+  const referenced = new Set<string>()
+  for (const entry of Object.values(store)) {
+    const sessionFile = asString(entry.sessionFile)
+    if (sessionFile) {
+      referenced.add(resolve(sessionFile))
+    }
+
+    const sessionId = asString(entry.sessionId)
+    if (sessionId) {
+      referenced.add(resolve(join(sessionsDir, `${sessionId}.jsonl`)))
+    }
+  }
+
+  return referenced
+}
+
+async function findOrphanSessionArtifactPaths(sessionsDir: string, referenced: Set<string>): Promise<string[]> {
+  const entries = await readdir(sessionsDir, { withFileTypes: true }).catch(() => [])
+  const candidates: string[] = []
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue
+    }
+
+    const fileName = entry.name
+    if (!/\.jsonl(?:\..+)?$/i.test(fileName)) {
+      continue
+    }
+
+    const absolutePath = resolve(join(sessionsDir, fileName))
+    if (!referenced.has(absolutePath)) {
+      candidates.push(absolutePath)
+    }
+  }
+
+  return candidates.sort((left, right) => left.localeCompare(right))
 }
 
 async function readSessionStore(sessionsPath: string): Promise<SessionStore> {

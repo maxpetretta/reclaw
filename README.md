@@ -24,6 +24,14 @@ Check run status or resume an interrupted run:
 npx reclaw status
 ```
 
+Preview or remove previously imported Reclaw legacy sessions from OpenClaw history:
+
+```bash
+npx reclaw cleanup --workspace ~/.openclaw/workspace --dry-run
+npx reclaw cleanup --workspace ~/.openclaw/workspace --yes
+npx reclaw cleanup --workspace ~/.openclaw/workspace --orphans --dry-run
+```
+
 ## Output Modes
 
 ### OpenClaw (default)

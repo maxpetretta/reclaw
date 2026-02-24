@@ -404,7 +404,8 @@ function parseStateSnapshot(value: unknown): {
     mode,
     model: record.model,
     targetPath: record.targetPath,
-    memoryWorkspacePath: typeof record.memoryWorkspacePath === "string" ? record.memoryWorkspacePath : record.targetPath,
+    memoryWorkspacePath:
+      typeof record.memoryWorkspacePath === "string" ? record.memoryWorkspacePath : record.targetPath,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     completed,

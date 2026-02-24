@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test"
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { enqueueSpawnResult, resetSpawnMock } from "../../test/spawn-mock"
@@ -218,6 +218,247 @@ describe("importLegacySessionsToOpenClawHistory", () => {
     const transcript = await readFile(sessionFile ?? "", "utf8")
     expect(transcript).toContain('"role":"system"')
     expect(transcript).toContain('"customType":"reclaw:legacy-source"')
+  })
+
+  it("cleanup dry-run reports matches without mutating store", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "reclaw-openclaw-cleanup-test-"))
+    const sessionsDir = join(workspace, ".openclaw", "agent-a")
+    const sessionsPath = join(sessionsDir, "sessions.json")
+    const legacyFile = join(sessionsDir, "legacy.jsonl")
+    const normalFile = join(sessionsDir, "normal.jsonl")
+    await mkdir(sessionsDir, { recursive: true })
+    await writeFile(legacyFile, "legacy", "utf8")
+    await writeFile(normalFile, "normal", "utf8")
+    await writeFile(
+      sessionsPath,
+      JSON.stringify(
+        {
+          "agent:agent-a:legacy:reclaw:chatgpt:abc": {
+            sessionId: "legacy-session",
+            sessionFile: legacyFile,
+            updatedAt: Date.now(),
+            chatType: "direct",
+            origin: { label: "reclaw-legacy-import" },
+            reclawLegacy: { legacy: true },
+          },
+          "agent:agent-a:normal:1": {
+            sessionId: "normal-session",
+            sessionFile: normalFile,
+            updatedAt: Date.now(),
+            chatType: "direct",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    )
+
+    enqueueStatus(workspace, sessionsPath, "agent-a")
+    const result = await sessions.cleanupLegacySessionsFromOpenClawHistory({
+      workspacePath: workspace,
+      dryRun: true,
+    })
+
+    expect(result.dryRun).toBe(true)
+    expect(result.matched).toBe(1)
+    const store = JSON.parse(await readFile(sessionsPath, "utf8")) as Record<string, unknown>
+    expect(Object.keys(store)).toHaveLength(2)
+    await expect(readFile(legacyFile, "utf8")).resolves.toBe("legacy")
+  })
+
+  it("cleanup removes legacy entries, session files, and writes a backup", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "reclaw-openclaw-cleanup-test-"))
+    const sessionsDir = join(workspace, ".openclaw", "agent-a")
+    const sessionsPath = join(sessionsDir, "sessions.json")
+    const legacyFile = join(sessionsDir, "legacy.jsonl")
+    const normalFile = join(sessionsDir, "normal.jsonl")
+    await mkdir(sessionsDir, { recursive: true })
+    await writeFile(legacyFile, "legacy", "utf8")
+    await writeFile(normalFile, "normal", "utf8")
+    await writeFile(
+      sessionsPath,
+      JSON.stringify(
+        {
+          "agent:agent-a:legacy:reclaw:chatgpt:abc": {
+            sessionId: "legacy-session",
+            sessionFile: legacyFile,
+            updatedAt: Date.now(),
+            chatType: "direct",
+            origin: { label: "reclaw-legacy-import" },
+            reclawLegacy: { legacy: true },
+          },
+          "agent:agent-a:normal:1": {
+            sessionId: "normal-session",
+            sessionFile: normalFile,
+            updatedAt: Date.now(),
+            chatType: "direct",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    )
+
+    enqueueStatus(workspace, sessionsPath, "agent-a")
+    const result = await sessions.cleanupLegacySessionsFromOpenClawHistory({
+      workspacePath: workspace,
+    })
+
+    expect(result.dryRun).toBe(false)
+    expect(result.matched).toBe(1)
+    expect(result.removedFromStore).toBe(1)
+    expect(result.removedSessionFiles).toBe(1)
+    expect(result.missingSessionFiles).toBe(0)
+    expect(result.backupPath).toBeDefined()
+    await expect(readFile(result.backupPath ?? "", "utf8")).resolves.toContain("legacy-session")
+    await expect(readFile(legacyFile, "utf8")).rejects.toThrow()
+    await expect(readFile(normalFile, "utf8")).resolves.toBe("normal")
+    const store = JSON.parse(await readFile(sessionsPath, "utf8")) as Record<string, unknown>
+    expect(Object.keys(store)).toEqual(["agent:agent-a:normal:1"])
+  })
+
+  it("cleanup counts missing legacy session files", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "reclaw-openclaw-cleanup-test-"))
+    const sessionsDir = join(workspace, ".openclaw", "agent-a")
+    const sessionsPath = join(sessionsDir, "sessions.json")
+    const legacyFile = join(sessionsDir, "legacy-missing.jsonl")
+    await mkdir(sessionsDir, { recursive: true })
+    await writeFile(
+      sessionsPath,
+      JSON.stringify(
+        {
+          "agent:agent-a:legacy:reclaw:chatgpt:abc": {
+            sessionId: "legacy-session",
+            sessionFile: legacyFile,
+            updatedAt: Date.now(),
+            chatType: "direct",
+            origin: { label: "reclaw-legacy-import" },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    )
+    await unlink(legacyFile).catch(() => {
+      // Test setup best-effort: file may already be absent.
+    })
+
+    enqueueStatus(workspace, sessionsPath, "agent-a")
+    const result = await sessions.cleanupLegacySessionsFromOpenClawHistory({
+      workspacePath: workspace,
+    })
+
+    expect(result.matched).toBe(1)
+    expect(result.removedSessionFiles).toBe(0)
+    expect(result.missingSessionFiles).toBe(1)
+    expect(result.failedSessionFiles).toEqual([])
+  })
+
+  it("cleanup --orphans dry-run reports orphan transcript files", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "reclaw-openclaw-cleanup-test-"))
+    const sessionsDir = join(workspace, ".openclaw", "agent-a")
+    const sessionsPath = join(sessionsDir, "sessions.json")
+    const keepViaSessionId = join(sessionsDir, "keep-session-id.jsonl")
+    const keepViaSessionFile = join(sessionsDir, "keep-session-file.jsonl")
+    const orphanOne = join(sessionsDir, "orphan-one.jsonl")
+    const orphanDeleted = join(sessionsDir, "orphan-two.jsonl.deleted.2026-02-24T01-00-00.000Z")
+
+    await mkdir(sessionsDir, { recursive: true })
+    await writeFile(keepViaSessionId, "keep-a", "utf8")
+    await writeFile(keepViaSessionFile, "keep-b", "utf8")
+    await writeFile(orphanOne, "orphan-a", "utf8")
+    await writeFile(orphanDeleted, "orphan-b", "utf8")
+    await writeFile(
+      sessionsPath,
+      JSON.stringify(
+        {
+          "agent:agent-a:normal:id-only": {
+            sessionId: "keep-session-id",
+            updatedAt: Date.now(),
+            chatType: "direct",
+          },
+          "agent:agent-a:normal:file-path": {
+            sessionId: "keep-session-file",
+            sessionFile: keepViaSessionFile,
+            updatedAt: Date.now(),
+            chatType: "direct",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    )
+
+    enqueueStatus(workspace, sessionsPath, "agent-a")
+    const result = await sessions.cleanupLegacySessionsFromOpenClawHistory({
+      workspacePath: workspace,
+      dryRun: true,
+      includeOrphans: true,
+    })
+
+    expect(result.matched).toBe(0)
+    expect(result.orphanCandidates).toBe(2)
+    expect(result.removedOrphanFiles).toBe(0)
+    await expect(readFile(orphanOne, "utf8")).resolves.toBe("orphan-a")
+    await expect(readFile(orphanDeleted, "utf8")).resolves.toBe("orphan-b")
+  })
+
+  it("cleanup --orphans removes orphan transcript files without touching referenced transcripts", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "reclaw-openclaw-cleanup-test-"))
+    const sessionsDir = join(workspace, ".openclaw", "agent-a")
+    const sessionsPath = join(sessionsDir, "sessions.json")
+    const keepViaSessionId = join(sessionsDir, "keep-session-id.jsonl")
+    const keepViaSessionFile = join(sessionsDir, "keep-session-file.jsonl")
+    const orphanOne = join(sessionsDir, "orphan-one.jsonl")
+    const orphanReset = join(sessionsDir, "orphan-two.jsonl.reset.2026-02-24T01-00-00.000Z")
+
+    await mkdir(sessionsDir, { recursive: true })
+    await writeFile(keepViaSessionId, "keep-a", "utf8")
+    await writeFile(keepViaSessionFile, "keep-b", "utf8")
+    await writeFile(orphanOne, "orphan-a", "utf8")
+    await writeFile(orphanReset, "orphan-b", "utf8")
+    await writeFile(
+      sessionsPath,
+      JSON.stringify(
+        {
+          "agent:agent-a:normal:id-only": {
+            sessionId: "keep-session-id",
+            updatedAt: Date.now(),
+            chatType: "direct",
+          },
+          "agent:agent-a:normal:file-path": {
+            sessionId: "keep-session-file",
+            sessionFile: keepViaSessionFile,
+            updatedAt: Date.now(),
+            chatType: "direct",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    )
+
+    enqueueStatus(workspace, sessionsPath, "agent-a")
+    const result = await sessions.cleanupLegacySessionsFromOpenClawHistory({
+      workspacePath: workspace,
+      includeOrphans: true,
+    })
+
+    expect(result.matched).toBe(0)
+    expect(result.orphanCandidates).toBe(2)
+    expect(result.removedOrphanFiles).toBe(2)
+    expect(result.missingOrphanFiles).toBe(0)
+    await expect(readFile(keepViaSessionId, "utf8")).resolves.toBe("keep-a")
+    await expect(readFile(keepViaSessionFile, "utf8")).resolves.toBe("keep-b")
+    await expect(readFile(orphanOne, "utf8")).rejects.toThrow()
+    await expect(readFile(orphanReset, "utf8")).rejects.toThrow()
+    const store = JSON.parse(await readFile(sessionsPath, "utf8")) as Record<string, unknown>
+    expect(Object.keys(store)).toHaveLength(2)
   })
 })
 

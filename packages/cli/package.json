@@ -35,6 +35,7 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "status": "bun run src/index.ts status",
+    "cleanup": "bun run src/index.ts cleanup",
     "smoke": "../../scripts/run-local-smoke-tests.sh",
     "build": "rm -rf dist && bun build --target node --outfile dist/index.js src/index.ts && mkdir -p dist/prompts && if [ -d prompts ]; then cp prompts/*.md dist/prompts/ 2>/dev/null || true; fi",
     "prepack": "bun run build",

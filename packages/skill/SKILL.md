@@ -79,9 +79,10 @@ npx reclaw --plan --provider claude --input ./path/to/claude-export/
   - `## Facts`
   - `## Interests`
   - `## Open`
+- Optional footer (only when legacy session import is enabled via hidden CLI flag):
   - `---`
   - `## Sessions` (bullets as `provider:conversationId — timestamp`)
-- Imports legacy conversations into OpenClaw session history by default (`--legacy-sessions on`).
+- Legacy session import is **off by default**. Enable explicitly with `--legacy-sessions on` (or `required`).
 - Updates `MEMORY.md` and `USER.md` via a main synthesis agent run.
 
 ### `--mode zettelclaw`
@@ -91,11 +92,12 @@ npx reclaw --plan --provider claude --input ./path/to/claude-export/
   - `## Decisions`
   - `## Facts` (includes interests and other user-specific signals)
   - `## Open`
-  - `---`
-  - `## Sessions` (bullets as `provider:conversationId — HH:MM`)
+  - Optional footer (only when legacy session import is enabled):
+    - `---`
+    - `## Sessions` (bullets as `provider:conversationId — HH:MM`)
 - Preserves existing journal content (append-only). Legacy `## Interests` sections are migrated into `## Facts`.
 - Does not write inbox notes or typed notes — those are handled by Zettelclaw's nightly maintenance or supervised sessions.
-- Imports legacy conversations into OpenClaw session history by default (`--legacy-sessions on`) using `--workspace` or `~/.openclaw/workspace`.
+- Legacy session import is **off by default**; enable with `--legacy-sessions on` (or `required`) using `--workspace` or `~/.openclaw/workspace`.
 - Updates `MEMORY.md` and `USER.md` in the OpenClaw workspace via a main synthesis agent run.
 
 ## 4) Subagent Model
