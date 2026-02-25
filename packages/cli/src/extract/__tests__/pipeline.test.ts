@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test"
-import { writeFileSync } from "node:fs"
+import { existsSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -149,6 +149,86 @@ describe("pipeline", () => {
     })
     expect(resumed.processedBatches).toBe(0)
     expect(resumed.skippedBatches).toBe(1)
+  })
+
+  it("writes daily output incrementally as each batch completes", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "reclaw-pipeline-incremental-write-test-"))
+    const statePath = join(tempDir, "state.json")
+    const targetPath = join(tempDir, "workspace")
+    await mkdir(targetPath, { recursive: true })
+    await writeFile(join(targetPath, "MEMORY.md"), "baseline memory", "utf8")
+    await writeFile(join(targetPath, "USER.md"), "baseline user", "utf8")
+
+    let cronAddCalls = 0
+    setSpawnHook((_, args) => {
+      if (args[0] === "cron" && args[1] === "add") {
+        cronAddCalls += 1
+        if (cronAddCalls === 2) {
+          expect(existsSync(join(targetPath, "memory", "2026-02-20.md"))).toBeTrue()
+        }
+      }
+
+      const idIndex = args.indexOf("--id")
+      const jobId = idIndex >= 0 ? args[idIndex + 1] : undefined
+      if (jobId === "job-main") {
+        writeFileSync(
+          join(targetPath, "MEMORY.md"),
+          "<!-- reclaw-memory:start -->\nincremental\n<!-- reclaw-memory:end -->\n",
+          "utf8",
+        )
+        writeFileSync(
+          join(targetPath, "USER.md"),
+          "<!-- reclaw-user:start -->\nincremental\n<!-- reclaw-user:end -->\n",
+          "utf8",
+        )
+      }
+    })
+
+    enqueueSpawnResult({ status: 0, stdout: '{"id":"job-batch-1"}', stderr: "" })
+    enqueueSpawnResult({
+      status: 0,
+      stdout: JSON.stringify({
+        entries: [{ action: "finished", status: "ok", summary: '{"summary":"first day summary"}', ts: 1 }],
+      }),
+      stderr: "",
+    })
+    enqueueSpawnResult({ status: 0, stdout: '{"id":"job-batch-2"}', stderr: "" })
+    enqueueSpawnResult({
+      status: 0,
+      stdout: JSON.stringify({
+        entries: [{ action: "finished", status: "ok", summary: '{"summary":"second day summary"}', ts: 2 }],
+      }),
+      stderr: "",
+    })
+    enqueueSpawnResult({ status: 0, stdout: '{"id":"job-main"}', stderr: "" })
+    enqueueSpawnResult({
+      status: 0,
+      stdout: JSON.stringify({
+        entries: [{ action: "finished", status: "ok", summary: "ok", ts: 3 }],
+      }),
+      stderr: "",
+    })
+
+    const result = await pipeline.runExtractionPipeline({
+      providerConversations: {
+        chatgpt: [
+          buildConversation("chatgpt", "c1", localIso(2026, 2, 20, 10, 0)),
+          buildConversation("chatgpt", "c2", localIso(2026, 2, 21, 10, 0)),
+        ],
+        claude: [],
+        grok: [],
+      },
+      selectedProviders: ["chatgpt"],
+      mode: "openclaw",
+      model: "gpt-5",
+      targetPath,
+      statePath,
+      maxParallelJobs: 1,
+    })
+
+    expect(result.processedBatches).toBe(2)
+    expect(await readFile(join(targetPath, "memory", "2026-02-20.md"), "utf8")).toContain("first day summary")
+    expect(await readFile(join(targetPath, "memory", "2026-02-21.md"), "utf8")).toContain("second day summary")
   })
 
   it("reports failed batches and throws when no batch succeeds", async () => {

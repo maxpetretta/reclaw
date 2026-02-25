@@ -23,6 +23,12 @@ interface WriteArtifactsOptions {
   includeSessionFooters: boolean
 }
 
+interface WriteOutputFilesOptions {
+  mode: ExtractionMode
+  targetPath: string
+  includeSessionFooters: boolean
+}
+
 export async function writeExtractionArtifacts(
   batchResults: BatchExtractionResult[],
   options: WriteArtifactsOptions,
@@ -30,14 +36,11 @@ export async function writeExtractionArtifacts(
   const insights = aggregateInsights(batchResults)
   const backupTimestamp = options.backupMode === "timestamped" ? formatBackupTimestamp(new Date()) : undefined
 
-  const outputFiles =
-    options.mode === "openclaw"
-      ? await writeOpenClawMemoryFiles(batchResults, options.targetPath, options.includeSessionFooters)
-      : (
-          await writeZettelclawArtifacts(batchResults, options.targetPath, {
-            includeSessionFooters: options.includeSessionFooters,
-          })
-        ).outputFiles
+  const outputFiles = await writeExtractionOutputFiles(batchResults, {
+    mode: options.mode,
+    targetPath: options.targetPath,
+    includeSessionFooters: options.includeSessionFooters,
+  })
 
   const memoryFilePath = join(options.memoryWorkspacePath, "MEMORY.md")
   const userFilePath = join(options.memoryWorkspacePath, "USER.md")
@@ -61,6 +64,19 @@ export async function writeExtractionArtifacts(
     userFilePath,
     insights,
   }
+}
+
+export async function writeExtractionOutputFiles(
+  batchResults: BatchExtractionResult[],
+  options: WriteOutputFilesOptions,
+): Promise<string[]> {
+  return options.mode === "openclaw"
+    ? await writeOpenClawMemoryFiles(batchResults, options.targetPath, options.includeSessionFooters)
+    : (
+        await writeZettelclawArtifacts(batchResults, options.targetPath, {
+          includeSessionFooters: options.includeSessionFooters,
+        })
+      ).outputFiles
 }
 
 function aggregateInsights(batchResults: BatchExtractionResult[]): AggregatedInsights {

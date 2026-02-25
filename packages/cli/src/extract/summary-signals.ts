@@ -10,6 +10,10 @@ export interface SummarySignals {
   todo: string[]
 }
 
+interface ExtractSummarySignalOptions {
+  allowUntaggedFacts?: boolean
+}
+
 const TAG_ALIASES: Record<string, keyof SummarySignals> = {
   interest: "interests",
   interests: "interests",
@@ -30,7 +34,7 @@ const TAG_ALIASES: Record<string, keyof SummarySignals> = {
   "follow-up": "todo",
 }
 
-export function extractSummarySignals(summary: string): SummarySignals {
+export function extractSummarySignals(summary: string, options: ExtractSummarySignalOptions = {}): SummarySignals {
   const lines = splitSummaryLines(summary)
   const signals: SummarySignals = {
     interests: [],
@@ -45,7 +49,9 @@ export function extractSummarySignals(summary: string): SummarySignals {
   for (const line of lines) {
     const tagged = parseTaggedLine(line)
     if (!tagged) {
-      signals.facts.push(line)
+      if (options.allowUntaggedFacts !== false) {
+        signals.facts.push(line)
+      }
       continue
     }
 
@@ -104,7 +110,8 @@ function stripListPrefix(value: string): string {
 }
 
 function parseTaggedLine(line: string): { key: keyof SummarySignals; value: string } | undefined {
-  const match = line.match(/^([a-zA-Z-]+)\s*:\s*(.+)$/)
+  const normalized = line.replace(/^\*\*([a-zA-Z-]+)\*\*\s*:\s*/u, "$1: ").trim()
+  const match = normalized.match(/^([a-zA-Z-]+)\s*:\s*(.+)$/)
   if (!(match?.[1] && match[2])) {
     return undefined
   }

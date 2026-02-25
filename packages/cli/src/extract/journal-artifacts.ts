@@ -62,6 +62,17 @@ async function writeZettelclawJournalImports(
       continue
     }
 
+    // Skip dates where all extractions produced empty summaries (no signal)
+    const hasAnySummary = dateResults.some((result) => result.extraction.summary.trim().length > 0)
+    if (!hasAnySummary) {
+      continue
+    }
+
+    const previewInsights = collectDateInsights(dateResults)
+    if (!includeSessionFooters && previewInsights.logItems.length === 0 && previewInsights.todoItems.length === 0) {
+      continue
+    }
+
     const filePath = join(journalPath, `${date}.md`)
     let content = await readOrCreateJournalFile(filePath, date, todayDate, includeSessionFooters)
     const ensured = ensureDailyJournalSections(content, includeSessionFooters)
@@ -97,24 +108,9 @@ async function writeZettelclawJournalImports(
           )
         : dateResults
 
-      const logItems = uniqueStrings(
-        pendingResults.flatMap((entry) => {
-          const signals = extractSummarySignals(entry.extraction.summary)
-          return [
-            ...signals.decisions,
-            ...signals.facts,
-            ...signals.projects,
-            ...signals.people,
-            ...signals.preferences,
-            ...signals.interests,
-          ]
-        }),
-      )
-      const todo = uniqueStrings(
-        pendingResults.flatMap((entry) => extractSummarySignals(entry.extraction.summary).todo),
-      )
-      const cleanedLog = cleanJournalBullets(logItems)
-      const cleanedTodo = cleanJournalBullets(todo)
+      const insights = collectDateInsights(pendingResults)
+      const cleanedLog = insights.logItems
+      const cleanedTodo = insights.todoItems
 
       const logUpdate = appendUniqueSectionBullets(content, "## Log", cleanedLog, includeSessionFooters)
       content = logUpdate.content
@@ -240,10 +236,7 @@ function ensureDailyJournalSections(content: string, includeSessionFooters: bool
   }
 }
 
-function migrateLegacyOpenSection(
-  lines: string[],
-  includeSessionFooters: boolean,
-): { changed: boolean } {
+function migrateLegacyOpenSection(lines: string[], includeSessionFooters: boolean): { changed: boolean } {
   const legacyOpen = findSectionBounds(lines, "## Open")
   if (!legacyOpen) {
     return { changed: false }
@@ -617,12 +610,19 @@ function findDividerBefore(lines: string[], index: number): number {
 }
 
 function removeTrailingDivider(lines: string[]): boolean {
+  const frontmatterEnd = findFrontmatterEnd(lines)
+
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const trimmed = lines[index]?.trim() ?? ""
     if (trimmed.length === 0) {
       continue
     }
     if (trimmed !== "---") {
+      return false
+    }
+
+    // Never remove the frontmatter closing delimiter
+    if (index === frontmatterEnd) {
       return false
     }
 
@@ -634,6 +634,20 @@ function removeTrailingDivider(lines: string[]): boolean {
   }
 
   return false
+}
+
+function findFrontmatterEnd(lines: string[]): number {
+  if (lines.length < 2 || (lines[0]?.trim() ?? "") !== "---") {
+    return -1
+  }
+
+  for (let index = 1; index < lines.length; index += 1) {
+    if ((lines[index]?.trim() ?? "") === "---") {
+      return index
+    }
+  }
+
+  return -1
 }
 
 function findLineIndex(lines: string[], target: string): number {
@@ -691,11 +705,41 @@ function arraysEqual(left: string[], right: string[]): boolean {
   return true
 }
 
+function collectDateInsights(results: BatchExtractionResult[]): { logItems: string[]; todoItems: string[] } {
+  const logItems = uniqueStrings(
+    results.flatMap((entry) => {
+      const signals = extractSummarySignals(entry.extraction.summary, { allowUntaggedFacts: false })
+      return [
+        ...signals.decisions,
+        ...signals.facts,
+        ...signals.projects,
+        ...signals.people,
+        ...signals.preferences,
+        ...signals.interests,
+      ]
+    }),
+  )
+
+  const todoItems = uniqueStrings(
+    results.flatMap((entry) => extractSummarySignals(entry.extraction.summary, { allowUntaggedFacts: false }).todo),
+  )
+
+  return {
+    logItems: cleanJournalBullets(logItems),
+    todoItems: cleanJournalBullets(todoItems),
+  }
+}
+
 function cleanJournalBullets(values: string[]): string[] {
   return uniqueStrings(
     values
       .map((value) => stripInlineSignalPrefix(value))
+      .map((value) => value.replace(/\s+/g, " ").trim())
+      .filter((value) => !isBlockedJournalBullet(value))
+      .filter((value) => hasBalancedMarkers(value))
+      .filter((value) => !isLikelyTruncatedBullet(value))
       .map((value) => value.trim())
+      .filter((value) => value.length <= 220)
       .filter((value) => value.length > 0),
   )
 }
@@ -704,11 +748,72 @@ function stripInlineSignalPrefix(value: string): string {
   let output = value.trim()
   while (true) {
     const next = output
-      .replace(/^(preference|project|fact|decision|interest|person|open|todo|next|followup|follow-up)\s*:\s*/i, "")
+      .replace(
+        /^(?:\*\*)?(preference|project|fact|decision|interest|person|open|todo|next|followup|follow-up)(?:\*\*)?\s*:\s*/i,
+        "",
+      )
       .trim()
     if (next === output) {
       return output
     }
     output = next
   }
+}
+
+function isBlockedJournalBullet(value: string): boolean {
+  const normalized = value.trim().toLowerCase()
+  if (normalized.length === 0) {
+    return true
+  }
+
+  if (
+    /^(summary|analysis|reason|reasoning|signal distilled|key signal|memory extraction complete|filtered out)\s*:/u.test(
+      normalized,
+    )
+  ) {
+    return true
+  }
+
+  if (/\/users\/|\.json\b|reclaw-extract-output|\.memory-extract/u.test(normalized)) {
+    return true
+  }
+
+  return /done\b|saved to|main reclaw process|hard memory filter|would i need to know this person|general knowledge|one-off|no durable user-specific|no user-specific|does not meet.*filter/u.test(
+    normalized,
+  )
+}
+
+function hasBalancedMarkers(value: string): boolean {
+  const starPairs = (value.match(/\*\*/g) ?? []).length
+  if (starPairs % 2 !== 0) {
+    return false
+  }
+
+  return (
+    countChar(value, "(") === countChar(value, ")") &&
+    countChar(value, "[") === countChar(value, "]") &&
+    countChar(value, "{") === countChar(value, "}")
+  )
+}
+
+function countChar(value: string, char: string): number {
+  let count = 0
+  for (const current of value) {
+    if (current === char) {
+      count += 1
+    }
+  }
+  return count
+}
+
+function isLikelyTruncatedBullet(value: string): boolean {
+  if (/[([{]\s*$/u.test(value)) {
+    return true
+  }
+
+  if (/\b(prese|approac|decis|criter|integra|signif|durab|proces|answ|req)\s*$/iu.test(value)) {
+    return true
+  }
+
+  return value.length >= 100 && /\b(and|or|to|for|with|from|in|on|at|by|vs)\s*$/iu.test(value)
 }

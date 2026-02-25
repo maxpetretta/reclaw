@@ -40,4 +40,17 @@ describe("extractSummarySignals", () => {
       todo: [],
     })
   })
+
+  it("can ignore untagged lines when strict mode is enabled", () => {
+    const signals = extractSummarySignals("project: Reclaw v1\nmisc line without tag", {
+      allowUntaggedFacts: false,
+    })
+    expect(signals.projects).toEqual(["Reclaw v1"])
+    expect(signals.facts).toEqual([])
+  })
+
+  it("supports bold markdown tags", () => {
+    const signals = extractSummarySignals("**Decision**: Keep local time")
+    expect(signals.decisions).toEqual(["Keep local time"])
+  })
 })

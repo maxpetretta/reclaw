@@ -30,13 +30,34 @@ describe("prompt", () => {
   })
 
   it("parses JSON and embedded JSON extraction outputs", () => {
-    expect(parseSubagentExtraction('{"summary":"clean"}')).toEqual({ summary: "clean" })
-    expect(parseSubagentExtraction('status: ok\n{"summary":"embedded"}\nend')).toEqual({ summary: "embedded" })
+    expect(parseSubagentExtraction('{"summary":"clean"}')).toEqual({ summary: "Fact: clean" })
+    expect(parseSubagentExtraction('status: ok\n{"summary":"embedded"}\nend')).toEqual({ summary: "Fact: embedded" })
   })
 
-  it("falls back to clipped raw response when parsing fails", () => {
+  it("returns empty summary when parsing fails", () => {
     const parsed = parseSubagentExtraction("  unstructured output  ")
-    expect(parsed.summary).toBe("unstructured output")
+    expect(parsed.summary).toBe("")
+  })
+
+  it("strips markdown fences before parsing JSON", () => {
+    const parsed = parseSubagentExtraction('```json\n{"summary":"fenced"}\n```')
+    expect(parsed.summary).toBe("Fact: fenced")
+  })
+
+  it("removes process/meta/filter commentary and keeps only tagged durable lines", () => {
+    const parsed = parseSubagentExtraction(
+      JSON.stringify({
+        summary: [
+          "Done. Extracted durable memory and saved to /Users/max/.openclaw/workspace/reclaw-extract-output.json",
+          "Reason: This is general knowledge and fails the hard memory filter",
+          "**Decision**: Use Bun runtime for this project",
+          "Project: Realtime pricing app",
+          "The main Reclaw process will integrate this output.",
+        ].join("\n"),
+      }),
+    )
+
+    expect(parsed.summary).toBe("Decision: Use Bun runtime for this project\nProject: Realtime pricing app")
   })
 })
 

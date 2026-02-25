@@ -15,6 +15,36 @@ const DEFAULT_EXTRACTION: SubagentExtraction = {
   summary: "",
 }
 
+const SUMMARY_TAG_ALIASES: Record<string, string> = {
+  decision: "Decision",
+  decisions: "Decision",
+  project: "Project",
+  projects: "Project",
+  fact: "Fact",
+  facts: "Fact",
+  preference: "Preference",
+  preferences: "Preference",
+  person: "Person",
+  people: "Person",
+  interest: "Interest",
+  interests: "Interest",
+  todo: "Todo",
+  open: "Todo",
+  next: "Todo",
+  followup: "Todo",
+  "follow-up": "Todo",
+}
+
+const SUMMARY_TAG_PRIORITY: Record<string, number> = {
+  Decision: 0,
+  Project: 1,
+  Fact: 2,
+  Preference: 3,
+  Person: 4,
+  Interest: 5,
+  Todo: 6,
+}
+
 const PROMPT_FILENAMES = {
   agent: "agent.md",
   subagent: "subagent.md",
@@ -107,23 +137,21 @@ function renderPromptTemplate(template: string, variables: Record<string, string
 }
 
 export function parseSubagentExtraction(rawResponse: string): SubagentExtraction {
+  const cleaned = stripMarkdownFences(rawResponse)
   let parsed: unknown
 
   try {
-    parsed = JSON.parse(rawResponse)
+    parsed = JSON.parse(cleaned)
   } catch {
-    parsed = parseEmbeddedJson(rawResponse)
+    parsed = parseEmbeddedJson(cleaned)
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return {
-      ...DEFAULT_EXTRACTION,
-      summary: toTrimmed(rawResponse).slice(0, 500),
-    }
+    return DEFAULT_EXTRACTION
   }
 
   const record = parsed as Record<string, unknown>
-  const summary = toTrimmed(record.summary) || toTrimmed(rawResponse).slice(0, 500)
+  const summary = sanitizeSubagentSummary(toTrimmed(record.summary))
 
   return {
     summary,
@@ -196,6 +224,13 @@ function clipText(value: string, limit: number): string {
   return `${value.slice(0, limit)} ...`
 }
 
+function stripMarkdownFences(raw: string): string {
+  const trimmed = raw.trim()
+  const fencePattern = /^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/
+  const match = trimmed.match(fencePattern)
+  return match?.[1]?.trim() ?? trimmed
+}
+
 function parseEmbeddedJson(raw: string): unknown {
   const start = raw.indexOf("{")
   const end = raw.lastIndexOf("}")
@@ -209,6 +244,207 @@ function parseEmbeddedJson(raw: string): unknown {
   } catch {
     return undefined
   }
+}
+
+function sanitizeSubagentSummary(rawSummary: string): string {
+  const normalized = rawSummary.replaceAll("\r\n", "\n").trim()
+  if (normalized.length === 0) {
+    return ""
+  }
+
+  const candidates = splitSummaryCandidates(normalized)
+  const accepted = new Map<string, { line: string; priority: number; index: number }>()
+  let index = 0
+
+  for (const candidate of candidates) {
+    const prepared = normalizeSummaryCandidate(candidate)
+    if (!prepared || isBlockedSummaryText(prepared)) {
+      continue
+    }
+
+    const tagged = toTaggedClaim(prepared)
+    if (!tagged) {
+      continue
+    }
+
+    const cleanedValue = cleanClaimValue(tagged.value)
+    if (cleanedValue.length === 0) {
+      continue
+    }
+
+    if (isBlockedSummaryText(cleanedValue)) {
+      continue
+    }
+
+    if (!hasBalancedMarkers(cleanedValue) || isLikelyTruncatedClaim(cleanedValue)) {
+      continue
+    }
+
+    const line = `${tagged.tag}: ${cleanedValue}`
+    const dedupeKey = line.toLowerCase()
+    if (accepted.has(dedupeKey)) {
+      continue
+    }
+
+    accepted.set(dedupeKey, {
+      line,
+      priority: SUMMARY_TAG_PRIORITY[tagged.tag] ?? 99,
+      index,
+    })
+    index += 1
+  }
+
+  if (accepted.size === 0) {
+    return ""
+  }
+
+  return [...accepted.values()]
+    .sort((left, right) => {
+      if (left.priority !== right.priority) {
+        return left.priority - right.priority
+      }
+      return left.index - right.index
+    })
+    .slice(0, 8)
+    .map((entry) => entry.line)
+    .join("\n")
+}
+
+function splitSummaryCandidates(summary: string): string[] {
+  const lines: string[] = []
+  for (const chunk of summary.split("\n")) {
+    const trimmed = stripListPrefix(chunk)
+    if (trimmed.length === 0) {
+      continue
+    }
+
+    if (trimmed.includes(";")) {
+      const parts = trimmed
+        .split(";")
+        .map((entry) => stripListPrefix(entry).trim())
+        .filter((entry) => entry.length > 0)
+      if (parts.length > 1) {
+        lines.push(...parts)
+        continue
+      }
+    }
+
+    lines.push(trimmed)
+  }
+
+  return lines
+}
+
+function stripListPrefix(value: string): string {
+  return value
+    .trim()
+    .replace(/^[-*•]\s+/, "")
+    .replace(/^\d+\.\s+/, "")
+    .trim()
+}
+
+function normalizeSummaryCandidate(value: string): string {
+  return value
+    .trim()
+    .replace(/^\*\*([a-zA-Z-]+)\*\*\s*:\s*/u, "$1: ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function toTaggedClaim(line: string): { tag: string; value: string } | undefined {
+  const tagMatch = line.match(/^([a-zA-Z-]+)\s*:\s*(.+)$/u)
+  if (tagMatch?.[1] && tagMatch[2]) {
+    const canonicalTag = SUMMARY_TAG_ALIASES[tagMatch[1].trim().toLowerCase()]
+    if (!canonicalTag) {
+      return undefined
+    }
+    return {
+      tag: canonicalTag,
+      value: tagMatch[2].trim(),
+    }
+  }
+
+  if (/^[a-zA-Z][a-zA-Z\s-]{0,48}:/u.test(line)) {
+    return undefined
+  }
+
+  return {
+    tag: "Fact",
+    value: line.trim(),
+  }
+}
+
+function cleanClaimValue(value: string): string {
+  let cleaned = value
+    .trim()
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  if (cleaned.length > 220) {
+    const clipped = cleaned.slice(0, 220)
+    const boundary = clipped.lastIndexOf(" ")
+    cleaned = (boundary > 120 ? clipped.slice(0, boundary) : clipped).trim()
+  }
+
+  return cleaned
+}
+
+function isBlockedSummaryText(value: string): boolean {
+  const normalized = value.trim().toLowerCase()
+  if (normalized.length === 0) {
+    return true
+  }
+
+  if (
+    /^(summary|analysis|reason|reasoning|signal distilled|key signal|memory extraction complete)\s*:/u.test(normalized)
+  ) {
+    return true
+  }
+
+  if (/\/users\/|\.json\b|reclaw-extract-output|\.memory-extract/u.test(normalized)) {
+    return true
+  }
+
+  return /done\b|saved to|main reclaw process|hard memory filter|would i need to know this person|general knowledge|one-off|no durable user-specific|no user-specific|does not meet.*filter|filtered out/u.test(
+    normalized,
+  )
+}
+
+function hasBalancedMarkers(value: string): boolean {
+  const starPairs = (value.match(/\*\*/g) ?? []).length
+  if (starPairs % 2 !== 0) {
+    return false
+  }
+
+  return (
+    countChar(value, "(") === countChar(value, ")") &&
+    countChar(value, "[") === countChar(value, "]") &&
+    countChar(value, "{") === countChar(value, "}")
+  )
+}
+
+function countChar(value: string, char: string): number {
+  let count = 0
+  for (const current of value) {
+    if (current === char) {
+      count += 1
+    }
+  }
+  return count
+}
+
+function isLikelyTruncatedClaim(value: string): boolean {
+  if (/[([{]\s*$/u.test(value)) {
+    return true
+  }
+
+  if (/\b(prese|approac|decis|criter|integra|signif|durab|proces|answ|req)\s*$/iu.test(value)) {
+    return true
+  }
+
+  return value.length >= 100 && /\b(and|or|to|for|with|from|in|on|at|by|vs)\s*$/iu.test(value)
 }
 
 function formatProviderSummary(conversations: ConversationBatch["conversations"]): string {

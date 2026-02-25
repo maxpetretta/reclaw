@@ -226,12 +226,36 @@ describe("writeZettelclawArtifacts", () => {
     expect(content).toContain("## Todo")
     expect(content).not.toContain("## Sessions")
   })
+
+  it("skips creating a journal when only filtered/meta lines remain and sessions are disabled", async () => {
+    const vault = await mkdtemp(join(tmpdir(), "reclaw-journal-test-"))
+    const journalPath = join(vault, "03 Journal", "2026-02-22.md")
+
+    const result = await writeZettelclawArtifacts(
+      [
+        batch(
+          "chatgpt",
+          "cg-1",
+          "14:25",
+          "fact: general knowledge one-off question\nfact: Done. Extracted durable memory and saved to /Users/max/.openclaw/workspace/reclaw-extract-output.json",
+        ),
+      ],
+      vault,
+      {
+        includeSessionFooters: false,
+      },
+    )
+
+    expect(result.outputFiles).toEqual([])
+    await expect(readFile(journalPath, "utf8")).rejects.toThrow()
+  })
 })
 
 function batch(
   provider: BatchExtractionResult["providers"][number],
   id: string,
   timestamp: string,
+  summary = "decision: Ship v1; fact: Uses bun test; interest: Quality; open: Follow up docs",
 ): BatchExtractionResult {
   return {
     batchId: `${provider}-${id}`,
@@ -241,7 +265,7 @@ function batch(
     conversationRefs: [{ provider, id, timestamp }],
     conversationCount: 1,
     extraction: {
-      summary: "decision: Ship v1; fact: Uses bun test; interest: Quality; open: Follow up docs",
+      summary,
     },
   }
 }

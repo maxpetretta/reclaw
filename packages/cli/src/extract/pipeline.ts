@@ -5,7 +5,7 @@ import { runWithConcurrency } from "../lib/concurrency"
 import { OpenClawError, removeCronJob, scheduleSubagentCronJob, waitForCronSummary } from "../lib/openclaw"
 import { toLocalDateKey } from "../lib/timestamps"
 import type { NormalizedConversation } from "../types"
-import { writeExtractionArtifacts } from "./aggregate"
+import { writeExtractionArtifacts, writeExtractionOutputFiles } from "./aggregate"
 import type {
   BackupMode,
   BatchConversationRef,
@@ -118,10 +118,30 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
     let settledConversations = 0
     let activeJobs = 0
     let saveChain = Promise.resolve()
+    let outputWriteChain = Promise.resolve()
 
     const enqueueStateSave = async (): Promise<void> => {
       saveChain = saveChain.then(() => saveState(options.statePath, state))
       await saveChain
+    }
+
+    const enqueueOutputWrite = async (batchResult: BatchExtractionResult): Promise<void> => {
+      const completedForDate = Object.values(state.completed).filter((entry) => entry.date === batchResult.date)
+      outputWriteChain = outputWriteChain
+        .then(async () => {
+          await writeExtractionOutputFiles(completedForDate, {
+            mode: options.mode,
+            targetPath: options.targetPath,
+            includeSessionFooters: options.includeSessionFooters === true,
+          })
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          options.onProgress?.(
+            `Warning: failed to write incremental output for ${batchResult.date} (${batchResult.batchId}): ${message}`,
+          )
+        })
+      await outputWriteChain
     }
 
     await runWithConcurrency(pendingBatches, parallelJobs, async (batch) => {
@@ -132,6 +152,7 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
         state.completed[batch.id] = batchResult
         state.updatedAt = new Date().toISOString()
         await enqueueStateSave()
+        await enqueueOutputWrite(batchResult)
         processedBatches += 1
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -146,6 +167,7 @@ export async function runExtractionPipeline(options: RunExtractionPipelineOption
       }
     })
     await saveChain
+    await outputWriteChain
   }
 
   const allResults = plan.batches

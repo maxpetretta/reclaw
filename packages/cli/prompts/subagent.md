@@ -45,11 +45,22 @@ Return STRICT JSON only (no markdown fences, no extra prose) with exactly this k
   "summary": "string"
 }
 
+If no durable user-specific memory survives filtering, return:
+{
+  "summary": ""
+}
+
+Never include:
+- Process/meta text (for example: "Done", "Summary", "Saved to", "main Reclaw process").
+- Filter rationale text (for example: "general knowledge", "one-off", "fails hard memory filter").
+- File paths, tool output notes, or markdown formatting markers.
+
 Summary format guidance:
 - 3-8 short lines separated by newline characters.
-- Prefix lines with tags when possible: `Decision:`, `Fact:`, `Preference:`, `Person:`, `Project:`, `Interest:`, `Todo:`.
+- Every line MUST start with one tag: `Decision:`, `Fact:`, `Preference:`, `Person:`, `Project:`, `Interest:`, `Todo:`.
 - Include only top-priority user-specific information.
 - Do not include duplicate lines.
+- Keep each line atomic and under ~160 characters.
 - Priority order when cutting for space: Decisions > Projects > Facts > Preferences > Interests > Todo.
 
 Date batch metadata:
