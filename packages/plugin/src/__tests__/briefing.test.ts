@@ -8,6 +8,7 @@ import {
   BRIEFING_END_MARKER,
   generateBriefing,
 } from "../briefing/generate";
+import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/handoff";
 
 function createConfig(logDir: string): PluginConfig {
   return {
@@ -139,5 +140,135 @@ describe("briefing generation", () => {
     expect(content).toContain("Header content");
     expect(content).toContain("Footer content");
     expect(content).toContain("## Recent Decisions");
+  });
+
+  test("pre-filters entries before sending input to briefing model", async () => {
+    const now = Date.parse("2026-02-28T00:00:00.000Z");
+    const entries = [
+      {
+        id: "aaa111bbb222",
+        timestamp: "2026-02-27T12:00:00.000Z",
+        type: "fact",
+        content: "Active auth rollout",
+        subject: "auth-migration",
+        session: "session-1",
+      },
+      {
+        id: "ccc333ddd444",
+        timestamp: "2026-02-25T09:00:00.000Z",
+        type: "decision",
+        content: "Use queue retries",
+        subject: "auth-migration",
+        session: "session-2",
+      },
+      {
+        id: "eee555fff666",
+        timestamp: "2025-12-01T09:00:00.000Z",
+        type: "decision",
+        content: "Legacy decision should be excluded",
+        subject: "legacy-system",
+        session: "session-3",
+      },
+      {
+        id: "ggg777hhh888",
+        timestamp: "2025-10-01T09:00:00.000Z",
+        type: "task",
+        content: "Open task should remain",
+        status: "open",
+        subject: "legacy-system",
+        session: "session-4",
+      },
+      {
+        id: "iii999jjj000",
+        timestamp: "2025-10-01T09:00:00.000Z",
+        type: "task",
+        content: "Closed task should be excluded",
+        status: "done",
+        subject: "legacy-system",
+        session: "session-5",
+      },
+      {
+        id: "kkk111lll222",
+        timestamp: "2025-10-01T09:00:00.000Z",
+        type: "question",
+        content: "Open question should remain",
+        subject: "legacy-system",
+        session: "session-6",
+      },
+    ];
+
+    await writeFile(
+      logPath,
+      `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+      "utf8",
+    );
+
+    let capturedUserInput = "";
+
+    await generateBriefing(
+      {
+        logPath,
+        memoryMdPath: memoryPath,
+        config: createConfig(tempDir),
+        now,
+      },
+      {
+        callBriefingModel: async ({ userInput }) => {
+          capturedUserInput = userInput;
+          return "## Active\n- auth-migration — Active auth rollout";
+        },
+      },
+    );
+
+    expect(capturedUserInput).toContain("## Active Entries");
+    expect(capturedUserInput).toContain("## Recent Decisions");
+    expect(capturedUserInput).toContain("## Open Items");
+    expect(capturedUserInput).toContain("## Stale Subjects");
+    expect(capturedUserInput).toContain("## Included Entries (Deduped Union)");
+
+    expect(capturedUserInput).toContain("Active auth rollout");
+    expect(capturedUserInput).toContain("Use queue retries");
+    expect(capturedUserInput).toContain("Open task should remain");
+    expect(capturedUserInput).toContain("Open question should remain");
+
+    expect(capturedUserInput).not.toContain("Legacy decision should be excluded");
+    expect(capturedUserInput).not.toContain("Closed task should be excluded");
+  });
+
+  test("briefing generation preserves handoff markers and content", async () => {
+    await writeFile(
+      memoryPath,
+      [
+        "## Goals",
+        "- Ship V3",
+        "",
+        BRIEFING_BEGIN_MARKER,
+        "old briefing content",
+        BRIEFING_END_MARKER,
+        "",
+        LAST_HANDOFF_BEGIN_MARKER,
+        "Session: session-9 (2026-02-19T00:00:00.000Z)",
+        "Auth migration handoff snapshot",
+        LAST_HANDOFF_END_MARKER,
+      ].join("\n"),
+      "utf8",
+    );
+
+    await generateBriefing(
+      {
+        logPath,
+        memoryMdPath: memoryPath,
+        config: createConfig(tempDir),
+      },
+      {
+        callBriefingModel: async () => "## Active\n- auth-migration — Queue retries enabled",
+      },
+    );
+
+    const content = await readFile(memoryPath, "utf8");
+    expect(content).toContain("## Active");
+    expect(content).toContain(LAST_HANDOFF_BEGIN_MARKER);
+    expect(content).toContain(LAST_HANDOFF_END_MARKER);
+    expect(content).toContain("Auth migration handoff snapshot");
   });
 });

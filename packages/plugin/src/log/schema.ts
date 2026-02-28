@@ -3,8 +3,22 @@ import { dirname } from "node:path";
 import { nanoid } from "nanoid";
 
 export const ENTRY_TYPES = ["task", "fact", "decision", "question", "handoff"] as const;
+export const VALID_SUBJECT_TYPES = ["project", "person", "system", "topic"] as const;
 
 export type EntryType = (typeof ENTRY_TYPES)[number];
+export type SubjectType = (typeof VALID_SUBJECT_TYPES)[number];
+
+export function parseSubjectType(rawType: unknown): SubjectType | undefined {
+  if (typeof rawType !== "string") {
+    return undefined;
+  }
+
+  return VALID_SUBJECT_TYPES.find((subjectType) => subjectType === rawType);
+}
+
+export function normalizeSubjectType(rawType: unknown): SubjectType {
+  return parseSubjectType(rawType) ?? "project";
+}
 
 interface BaseEntry {
   id: string;

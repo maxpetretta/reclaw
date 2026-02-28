@@ -1,10 +1,12 @@
-import { readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
-import { appendEntry, finalizeEntry, validateLlmOutput } from "../log/schema";
+import { queryExtractionContext } from "../log/query";
+import { appendEntry, finalizeEntry, parseSubjectType, validateLlmOutput } from "../log/schema";
 import { extractFromTranscript } from "../lib/llm";
+import { applyLastHandoffBlock } from "../memory/handoff";
 import {
   findTranscriptFile,
   formatTranscript,
@@ -19,7 +21,7 @@ import {
   readState,
   shouldRetry,
 } from "../state";
-import { ensureSubject, readRegistry } from "../subjects/registry";
+import { ensureSubject, readRegistry, type SubjectRegistry } from "../subjects/registry";
 
 interface ZettelclawPaths {
   logPath: string;
@@ -38,6 +40,8 @@ export interface ExtractionHookDeps {
   readTranscript: typeof readTranscript;
   formatTranscript: typeof formatTranscript;
   listSessionCandidates: typeof listSessionCandidates;
+  readMemoryFile: (path: string) => Promise<string>;
+  writeMemoryFile: (path: string, content: string) => Promise<void>;
 }
 
 const DEFAULT_DEPS: ExtractionHookDeps = {
@@ -46,10 +50,93 @@ const DEFAULT_DEPS: ExtractionHookDeps = {
   readTranscript,
   formatTranscript,
   listSessionCandidates,
+  async readMemoryFile(path) {
+    try {
+      return await readFile(path, "utf8");
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "ENOENT"
+      ) {
+        return "";
+      }
+
+      throw error;
+    }
+  },
+  async writeMemoryFile(path, content) {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, content, "utf8");
+  },
 };
+
+const EXTRACTION_CONTEXT_MAX_PER_SUBJECT = 50;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findMentionedSubjects(transcript: string, subjects: SubjectRegistry): string[] {
+  if (!transcript.trim()) {
+    return [];
+  }
+
+  const transcriptLower = transcript.toLowerCase();
+  const slugs = Object.keys(subjects);
+  const matched: string[] = [];
+
+  for (const slug of slugs) {
+    const normalizedSlug = slug.trim().toLowerCase();
+    if (!normalizedSlug) {
+      continue;
+    }
+
+    const pattern = new RegExp(`(^|[^a-z0-9-])${escapeRegex(normalizedSlug)}([^a-z0-9-]|$)`, "u");
+    if (pattern.test(transcriptLower)) {
+      matched.push(slug);
+    }
+  }
+
+  return matched;
+}
+
+function readSubjectTypeHint(raw: unknown): string | undefined {
+  if (!isObject(raw)) {
+    return undefined;
+  }
+
+  return parseSubjectType(raw.subjectType ?? raw.subject_type);
+}
+
+function readWorkspaceDir(ctx: unknown): string | undefined {
+  if (!isObject(ctx)) {
+    return undefined;
+  }
+
+  return typeof ctx.workspaceDir === "string" && ctx.workspaceDir.trim().length > 0
+    ? ctx.workspaceDir.trim()
+    : undefined;
+}
+
+function resolveMemoryMdPath(workspaceDir?: string): string {
+  return join(workspaceDir ?? process.cwd(), "MEMORY.md");
+}
+
+function stripSubjectTypeHint(raw: unknown): unknown {
+  if (!isObject(raw)) {
+    return raw;
+  }
+
+  const candidate = { ...raw };
+  delete candidate.subjectType;
+  delete candidate.subject_type;
+  return candidate;
 }
 
 function normalizeError(error: unknown): string {
@@ -295,6 +382,7 @@ async function runExtractionPipeline(params: {
   sessionId: string;
   messages: TranscriptMessage[];
   paths: ZettelclawPaths;
+  memoryMdPath: string;
   config: PluginConfig;
   deps: ExtractionHookDeps;
   logger: OpenClawPluginApi["logger"];
@@ -320,15 +408,21 @@ async function runExtractionPipeline(params: {
 
   try {
     const subjects = await readRegistry(params.paths.subjectsPath);
+    const transcriptSubjects = findMentionedSubjects(transcript, subjects);
+    const existingEntries = await queryExtractionContext(params.paths.logPath, transcriptSubjects, {
+      maxPerSubject: EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
+    });
     const rawOutput = await params.deps.extractFromTranscript({
       transcript,
       subjects,
+      existingEntries,
       model: params.config.extraction.model,
       apiBaseUrl: params.apiBaseUrl,
       apiToken: params.apiToken,
     });
 
     let appendedCount = 0;
+    const appendedEntries: Array<ReturnType<typeof finalizeEntry>> = [];
     const lines = rawOutput.split("\n");
 
     for (const line of lines) {
@@ -344,18 +438,31 @@ async function runExtractionPipeline(params: {
         continue;
       }
 
-      const validation = validateLlmOutput(parsed);
+      const subjectTypeHint = readSubjectTypeHint(parsed);
+      const validation = validateLlmOutput(stripSubjectTypeHint(parsed));
       if (!validation.ok) {
         continue;
       }
 
       const entry = finalizeEntry(validation.entry, { sessionId: params.sessionId });
       if (entry.subject) {
-        await ensureSubject(params.paths.subjectsPath, entry.subject);
+        await ensureSubject(params.paths.subjectsPath, entry.subject, subjectTypeHint);
       }
 
       await appendEntry(params.paths.logPath, entry);
+      appendedEntries.push(entry);
       appendedCount += 1;
+    }
+
+    const latestHandoff = [...appendedEntries].reverse().find((entry) => entry.type === "handoff");
+    if (latestHandoff) {
+      try {
+        const memoryContent = await params.deps.readMemoryFile(params.memoryMdPath);
+        const updatedMemory = applyLastHandoffBlock(memoryContent, latestHandoff);
+        await params.deps.writeMemoryFile(params.memoryMdPath, updatedMemory);
+      } catch (error) {
+        params.logger.warn(`zettelclaw handoff write failed for ${params.sessionId}: ${normalizeError(error)}`);
+      }
     }
 
     await markExtracted(params.paths.statePath, params.sessionId, appendedCount);
@@ -409,6 +516,7 @@ export function registerExtractionHooks(
       sessionId: event.sessionId,
       messages,
       paths,
+      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx)),
       config,
       deps: runtimeDeps,
       logger: api.logger,
@@ -432,6 +540,7 @@ export function registerExtractionHooks(
       sessionId: ctx.sessionId,
       messages,
       paths,
+      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx)),
       config,
       deps: runtimeDeps,
       logger: api.logger,
@@ -465,6 +574,7 @@ export function registerExtractionHooks(
         sessionId: candidate.sessionId,
         messages,
         paths,
+        memoryMdPath: resolveMemoryMdPath(),
         config,
         deps: runtimeDeps,
         logger: api.logger,

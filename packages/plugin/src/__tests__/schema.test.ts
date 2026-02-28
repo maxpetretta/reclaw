@@ -3,9 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  VALID_SUBJECT_TYPES,
   appendEntry,
   generateId,
   injectMeta,
+  normalizeSubjectType,
+  parseSubjectType,
   readLog,
   validateEntry,
   validateLlmOutput,
@@ -54,6 +57,13 @@ describe("schema", () => {
     if (!validated.ok) {
       expect(validated.error).toContain("must not include id, timestamp, or session");
     }
+  });
+
+  test("subject type helpers enforce enum values", () => {
+    expect(VALID_SUBJECT_TYPES).toEqual(["project", "person", "system", "topic"]);
+    expect(parseSubjectType("person")).toBe("person");
+    expect(parseSubjectType("invalid")).toBeUndefined();
+    expect(normalizeSubjectType("invalid")).toBe("project");
   });
 
   test("injectMeta adds id, timestamp, and session", () => {

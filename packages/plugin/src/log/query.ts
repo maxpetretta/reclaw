@@ -1,6 +1,6 @@
 import { open } from "node:fs/promises";
-import { spawn } from "node:child_process";
-import { buildReplacementMap } from "./resolve";
+import { runPluginCommandWithTimeout } from "openclaw/plugin-sdk";
+import { buildReplacementMap, filterReplaced } from "./resolve";
 import { readLog, type EntryType, type LogEntry, validateEntry } from "./schema";
 
 export interface LogQueryFilter {
@@ -58,72 +58,123 @@ function sortByTimestampDesc(a: LogEntry, b: LogEntry): number {
   return Date.parse(b.timestamp) - Date.parse(a.timestamp);
 }
 
+function getCurrentEntries(allEntries: LogEntry[]): LogEntry[] {
+  return filterReplaced(allEntries).sort(sortByTimestampDesc);
+}
+
+function normalizeSubjectList(subjects: string[]): Set<string> {
+  const normalized = subjects
+    .map((subject) => subject.trim())
+    .filter((subject) => subject.length > 0);
+  return new Set(normalized);
+}
+
+function isOpenItem(entry: LogEntry): boolean {
+  return (entry.type === "task" && entry.status === "open") || entry.type === "question";
+}
+
+function selectSubjectEntries(entries: LogEntry[], subjects: Set<string>): LogEntry[] {
+  if (subjects.size === 0) {
+    return [];
+  }
+
+  return entries.filter((entry) => entry.subject && subjects.has(entry.subject));
+}
+
+function selectOpenItems(entries: LogEntry[]): LogEntry[] {
+  return entries.filter(isOpenItem);
+}
+
+function capPerSubject(entries: LogEntry[], maxPerSubject: number): LogEntry[] {
+  if (!Number.isFinite(maxPerSubject) || maxPerSubject <= 0) {
+    return [];
+  }
+
+  const counts = new Map<string, number>();
+  const limited: LogEntry[] = [];
+
+  for (const entry of entries) {
+    if (!entry.subject) {
+      continue;
+    }
+
+    const current = counts.get(entry.subject) ?? 0;
+    if (current >= maxPerSubject) {
+      continue;
+    }
+
+    counts.set(entry.subject, current + 1);
+    limited.push(entry);
+  }
+
+  return limited;
+}
+
+function unionById(...groups: LogEntry[][]): LogEntry[] {
+  const byId = new Map<string, LogEntry>();
+
+  for (const group of groups) {
+    for (const entry of group) {
+      byId.set(entry.id, entry);
+    }
+  }
+
+  return [...byId.values()].sort(sortByTimestampDesc);
+}
+
 async function ripgrepSearch(logPath: string, keyword: string): Promise<Set<string> | null> {
-  return await new Promise<Set<string> | null>((resolve) => {
-    const child = spawn(
-      "rg",
-      ["--fixed-strings", "--ignore-case", "--line-number", "--no-heading", keyword, logPath],
-      {
-        stdio: ["ignore", "pipe", "ignore"],
-      },
-    );
-
-    let stdout = "";
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      stdout += chunk.toString();
-    });
-
-    child.on("error", () => {
-      resolve(null);
-    });
-
-    child.on("close", (code) => {
-      if (code !== 0 && code !== 1) {
-        resolve(null);
-        return;
-      }
-
-      if (code === 1 || stdout.trim().length === 0) {
-        resolve(new Set());
-        return;
-      }
-
-      const ids = new Set<string>();
-      for (const line of stdout.split("\n")) {
-        if (!line.trim()) {
-          continue;
-        }
-
-        const separatorIndex = line.indexOf(":");
-        if (separatorIndex < 0) {
-          continue;
-        }
-
-        const jsonLine = line.slice(separatorIndex + 1).trim();
-        if (!jsonLine) {
-          continue;
-        }
-
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(jsonLine);
-        } catch {
-          continue;
-        }
-
-        const validated = validateEntry(parsed);
-        if (!validated.ok) {
-          continue;
-        }
-
-        if (matchesKeyword(validated.entry, keyword)) {
-          ids.add(validated.entry.id);
-        }
-      }
-
-      resolve(ids);
-    });
+  const result = await runPluginCommandWithTimeout({
+    argv: ["rg", "--fixed-strings", "--ignore-case", "--line-number", "--no-heading", keyword, logPath],
+    timeoutMs: 2000,
   });
+
+  if (result.code !== 0 && result.code !== 1) {
+    return null;
+  }
+
+  // rg uses exit code 1 for no matches; treat stderr as "command failed" for fallback.
+  if (result.code === 1 && result.stderr.trim().length > 0) {
+    return null;
+  }
+
+  if (result.stdout.trim().length === 0) {
+    return new Set();
+  }
+
+  const ids = new Set<string>();
+  for (const line of result.stdout.split("\n")) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex < 0) {
+      continue;
+    }
+
+    const jsonLine = line.slice(separatorIndex + 1).trim();
+    if (!jsonLine) {
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonLine);
+    } catch {
+      continue;
+    }
+
+    const validated = validateEntry(parsed);
+    if (!validated.ok) {
+      continue;
+    }
+
+    if (matchesKeyword(validated.entry, keyword)) {
+      ids.add(validated.entry.id);
+    }
+  }
+
+  return ids;
 }
 
 function applyFilterAndResolution(
@@ -168,6 +219,44 @@ function parseLine(line: string): LogEntry | undefined {
 export async function queryLog(logPath: string, filter: LogQueryFilter): Promise<LogEntry[]> {
   const allEntries = await readLog(logPath);
   return applyFilterAndResolution(allEntries, null, filter);
+}
+
+export async function queryBySubjects(logPath: string, subjects: string[]): Promise<LogEntry[]> {
+  const normalizedSubjects = normalizeSubjectList(subjects);
+  if (normalizedSubjects.size === 0) {
+    return [];
+  }
+
+  const allEntries = await readLog(logPath);
+  const currentEntries = getCurrentEntries(allEntries);
+  return selectSubjectEntries(currentEntries, normalizedSubjects);
+}
+
+export async function queryOpenItems(logPath: string): Promise<LogEntry[]> {
+  const allEntries = await readLog(logPath);
+  const currentEntries = getCurrentEntries(allEntries);
+  return selectOpenItems(currentEntries);
+}
+
+export async function queryExtractionContext(
+  logPath: string,
+  subjects: string[],
+  opts: { maxPerSubject?: number } = {},
+): Promise<LogEntry[]> {
+  const allEntries = await readLog(logPath);
+  const currentEntries = getCurrentEntries(allEntries);
+  const normalizedSubjects = normalizeSubjectList(subjects);
+  const openItems = selectOpenItems(currentEntries);
+  const subjectEntries = selectSubjectEntries(currentEntries, normalizedSubjects);
+
+  // Keep extraction context bounded if subject history grows very large.
+  const maxPerSubject =
+    typeof opts.maxPerSubject === "number" && Number.isFinite(opts.maxPerSubject)
+      ? Math.max(0, Math.floor(opts.maxPerSubject))
+      : 50;
+
+  const cappedSubjectEntries = capPerSubject(subjectEntries, maxPerSubject);
+  return unionById(cappedSubjectEntries, openItems);
 }
 
 export async function searchLog(

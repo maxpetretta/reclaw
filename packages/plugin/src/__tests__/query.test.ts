@@ -3,7 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEntry, type LogEntry } from "../log/schema";
-import { getLastHandoff, queryLog, searchLog } from "../log/query";
+import {
+  getLastHandoff,
+  queryBySubjects,
+  queryExtractionContext,
+  queryLog,
+  queryOpenItems,
+  searchLog,
+} from "../log/query";
 
 describe("query", () => {
   let tempDir = "";
@@ -64,6 +71,14 @@ describe("query", () => {
       subject: "auth-migration",
       session: "s6",
     },
+    {
+      id: "qid000000002",
+      timestamp: "2026-02-26T08:00:00.000Z",
+      type: "question",
+      content: "Do we need rollback drills?",
+      subject: "ops",
+      session: "s7",
+    },
   ];
 
   beforeEach(async () => {
@@ -84,10 +99,10 @@ describe("query", () => {
     expect(openTasks.map((entry) => entry.id)).toEqual(["tidopen00001"]);
 
     const questions = await queryLog(logPath, { type: "question" });
-    expect(questions).toHaveLength(0);
+    expect(questions.map((entry) => entry.id)).toEqual(["qid000000002"]);
 
     const allQuestions = await queryLog(logPath, { type: "question", includeReplaced: true });
-    expect(allQuestions.map((entry) => entry.id)).toEqual(["qid000000001"]);
+    expect(allQuestions.map((entry) => entry.id)).toEqual(["qid000000002", "qid000000001"]);
   });
 
   test("searchLog finds keyword matches and supports fallback when ripgrep is unavailable", async () => {
@@ -111,5 +126,33 @@ describe("query", () => {
   test("getLastHandoff returns the most recent handoff entry", async () => {
     const last = await getLastHandoff(logPath);
     expect(last?.id).toBe("hid000000002");
+  });
+
+  test("queryBySubjects returns current entries for matching subjects", async () => {
+    const entries = await queryBySubjects(logPath, ["auth-migration"]);
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "hid000000002",
+      "hid000000001",
+      "tiddone00001",
+      "tidopen00001",
+      "did000000001",
+    ]);
+  });
+
+  test("queryOpenItems returns unresolved questions and open tasks", async () => {
+    const openItems = await queryOpenItems(logPath);
+    expect(openItems.map((entry) => entry.id)).toEqual(["qid000000002", "tidopen00001"]);
+  });
+
+  test("queryExtractionContext unions subject entries with open items", async () => {
+    const context = await queryExtractionContext(logPath, ["auth-migration"]);
+    expect(context.map((entry) => entry.id)).toEqual([
+      "qid000000002",
+      "hid000000002",
+      "hid000000001",
+      "tiddone00001",
+      "tidopen00001",
+      "did000000001",
+    ]);
   });
 });

@@ -1,9 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { normalizeSubjectType, type SubjectType } from "../log/schema";
 
 export interface Subject {
   display: string;
-  type: string;
+  type: SubjectType;
 }
 
 export type SubjectRegistry = Record<string, Subject>;
@@ -41,13 +42,13 @@ function normalizeRegistry(raw: unknown): SubjectRegistry {
       continue;
     }
 
-    if (!isNonEmptyString(value.display) || !isNonEmptyString(value.type)) {
+    if (!isNonEmptyString(value.display)) {
       continue;
     }
 
     normalized[slug] = {
       display: value.display,
-      type: value.type,
+      type: normalizeSubjectType(value.type),
     };
   }
 
@@ -100,7 +101,7 @@ export async function ensureSubject(
 
   registry[slug] = {
     display: slugToDisplay(slug),
-    type: isNonEmptyString(inferredType) ? inferredType : "project",
+    type: normalizeSubjectType(inferredType),
   };
 
   await writeRegistry(path, registry);

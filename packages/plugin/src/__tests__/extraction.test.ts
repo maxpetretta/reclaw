@@ -1,17 +1,24 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { registerExtractionHooks } from "../hooks/extraction";
-import { readLog } from "../log/schema";
+import { appendEntry, readLog, type LogEntry } from "../log/schema";
+import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/handoff";
 import { readState } from "../state";
-import { readRegistry } from "../subjects/registry";
+import { readRegistry, writeRegistry } from "../subjects/registry";
 
 type HookHandlers = {
-  session_end?: (event: { sessionId: string; messageCount: number }, ctx: { agentId?: string; sessionId: string }) => Promise<void>;
-  before_reset?: (event: { messages?: unknown[] }, ctx: { sessionId?: string; sessionKey?: string }) => Promise<void>;
+  session_end?: (
+    event: { sessionId: string; messageCount: number },
+    ctx: { agentId?: string; sessionId: string; workspaceDir?: string },
+  ) => Promise<void>;
+  before_reset?: (
+    event: { messages?: unknown[] },
+    ctx: { sessionId?: string; sessionKey?: string; workspaceDir?: string },
+  ) => Promise<void>;
   gateway_start?: (event: { port: number }) => Promise<void>;
 };
 
@@ -51,6 +58,10 @@ function createPluginConfig(logDir: string): PluginConfig {
       timezone: "UTC",
     },
   };
+}
+
+async function seedLogEntry(logDir: string, entry: LogEntry): Promise<void> {
+  await appendEntry(join(logDir, "log.jsonl"), entry);
 }
 
 describe("extraction hooks", () => {
@@ -126,6 +137,40 @@ describe("extraction hooks", () => {
     expect(state.extractedSessions["session-1"]?.entries).toBe(1);
   });
 
+  test("auto-created subject types use enum validation with project fallback", async () => {
+    const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-types.jsonl");
+    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-types","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"Remember people and projects"}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"Noted"}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () =>
+        [
+          '{"type":"fact","content":"Pairing with Max on rollout","subject":"max","subjectType":"person"}',
+          '{"type":"fact","content":"Ops audit is queued","subject":"ops-audit","subjectType":"invalid"}',
+        ].join("\n"),
+    });
+
+    await handlers.session_end?.(
+      { sessionId: "session-types", messageCount: 5 },
+      { agentId: "agent-1", sessionId: "session-types" },
+    );
+
+    const registry = await readRegistry(join(logDir, "subjects.json"));
+    expect(registry.max?.type).toBe("person");
+    expect(registry["ops-audit"]?.type).toBe("project");
+  });
+
   test("before_reset skips scoped session types", async () => {
     let llmCalls = 0;
     const handlers: HookHandlers = {};
@@ -188,5 +233,254 @@ describe("extraction hooks", () => {
     expect(llmCalls).toBe(2);
     expect(state.failedSessions["session-fail"]?.retries).toBe(2);
     expect(state.extractedSessions["session-fail"]).toBeUndefined();
+  });
+
+  test("passes transcript-relevant existing entries and open items to extraction model", async () => {
+    await seedLogEntry(logDir, {
+      id: "factold0001a",
+      timestamp: "2026-02-10T00:00:00.000Z",
+      type: "fact",
+      content: "Retries are sync",
+      subject: "auth-migration",
+      session: "seed-1",
+    });
+    await seedLogEntry(logDir, {
+      id: "opentask0001",
+      timestamp: "2026-02-11T00:00:00.000Z",
+      type: "task",
+      content: "Backfill failed jobs",
+      status: "open",
+      subject: "other-project",
+      session: "seed-2",
+    });
+    await seedLogEntry(logDir, {
+      id: "openques0001",
+      timestamp: "2026-02-12T00:00:00.000Z",
+      type: "question",
+      content: "Do we need load tests?",
+      subject: "other-project",
+      session: "seed-3",
+    });
+    await seedLogEntry(logDir, {
+      id: "oldfact0001b",
+      timestamp: "2026-02-01T00:00:00.000Z",
+      type: "fact",
+      content: "Unrelated archived note",
+      subject: "infra",
+      session: "seed-4",
+    });
+    await writeRegistry(join(logDir, "subjects.json"), {
+      "auth-migration": { display: "Auth Migration", type: "project" },
+      "other-project": { display: "Other Project", type: "project" },
+      infra: { display: "Infra", type: "system" },
+    });
+
+    const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-context.jsonl");
+    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-context","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"auth-migration update: backfill failed jobs is done"}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"great, closing it"}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    let existingIds: string[] = [];
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async (opts) => {
+        existingIds = (opts.existingEntries ?? []).map((entry) => entry.id);
+        return '{"type":"task","content":"Backfill failed jobs","status":"done","subject":"other-project","replaces":"opentask0001"}';
+      },
+    });
+
+    await handlers.session_end?.(
+      { sessionId: "session-context", messageCount: 5 },
+      { agentId: "agent-1", sessionId: "session-context" },
+    );
+
+    expect(existingIds).toContain("factold0001a");
+    expect(existingIds).toContain("opentask0001");
+    expect(existingIds).toContain("openques0001");
+    expect(existingIds).not.toContain("oldfact0001b");
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    const completed = entries.find((entry) => entry.replaces === "opentask0001");
+    expect(completed?.type).toBe("task");
+    if (completed?.type === "task") {
+      expect(completed.status).toBe("done");
+    }
+  });
+
+  test("does not append duplicate fact when extraction model returns no changes", async () => {
+    await seedLogEntry(logDir, {
+      id: "factdup00001",
+      timestamp: "2026-02-15T00:00:00.000Z",
+      type: "fact",
+      content: "Queue retries enabled",
+      subject: "auth-migration",
+      session: "seed-1",
+    });
+    await writeRegistry(join(logDir, "subjects.json"), {
+      "auth-migration": { display: "Auth Migration", type: "project" },
+    });
+
+    const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-dup.jsonl");
+    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-dup","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"auth-migration still has queue retries enabled"}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"ack"}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+    let existingIds: string[] = [];
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async (opts) => {
+        existingIds = (opts.existingEntries ?? []).map((entry) => entry.id);
+        return "";
+      },
+    });
+
+    await handlers.session_end?.(
+      { sessionId: "session-dup", messageCount: 5 },
+      { agentId: "agent-1", sessionId: "session-dup" },
+    );
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    expect(existingIds).toContain("factdup00001");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.id).toBe("factdup00001");
+  });
+
+  test("writes handoff to MEMORY.md markers and overwrites previous handoff", async () => {
+    const workspaceDir = join(tempDir, "workspace");
+    const memoryPath = join(workspaceDir, "MEMORY.md");
+    await mkdir(workspaceDir, { recursive: true });
+    await writeFile(
+      memoryPath,
+      [
+        "## Goals",
+        "- Ship V3",
+        "",
+        "<!-- BEGIN GENERATED BRIEFING -->",
+        "## Active",
+        "- auth-migration — old briefing",
+        "<!-- END GENERATED BRIEFING -->",
+        "",
+        LAST_HANDOFF_BEGIN_MARKER,
+        "Session: old-session (2026-02-01T00:00:00.000Z)",
+        "Old handoff text",
+        LAST_HANDOFF_END_MARKER,
+        "",
+        "## Notes",
+        "Keep this note.",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const sessionsDir = join(openclawHome, "agents", "agent-1", "sessions");
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, "session-h1.jsonl"),
+      [
+        '{"type":"session","id":"session-h1","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"handoff one"}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"noted"}}',
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(sessionsDir, "session-h2.jsonl"),
+      [
+        '{"type":"session","id":"session-h2","timestamp":"2026-02-21T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-21T00:01:00.000Z","message":{"role":"user","content":"handoff two"}}',
+        '{"type":"message","timestamp":"2026-02-21T00:02:00.000Z","message":{"role":"assistant","content":"noted"}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+    let llmCalls = 0;
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () => {
+        llmCalls += 1;
+        if (llmCalls === 1) {
+          return '{"type":"handoff","content":"Auth migration in progress","detail":"Backfill remains","subject":"auth-migration"}';
+        }
+        return '{"type":"handoff","content":"Auth migration complete","detail":"Backfill done","subject":"auth-migration"}';
+      },
+    });
+
+    await handlers.session_end?.(
+      { sessionId: "session-h1", messageCount: 5 },
+      { agentId: "agent-1", sessionId: "session-h1", workspaceDir },
+    );
+
+    const firstMemory = await readFile(memoryPath, "utf8");
+    expect(firstMemory).toContain("## Last Session Handoff");
+    expect(firstMemory).toContain("Session: session-h1");
+    expect(firstMemory).toContain("Auth migration in progress");
+    expect(firstMemory).toContain("Detail: Backfill remains");
+    expect(firstMemory).not.toContain("Old handoff text");
+
+    await handlers.session_end?.(
+      { sessionId: "session-h2", messageCount: 5 },
+      { agentId: "agent-1", sessionId: "session-h2", workspaceDir },
+    );
+
+    const secondMemory = await readFile(memoryPath, "utf8");
+    expect(secondMemory).toContain("Session: session-h2");
+    expect(secondMemory).toContain("Auth migration complete");
+    expect(secondMemory).toContain("Detail: Backfill done");
+    expect(secondMemory).not.toContain("Session: session-h1");
+    expect(secondMemory).toContain("## Goals");
+    expect(secondMemory).toContain("## Notes");
+    expect(secondMemory).toContain("<!-- BEGIN GENERATED BRIEFING -->");
+    expect(secondMemory).toContain("<!-- END GENERATED BRIEFING -->");
+  });
+
+  test("creates handoff markers in MEMORY.md when missing", async () => {
+    const workspaceDir = join(tempDir, "workspace-no-markers");
+    const memoryPath = join(workspaceDir, "MEMORY.md");
+    await mkdir(workspaceDir, { recursive: true });
+    await writeFile(memoryPath, "## Goals\n- Keep velocity\n", "utf8");
+
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () =>
+        '{"type":"handoff","content":"Queue retries stable","detail":"Monitoring next 24h","subject":"auth-migration"}',
+    });
+
+    await handlers.before_reset?.(
+      {
+        messages: [
+          { role: "user", content: "Summarize handoff" },
+          { role: "assistant", content: "Done" },
+        ],
+      },
+      { sessionId: "session-reset-handoff", sessionKey: "agent:main", workspaceDir },
+    );
+
+    const memoryContent = await readFile(memoryPath, "utf8");
+    expect(memoryContent).toContain(LAST_HANDOFF_BEGIN_MARKER);
+    expect(memoryContent).toContain(LAST_HANDOFF_END_MARKER);
+    expect(memoryContent).toContain("Session: session-reset-handoff");
+    expect(memoryContent).toContain("Queue retries stable");
+    expect(memoryContent).toContain("## Goals");
   });
 });

@@ -50,6 +50,16 @@ describe("registry", () => {
     expect(registry.max).toEqual({ display: "Max", type: "person" });
   });
 
+  test("ensureSubject falls back to project type for invalid inferred type", async () => {
+    await ensureSubject(registryPath, "ops-audit", "unknown-type");
+
+    const registry = await readRegistry(registryPath);
+    expect(registry["ops-audit"]).toEqual({
+      display: "Ops Audit",
+      type: "project",
+    });
+  });
+
   test("renameSubject updates registry and log", async () => {
     await writeRegistry(registryPath, {
       old: { display: "Old", type: "project" },

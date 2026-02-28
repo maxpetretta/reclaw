@@ -6,7 +6,6 @@ import {
 import { resolveConfig } from "./config";
 import { registerZettelclawCli } from "./cli/commands";
 import { registerExtractionHooks } from "./hooks/extraction";
-import { registerHandoffHook } from "./hooks/handoff";
 import { createWrappedMemoryGetTool } from "./tools/memory-get";
 import { createWrappedMemorySearchTool } from "./tools/memory-search";
 
@@ -35,7 +34,6 @@ const zettelclawPlugin: OpenClawPluginDefinition = {
       { names: ["memory_search", "memory_get"] },
     );
 
-    registerHandoffHook(api, config);
     registerExtractionHooks(api, config);
   },
 };

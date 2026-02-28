@@ -72,6 +72,17 @@ Distilled from reviewing Berkay Ozcan, Vin (YouTube), Ramya Chinnadurai, Pedro/C
 }
 ```
 
+#### Subject type enum
+
+| Type | For | Examples |
+|---|---|---|
+| `project` | Things being built | zettelclaw, safeshell, bracky |
+| `person` | People | max, contacts |
+| `system` | Infrastructure, services, tools | openclaw, telegram, tts |
+| `topic` | Recurring themes that aren't a project, person, or system | ai-wearables, crypto |
+
+`project` is the default. The extraction hook validates `type` against this enum and falls back to `project` if the LLM outputs an unlisted value.
+
 #### Subject contract
 
 **Slug format:** Lowercase kebab-case. `auth-migration`, not `Auth_Migration` or `authMigration`.
@@ -300,6 +311,11 @@ The extraction agent reads the conversation transcript and produces JSONL entrie
 You are the memory extraction agent. Read the conversation transcript below
 and extract structured entries into the log.
 
+You will receive:
+- Known subjects from `subjects.json`
+- Existing log entries relevant to the current transcript (plus open items)
+- The current transcript
+
 ## Entry types
 
 - **task**: Something to do. Include status: open or done.
@@ -322,11 +338,19 @@ and extract structured entries into the log.
    background on a fact, what prompted a question, constraints on a task.
 5. Use existing slugs from the provided subjects list when a match exists. If the
    entry concerns something genuinely new, use a new kebab-case slug — the hook
-   will add it to the registry automatically. Don't force a subject on entries
+   will add it to the registry automatically. Subject types must be one of:
+   project, person, system, topic. Don't force a subject on entries
    that aren't clearly about a specific thing.
 6. Always produce exactly one handoff entry at the end.
 7. Skip trivial exchanges (greetings, acknowledgments, clarifying questions
    that led nowhere).
+8. Existing entries are provided so you can evolve memory, not duplicate it.
+   If a new fact or decision supersedes an existing entry, include `replaces`
+   with the old entry ID.
+9. Do not re-extract information that already exists in the log unless it has
+   changed.
+10. If a task is now done, emit a new `task` entry with `status: "done"` and
+    `replaces` pointing to the previous open task entry.
 
 ## Output format
 
@@ -337,6 +361,7 @@ programmatically by the extraction hook after your output.
 {"type":"decision","content":"...","detail":"...","subject":"..."}
 {"type":"fact","content":"...","subject":"..."}
 {"type":"task","content":"...","status":"open","subject":"..."}
+{"type":"task","content":"...","status":"done","subject":"...","replaces":"<open-task-id>"}
 {"type":"handoff","content":"...","detail":"..."}
 ```
 
@@ -353,6 +378,12 @@ The extraction hook receives the LLM's JSONL output and for each line:
 5. Sets `session` to the OpenClaw `sessionId` from the hook event context.
 6. If `subject` is present and not in `subjects.json`, adds it to the registry with `display` (Title Case) and `type` defaulting to `project`.
 7. Appends the complete entry to `log.jsonl`.
+
+Before step 1, the hook prepares extraction context and feeds it to the model:
+- Detects transcript-mentioned subjects by matching known slugs from `subjects.json`.
+- Reads `log.jsonl`, resolves replacements (`filterReplaced`), and selects current entries for those subjects.
+- Adds all open tasks and unresolved questions regardless of subject.
+- Sends these as `## Existing Entries` so the model can reference IDs in `replaces`.
 
 ### 4.3 Transcript access
 
@@ -375,7 +406,9 @@ The extraction hook accesses session transcripts differently depending on the tr
 
 **Common to all triggers:**
 - Messages are filtered for `type: "message"` entries with `role: "user"` or `role: "assistant"`.
-- The extracted conversation text is passed to the LLM extraction prompt (model: Sonnet) along with the current `subjects.json` contents.
+- The extracted conversation text is passed to the LLM extraction prompt (model: Sonnet) along with:
+  - the current `subjects.json` contents
+  - pre-filtered `## Existing Entries` from the current log (subject-relevant entries + open items), including IDs for `replaces` references
 
 ### 4.4 Hard content filter
 
@@ -463,7 +496,7 @@ The log is authoritative. The briefing is a cache. When they disagree, the log w
 When the agent needs information beyond what MEMORY.md and the handoff provide, it uses the zettelclaw-provided memory tools:
 
 1. **MEMORY.md** — auto-loaded by OpenClaw session bootstrap. Already in context.
-2. **Last handoff** — auto-injected by `before_prompt_build` hook via `prependContext`. Already in context.
+2. **Last handoff** — written into MEMORY.md between managed markers on each successful extraction when a handoff entry is produced.
 3. **`memory_search`** — zettelclaw's wrapped tool. Two search paths:
    - **Log search** (structured filters + ripgrep): precise lookups by type, subject, status. Keyword search over content/detail fields. Replacement-chain-aware.
    - **MEMORY.md search** (builtin semantic): delegated to OpenClaw's builtin for hybrid BM25+vector search over the manual section.
@@ -473,11 +506,13 @@ Each step is more expensive than the last. Most sessions should resolve from ste
 
 ## 6. Session Handover
 
-### 6.1 Handoff injection via `before_prompt_build`
+### 6.1 Handoff persistence in MEMORY.md
 
-On every agent turn, the `before_prompt_build` plugin hook fires before the system prompt is assembled. Zettelclaw registers on this hook, reads the most recent handoff entry from the log, and returns it as `prependContext` — which OpenClaw injects into the system prompt automatically. No file writes, no LLM call, runs in milliseconds.
+When extraction appends new entries to `log.jsonl`, it checks the newly appended entries for a handoff.
+If found, zettelclaw rewrites the `<!-- BEGIN LAST HANDOFF -->` / `<!-- END LAST HANDOFF -->`
+managed block in MEMORY.md with the latest handoff content.
 
-The injected context looks like:
+The generated handoff block looks like:
 
 ```
 ## Last Session Handoff
@@ -486,23 +521,16 @@ Auth migration — retry logic implementation, backfill script not started
 Detail: Exponential backoff working in staging. Still need backfill script for 47 failed jobs, then canary deploy. Load testing not done yet.
 ```
 
-MEMORY.md provides the broad landscape (nightly briefing). The handoff injection provides the immediate context (real-time). They don't overlap.
+If the handoff markers are missing, extraction appends them to MEMORY.md and writes the latest
+handoff between them.
 
 ### 6.2 Implementation note
 
-The `before_prompt_build` hook fires on every agent run, not just session start. To avoid re-reading the log on every message, the handoff hook caches the last handoff entry in memory and only re-reads when the `sessionId` changes (new session) or the log file's mtime is newer than the cached value.
+MEMORY.md now has two generated sections:
+- **Nightly briefing block** (`BEGIN/END GENERATED BRIEFING`) written by the cron briefing job.
+- **Last handoff block** (`BEGIN/END LAST HANDOFF`) written by extraction when a new handoff is appended.
 
-The hook can also pull recent decisions and tasks from the same session as the handoff (by matching `session` ID) to give fuller context without the handoff needing to repeat them.
-
-```typescript
-api.registerHook("before_prompt_build", async (event, ctx) => {
-  const handoff = getCachedLastHandoff(logDir);
-  if (!handoff) return;
-  return {
-    prependContext: formatHandoffContext(handoff),
-  };
-});
-```
+Each writer only edits its own marker block, so the two generated sections do not overwrite each other.
 
 ## 7. Obsidian Layer (Optional — deferred to v2)
 
@@ -603,7 +631,6 @@ zettelclaw/
     plugin.ts                     # Plugin entry — registers hooks, tools, CLI commands
     hooks/
       extraction.ts               # session_end / before_reset / gateway_start — extract from transcripts
-      handoff.ts                  # before_prompt_build — inject last handoff as prependContext
     tools/
       memory-search.ts            # Wraps builtin memory_search — adds structured filters + replacement resolution
       memory-get.ts               # Wraps builtin memory_get — adds entry-by-ID and transcript lookups
@@ -653,10 +680,10 @@ The pre-compaction memory flush (`agents.defaults.compaction.memoryFlush`) is di
 | Extraction hook | Plugin hook: `session_end` | Primary trigger — fires on any session end (daily/idle/explicit reset) |
 | Extraction hook | Plugin hook: `before_reset` | Secondary — provides `messages[]` inline on `/new`/`/reset` |
 | Extraction hook | Plugin hook: `gateway_start` | Sweep for un-extracted and failed sessions |
-| Handover hook | Plugin hook: `before_prompt_build` | Inject last handoff as `prependContext` in system prompt |
+| Handoff writer | Extraction post-processing | Rewrites MEMORY.md `LAST HANDOFF` managed block when new handoff is appended |
 | Nightly cron | `openclaw cron add` during init | Rewrite MEMORY.md briefing block (LLM-powered) |
 | Skill | `skills/zettelclaw/SKILL.md` | Agent instructions for the memory system |
-| CLI: init | Plugin-registered command | Create log directory, set memory slot, disable flush, register cron, add briefing markers to MEMORY.md |
+| CLI: init | Plugin-registered command | Create log directory, set memory slot, disable flush, register cron, add briefing + handoff markers to MEMORY.md |
 | CLI: log | Plugin-registered command | Pretty-print recent log entries |
 | CLI: search | Plugin-registered command | Search log with filters (type, subject, date range, `--all` for replaced) |
 | CLI: subjects | Plugin-registered command | `add`, `rename`, `list` — manage subject registry |
@@ -674,7 +701,9 @@ openclaw zettelclaw init
 3. Disables `agents.defaults.compaction.memoryFlush` (zettelclaw handles persistence)
 4. Disables the `session-memory` bundled hook if enabled
 5. Registers the nightly cron job for briefing generation
-6. Adds `<!-- BEGIN GENERATED BRIEFING -->` / `<!-- END GENERATED BRIEFING -->` markers to MEMORY.md
+6. Adds briefing markers and handoff markers to MEMORY.md:
+   - `<!-- BEGIN GENERATED BRIEFING -->` / `<!-- END GENERATED BRIEFING -->`
+   - `<!-- BEGIN LAST HANDOFF -->` / `<!-- END LAST HANDOFF -->`
 
 ### 8.4 Configuration
 
@@ -862,7 +891,7 @@ By replacing `memory-core`, zettelclaw eliminates:
 
 5. **Subject auto-creation**: Verify new subjects from extraction are added to `subjects.json`. Verify `openclaw zettelclaw subjects add` and `openclaw zettelclaw subjects rename` work correctly (rename updates both registry and log).
 
-6. **Handover injection**: Start a new session. Verify the agent sees the last handoff context via `before_prompt_build` → `prependContext`. Check that it knows what was being worked on without searching.
+6. **Handoff persistence**: End a session that emits a handoff. Verify MEMORY.md `LAST HANDOFF` block is updated. Start a new session and confirm the handoff appears via MEMORY.md auto-load.
 
 7. **Nightly briefing**: Run `openclaw cron run <zettelclaw-briefing>`. Verify MEMORY.md's generated block is updated. Verify manual content outside the markers is preserved. Verify active subjects, recent decisions, pending items, and stale subjects are populated correctly from the log.
 
@@ -891,7 +920,7 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 | 9 | Session ID format | OpenClaw's `sessionId` from hook event context. Maps to `<sessionId>.jsonl` transcript. |
 | 10 | Duplicate handoffs | `state.json` tracks `extractedSessions` map (set of sessionIds). Same session = skip. Failed sessions tracked with retry count (max 1 retry). Map pruned after 30d. |
 | 11 | JSONL indexing | Builtin indexer is markdown-only. Log search handled by wrapper (structured filters + ripgrep). Semantic search covers MEMORY.md only for v1. |
-| 12 | Handoff injection | `before_prompt_build` hook → `prependContext`. Cached in memory, re-read on session change or log mtime change. |
+| 12 | Handoff persistence | Extraction rewrites MEMORY.md `LAST HANDOFF` block when new handoff entries are appended. |
 | 13 | Extraction model | Sonnet (configurable via `extraction.model`). |
 | 14 | Scope filtering | Only main sessions extracted. Skip `cron:`, `sub:`, `hook:` session key prefixes. |
 | 15 | Error handling | Retry extraction once on failure. Mark as permanently failed after second failure. `gateway_start` sweep also retries. |
@@ -925,9 +954,9 @@ Recommended implementation sequence. Each phase is independently testable.
 - `plugin.ts` — register tools, hooks, CLI
 - **Test:** Install plugin, verify `memory_search` with type/subject filters works, verify `memory_get` by entry ID works, verify `memory-core` is disabled
 
-### Phase 4: Handoff injection
-- `hooks/handoff.ts` — `before_prompt_build` handler, cached last handoff
-- **Test:** End a session, start a new one, verify the agent sees the handoff context without searching
+### Phase 4: Handoff persistence
+- Extraction post-processing writes `LAST HANDOFF` markers in MEMORY.md
+- **Test:** End a session with a handoff, verify MEMORY.md handoff block updates and is loaded in the next session
 
 ### Phase 5: Briefing generation
 - `prompts/briefing.md` — briefing generation prompt
