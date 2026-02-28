@@ -12,15 +12,25 @@ export interface FailedSession {
   retries: number;
 }
 
+export interface ImportedConversationState {
+  at: string;
+  updatedAt: string;
+  sessionId: string;
+  entries: number;
+  title?: string;
+}
+
 export interface ZettelclawState {
   extractedSessions: Record<string, ExtractedSession>;
   failedSessions: Record<string, FailedSession>;
+  importedConversations: Record<string, ImportedConversationState>;
 }
 
 function createEmptyState(): ZettelclawState {
   return {
     extractedSessions: {},
     failedSessions: {},
+    importedConversations: {},
   };
 }
 
@@ -37,6 +47,29 @@ function isEnoent(error: unknown): boolean {
   );
 }
 
+const IMPORTED_PLATFORM_SET = new Set(["chatgpt", "claude", "grok"]);
+
+function parseConversationKey(value: string): { platform: string; conversationId: string } | null {
+  const delimiterIndex = value.indexOf(":");
+  if (delimiterIndex <= 0 || delimiterIndex >= value.length - 1) {
+    return null;
+  }
+
+  return {
+    platform: value.slice(0, delimiterIndex),
+    conversationId: value.slice(delimiterIndex + 1),
+  };
+}
+
+function hasValidImportedSessionId(conversationKey: string, sessionId: string): boolean {
+  const parsedKey = parseConversationKey(conversationKey);
+  if (!parsedKey || !IMPORTED_PLATFORM_SET.has(parsedKey.platform)) {
+    return false;
+  }
+
+  return sessionId === `reclaw:${parsedKey.platform}:${parsedKey.conversationId}`;
+}
+
 function normalizeState(raw: unknown): ZettelclawState {
   if (!isObject(raw)) {
     return createEmptyState();
@@ -44,9 +77,11 @@ function normalizeState(raw: unknown): ZettelclawState {
 
   const extractedSessions: Record<string, ExtractedSession> = {};
   const failedSessions: Record<string, FailedSession> = {};
+  const importedConversations: Record<string, ImportedConversationState> = {};
 
   const extractedRaw = isObject(raw.extractedSessions) ? raw.extractedSessions : {};
   const failedRaw = isObject(raw.failedSessions) ? raw.failedSessions : {};
+  const importedRaw = isObject(raw.importedConversations) ? raw.importedConversations : {};
 
   for (const [sessionId, sessionValue] of Object.entries(extractedRaw)) {
     if (!isObject(sessionValue)) {
@@ -88,9 +123,41 @@ function normalizeState(raw: unknown): ZettelclawState {
     };
   }
 
+  for (const [conversationKey, conversationValue] of Object.entries(importedRaw)) {
+    if (!isObject(conversationValue)) {
+      continue;
+    }
+
+    const sessionId =
+      typeof conversationValue.sessionId === "string" ? conversationValue.sessionId.trim() : "";
+
+    if (
+      typeof conversationValue.at !== "string" ||
+      !Number.isFinite(Date.parse(conversationValue.at)) ||
+      typeof conversationValue.updatedAt !== "string" ||
+      !Number.isFinite(Date.parse(conversationValue.updatedAt)) ||
+      sessionId.length === 0 ||
+      !hasValidImportedSessionId(conversationKey, sessionId) ||
+      typeof conversationValue.entries !== "number"
+    ) {
+      continue;
+    }
+
+    importedConversations[conversationKey] = {
+      at: conversationValue.at,
+      updatedAt: conversationValue.updatedAt,
+      sessionId,
+      entries: conversationValue.entries,
+      ...(typeof conversationValue.title === "string" && conversationValue.title.trim().length > 0
+        ? { title: conversationValue.title }
+        : {}),
+    };
+  }
+
   return {
     extractedSessions,
     failedSessions,
+    importedConversations,
   };
 }
 
@@ -146,6 +213,10 @@ export async function markFailed(path: string, sessionId: string, error: string)
 
 export function isExtracted(state: ZettelclawState, sessionId: string): boolean {
   return Boolean(state.extractedSessions[sessionId]);
+}
+
+export function isImportedConversation(state: ZettelclawState, conversationKey: string): boolean {
+  return Boolean(state.importedConversations[conversationKey]);
 }
 
 export function shouldRetry(state: ZettelclawState, sessionId: string): boolean {

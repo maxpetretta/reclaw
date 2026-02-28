@@ -29,6 +29,7 @@ describe("state", () => {
     expect(await readState(statePath)).toEqual({
       extractedSessions: {},
       failedSessions: {},
+      importedConversations: {},
     });
   });
 
@@ -40,6 +41,25 @@ describe("state", () => {
     expect(isExtracted(state, "session-1")).toBe(true);
     expect(state.extractedSessions["session-1"]?.entries).toBe(3);
     expect(state.failedSessions["session-1"]).toBeUndefined();
+  });
+
+  test("readState ignores imported records with invalid sessionId format", async () => {
+    const at = new Date().toISOString();
+    await writeState(statePath, {
+      extractedSessions: {},
+      failedSessions: {},
+      importedConversations: {
+        "chatgpt:bad": {
+          at,
+          updatedAt: at,
+          sessionId: "not-reclaw",
+          entries: 1,
+        },
+      },
+    });
+
+    const state = await readState(statePath);
+    expect(state.importedConversations["chatgpt:bad"]).toBeUndefined();
   });
 
   test("markFailed increments retries and shouldRetry reflects retry policy", async () => {
@@ -71,6 +91,15 @@ describe("state", () => {
         old: { at: oldAt, error: "x", retries: 1 },
         recent: { at: recentAt, error: "y", retries: 1 },
       },
+      importedConversations: {
+        "chatgpt:old": {
+          at: oldAt,
+          updatedAt: oldAt,
+          sessionId: "reclaw:chatgpt:old",
+          entries: 1,
+          title: "Old",
+        },
+      },
     });
 
     await pruneState(statePath);
@@ -80,5 +109,6 @@ describe("state", () => {
     expect(state.failedSessions.old).toBeUndefined();
     expect(state.extractedSessions.recent).toBeDefined();
     expect(state.failedSessions.recent).toBeDefined();
+    expect(state.importedConversations["chatgpt:old"]).toBeDefined();
   });
 });
