@@ -1,4 +1,4 @@
-export const IMPORT_PLATFORMS = ["chatgpt", "claude", "grok"] as const;
+export const IMPORT_PLATFORMS = ["chatgpt", "claude", "grok", "openclaw"] as const;
 
 export type ImportPlatform = (typeof IMPORT_PLATFORMS)[number];
 

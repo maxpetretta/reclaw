@@ -171,6 +171,41 @@ describe("import run", () => {
     expect(state.importedConversations["chatgpt:dry-run"]).toBeUndefined();
   });
 
+  test("openclaw platform defaults min-messages to 1 for markdown migration", async () => {
+    const summary = await runReclawImport(
+      {
+        platform: "openclaw",
+        filePath: join(tempDir, "memory"),
+        logPath,
+        subjectsPath,
+        statePath,
+        model: "anthropic/claude-haiku-4-5",
+        openClawHome,
+      },
+      {
+        readImportFile: async () => ({}),
+        parseConversations: () => [makeConversation("memory-file-1", "2024-01-06T00:00:00.000Z", 1, "openclaw")],
+        extractConversation: async ({ sessionId }) => [
+          finalizeEntry(
+            {
+              type: "fact",
+              content: "Imported legacy memory entry",
+            },
+            {
+              sessionId,
+              timestamp: "2024-01-06T00:00:00.000Z",
+            },
+          ),
+        ],
+      },
+      silentLogger,
+    );
+
+    expect(summary.selected).toBe(1);
+    expect(summary.imported).toBe(1);
+    expect(summary.skippedByMinMessages).toBe(0);
+  });
+
   test("--force bypasses importedConversations dedupe", async () => {
     const updatedAt = "2024-01-07T00:00:00.000Z";
     const conversation = makeConversation("force-me", updatedAt, 6);

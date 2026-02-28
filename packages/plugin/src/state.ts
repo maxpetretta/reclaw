@@ -47,7 +47,7 @@ function isEnoent(error: unknown): boolean {
   );
 }
 
-const IMPORTED_PLATFORM_SET = new Set(["chatgpt", "claude", "grok"]);
+const IMPORTED_PLATFORM_SET = new Set(["chatgpt", "claude", "grok", "openclaw"]);
 
 function parseConversationKey(value: string): { platform: string; conversationId: string } | null {
   const delimiterIndex = value.indexOf(":");

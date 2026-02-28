@@ -3,10 +3,16 @@
   "version": "3.0.0",
   "type": "module",
   "main": "src/plugin.ts",
+  "openclaw": {
+    "extensions": [
+      "./src/plugin.ts"
+    ]
+  },
   "peerDependencies": {
     "openclaw": "*"
   },
   "dependencies": {
+    "@clack/prompts": "1.0.1",
     "nanoid": "^5.1.5"
   },
   "devDependencies": {

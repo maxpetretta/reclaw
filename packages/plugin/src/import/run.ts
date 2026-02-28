@@ -10,6 +10,7 @@ import { ensureSubject } from "../subjects/registry";
 import { parseChatGptConversations } from "./adapters/chatgpt";
 import { parseClaudeConversations } from "./adapters/claude";
 import { parseGrokConversations } from "./adapters/grok";
+import { loadOpenClawImportSource, parseOpenClawConversations } from "./adapters/openclaw";
 import { extractImportedConversation } from "./extract";
 import { writeImportedSession } from "./sessions";
 import type { ImportPlatform, ImportedConversation } from "./types";
@@ -65,7 +66,12 @@ interface ImportLogger {
 }
 
 interface ReclawImportDeps {
-  readImportFile: (path: string) => Promise<unknown>;
+  readImportFile: (params: {
+    platform: ImportPlatform;
+    filePath: string;
+    openClawHome?: string;
+    agentId?: string;
+  }) => Promise<unknown>;
   parseConversations: (platform: ImportPlatform, raw: unknown) => ImportedConversation[];
   extractConversation: (params: {
     conversation: ImportedConversation;
@@ -92,8 +98,15 @@ const DEFAULT_LOGGER: ImportLogger = {
 };
 
 const DEFAULT_DEPS: ReclawImportDeps = {
-  async readImportFile(path) {
-    const rawText = await readFile(path, "utf8");
+  async readImportFile(params) {
+    if (params.platform === "openclaw") {
+      return await loadOpenClawImportSource(params.filePath, {
+        openClawHome: params.openClawHome,
+        preferredAgentId: params.agentId,
+      });
+    }
+
+    const rawText = await readFile(params.filePath, "utf8");
     try {
       return JSON.parse(rawText) as unknown;
     } catch (error) {
@@ -108,6 +121,10 @@ const DEFAULT_DEPS: ReclawImportDeps = {
 
     if (platform === "claude") {
       return parseClaudeConversations(raw);
+    }
+
+    if (platform === "openclaw") {
+      return parseOpenClawConversations(raw);
     }
 
     return parseGrokConversations(raw);
@@ -256,7 +273,8 @@ export async function runReclawImport(
     ...deps,
   };
 
-  const minMessages = Math.max(1, Math.floor(options.minMessages ?? DEFAULT_IMPORT_MIN_MESSAGES));
+  const defaultMinMessages = options.platform === "openclaw" ? 1 : DEFAULT_IMPORT_MIN_MESSAGES;
+  const minMessages = Math.max(1, Math.floor(options.minMessages ?? defaultMinMessages));
   const jobs = Math.max(1, Math.floor(options.jobs ?? DEFAULT_IMPORT_JOBS));
   const model = options.model?.trim() || DEFAULT_IMPORT_MODEL;
   const transcripts = options.transcripts !== false;
@@ -264,7 +282,12 @@ export async function runReclawImport(
   const afterMs = parseBoundary(options.after, "--after");
   const beforeMs = parseBoundary(options.before, "--before");
 
-  const rawImport = await runtimeDeps.readImportFile(options.filePath);
+  const rawImport = await runtimeDeps.readImportFile({
+    platform: options.platform,
+    filePath: options.filePath,
+    openClawHome: options.openClawHome,
+    agentId: options.agentId,
+  });
   const parsedRaw = runtimeDeps.parseConversations(options.platform, rawImport);
   const deduped = dedupeInputConversations(options.platform, parsedRaw);
   const state = await runtimeDeps.readState(options.statePath);
