@@ -8,6 +8,13 @@ const execAsync = promisify(exec);
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { generateBriefing } from "../briefing/generate";
+import {
+  DEFAULT_IMPORT_JOBS,
+  DEFAULT_IMPORT_MIN_MESSAGES,
+  DEFAULT_IMPORT_MODEL,
+  runReclawImport,
+} from "../import/run";
+import type { ImportPlatform } from "../import/types";
 import { queryLog, searchLog } from "../log/query";
 import type { EntryType, LogEntry } from "../log/schema";
 import { ensureSubject, readRegistry, renameSubject, writeRegistry } from "../subjects/registry";
@@ -87,6 +94,50 @@ function parseStatus(raw: unknown): "open" | "done" | undefined {
   }
 
   return undefined;
+}
+
+function parseImportPlatform(raw: unknown): ImportPlatform | undefined {
+  if (raw === "chatgpt" || raw === "claude" || raw === "grok") {
+    return raw;
+  }
+
+  return undefined;
+}
+
+function readGatewayPort(config: unknown): number | null {
+  if (!isObject(config)) {
+    return null;
+  }
+
+  const gateway = config.gateway;
+  if (!isObject(gateway)) {
+    return null;
+  }
+
+  return typeof gateway.port === "number" && Number.isFinite(gateway.port) ? gateway.port : null;
+}
+
+function readGatewayToken(config: unknown): string | undefined {
+  if (!isObject(config)) {
+    return undefined;
+  }
+
+  const gateway = config.gateway;
+  if (!isObject(gateway)) {
+    return undefined;
+  }
+
+  const auth = gateway.auth;
+  if (!isObject(auth)) {
+    return undefined;
+  }
+
+  return typeof auth.token === "string" && auth.token.trim().length > 0 ? auth.token : undefined;
+}
+
+function resolveApiBaseUrl(config: unknown): string {
+  const port = readGatewayPort(config) ?? 18789;
+  return `http://127.0.0.1:${port}`;
 }
 
 function formatTimestamp(iso: string): string {
@@ -436,6 +487,70 @@ function registerZettelclawCliCommands(
           : await queryLog(paths.logPath, filter);
 
       printEntries(entries);
+    });
+
+  zettelclaw
+    .command("import <platform> <file>")
+    .description("Import Reclaw historical conversation exports")
+    .option("--dry-run", "Preview import without writing files", false)
+    .option("--after <date>", "Only include conversations updated on/after this date")
+    .option("--before <date>", "Only include conversations updated on/before this date")
+    .option("--min-messages <n>", "Minimum user/assistant messages per conversation", DEFAULT_IMPORT_MIN_MESSAGES)
+    .option("--jobs <n>", "Concurrent import workers", DEFAULT_IMPORT_JOBS)
+    .option("--model <model>", "Extraction model", DEFAULT_IMPORT_MODEL)
+    .option("--force", "Import even if conversation was imported before", false)
+    .option("--no-transcripts", "Do not write OpenClaw transcript sessions")
+    .option("--verbose", "Verbose progress output", false)
+    .action(async (platform: unknown, file: unknown, opts: unknown) => {
+      const parsedPlatform = parseImportPlatform(platform);
+      if (!parsedPlatform) {
+        throw new Error('platform must be one of: "chatgpt", "claude", "grok"');
+      }
+
+      if (typeof file !== "string" || file.trim().length === 0) {
+        throw new Error("file is required");
+      }
+
+      const options = toObject(opts);
+      const paths = resolvePaths(config, workspaceDir);
+      await ensureLogStoreFiles(paths);
+
+      const summary = await runReclawImport(
+        {
+          platform: parsedPlatform,
+          filePath: file.trim(),
+          logPath: paths.logPath,
+          subjectsPath: paths.subjectsPath,
+          statePath: paths.statePath,
+          dryRun: options.dryRun === true,
+          after: typeof options.after === "string" ? options.after : undefined,
+          before: typeof options.before === "string" ? options.before : undefined,
+          minMessages: readNumberOption(options.minMessages, DEFAULT_IMPORT_MIN_MESSAGES),
+          jobs: readNumberOption(options.jobs, DEFAULT_IMPORT_JOBS),
+          model: typeof options.model === "string" ? options.model : DEFAULT_IMPORT_MODEL,
+          force: options.force === true,
+          transcripts: options.transcripts !== false,
+          verbose: options.verbose === true,
+          apiBaseUrl: resolveApiBaseUrl(api.config),
+          apiToken: readGatewayToken(api.config),
+          openClawHome: resolveOpenClawHome(),
+        },
+      );
+
+      console.log("Reclaw import summary:");
+      console.log(`  Parsed: ${summary.parsed}`);
+      console.log(`  Deduped in input: ${summary.dedupedInInput}`);
+      console.log(`  Selected: ${summary.selected}`);
+      console.log(`  Skipped (date): ${summary.skippedByDate}`);
+      console.log(`  Skipped (min-messages): ${summary.skippedByMinMessages}`);
+      console.log(`  Skipped (already imported): ${summary.skippedAlreadyImported}`);
+      console.log(`  Imported: ${summary.imported}`);
+      console.log(`  Failed: ${summary.failed}`);
+      console.log(`  Entries written: ${summary.entriesWritten}`);
+      console.log(`  Transcripts written: ${summary.transcriptsWritten}`);
+      if (summary.dryRun) {
+        console.log("  Mode: dry-run");
+      }
     });
 
   const subjects = zettelclaw.command("subjects").description("Manage subject registry");
