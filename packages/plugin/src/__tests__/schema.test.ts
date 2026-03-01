@@ -63,7 +63,7 @@ describe("schema", () => {
     expect(VALID_SUBJECT_TYPES).toEqual(["project", "person", "system", "topic"]);
     expect(parseSubjectType("person")).toBe("person");
     expect(parseSubjectType("invalid")).toBeUndefined();
-    expect(normalizeSubjectType("invalid")).toBe("project");
+    expect(normalizeSubjectType("invalid")).toBe("topic");
   });
 
   test("injectMeta adds id, timestamp, and session", () => {

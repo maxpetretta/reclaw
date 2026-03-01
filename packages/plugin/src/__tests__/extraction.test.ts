@@ -16,8 +16,8 @@ type HookHandlers = {
     ctx: { agentId?: string; sessionId: string; workspaceDir?: string },
   ) => Promise<void>;
   before_reset?: (
-    event: { messages?: unknown[] },
-    ctx: { sessionId?: string; sessionKey?: string; workspaceDir?: string },
+    event: { messages?: unknown[]; sessionFile?: string },
+    ctx: { agentId?: string; sessionId?: string; sessionKey?: string; workspaceDir?: string },
   ) => Promise<void>;
   gateway_start?: (event: { port: number }) => Promise<void>;
 };
@@ -136,7 +136,55 @@ describe("extraction hooks", () => {
     expect(state.extractedSessions["session-1"]?.entries).toBe(1);
   });
 
-  test("auto-created subject types use enum validation with project fallback", async () => {
+  test("session_end skips non-main sessions discovered from sessions.json key", async () => {
+    const sessionsDir = join(openclawHome, "agents", "agent-1", "sessions");
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, "session-sub.jsonl"),
+      [
+        '{"type":"session","id":"session-sub","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"should be skipped"}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"ack"}}',
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(sessionsDir, "sessions.json"),
+      JSON.stringify(
+        {
+          "sub:worker:agent-1": {
+            sessionId: "session-sub",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    let llmCalls = 0;
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () => {
+        llmCalls += 1;
+        return '{"type":"fact","content":"should not be extracted"}';
+      },
+    });
+
+    await handlers.session_end?.(
+      { sessionId: "session-sub", messageCount: 5 },
+      { agentId: "agent-1", sessionId: "session-sub" },
+    );
+
+    const state = await readState(join(logDir, "state.json"));
+    expect(llmCalls).toBe(0);
+    expect(state.extractedSessions["session-sub"]).toBeUndefined();
+    expect(state.failedSessions["session-sub"]).toBeUndefined();
+  });
+
+  test("auto-created subject types use enum validation with topic fallback", async () => {
     const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-types.jsonl");
     await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
     await writeFile(
@@ -152,9 +200,14 @@ describe("extraction hooks", () => {
     const handlers: HookHandlers = {};
     const api = createMockApi({}, handlers);
 
+    await writeRegistry(join(logDir, "subjects.json"), {
+      "auth-migration": { display: "Auth Migration", type: "project" },
+    });
+
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () =>
         [
+          '{"type":"fact","content":"Auth migration moved under platform systems","subject":"auth-migration","subjectType":"system"}',
           '{"type":"fact","content":"Pairing with Max on rollout","subject":"max","subjectType":"person"}',
           '{"type":"fact","content":"Ops audit is queued","subject":"ops-audit","subjectType":"invalid"}',
         ].join("\n"),
@@ -166,8 +219,89 @@ describe("extraction hooks", () => {
     );
 
     const registry = await readRegistry(join(logDir, "subjects.json"));
+    expect(registry["auth-migration"]?.type).toBe("system");
     expect(registry.max?.type).toBe("person");
-    expect(registry["ops-audit"]?.type).toBe("project");
+    expect(registry["ops-audit"]?.type).toBe("topic");
+  });
+
+  test("uses transcript-cited event id for replaces when output omits it", async () => {
+    await seedLogEntry(logDir, {
+      id: "opentask0001",
+      timestamp: "2026-02-11T00:00:00.000Z",
+      type: "task",
+      content: "Backfill failed jobs",
+      status: "open",
+      subject: "auth-migration",
+      session: "seed-1",
+    });
+
+    const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-cited-id.jsonl");
+    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-cited-id","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"According to [opentask0001], backfill failed jobs is done now."}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"I will mark it complete."}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () =>
+        '{"type":"task","content":"Backfill failed jobs","status":"done","subject":"auth-migration"}',
+    });
+
+    await handlers.session_end?.(
+      { sessionId: "session-cited-id", messageCount: 5 },
+      { agentId: "agent-1", sessionId: "session-cited-id" },
+    );
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    const doneTask = entries.find((entry) => entry.type === "task" && entry.session === "session-cited-id");
+    expect(doneTask?.replaces).toBe("opentask0001");
+  });
+
+  test("searches log to resolve replaces when transcript has no direct id", async () => {
+    await seedLogEntry(logDir, {
+      id: "dec000000001",
+      timestamp: "2026-02-11T00:00:00.000Z",
+      type: "decision",
+      content: "Queue retries for webhook failures",
+      detail: "Initial approach before rollout findings",
+      subject: "auth-migration",
+      session: "seed-1",
+    });
+
+    const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-search-link.jsonl");
+    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-search-link","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"Update auth-migration decision: queue retries should use exponential backoff and a dead-letter queue."}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"Acknowledged."}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () =>
+        '{"type":"decision","content":"Queue retries for webhook failures","detail":"Now using exponential backoff and dead-letter queue","subject":"auth-migration"}',
+    });
+
+    await handlers.session_end?.(
+      { sessionId: "session-search-link", messageCount: 5 },
+      { agentId: "agent-1", sessionId: "session-search-link" },
+    );
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    const decision = entries.find((entry) => entry.type === "decision" && entry.session === "session-search-link");
+    expect(decision?.replaces).toBe("dec000000001");
   });
 
   test("before_reset skips scoped session types", async () => {
@@ -197,6 +331,46 @@ describe("extraction hooks", () => {
     const state = await readState(join(logDir, "state.json"));
     expect(llmCalls).toBe(0);
     expect(state.extractedSessions["session-2"]).toBeUndefined();
+  });
+
+  test("before_reset falls back to sessionFile transcript when messages are missing", async () => {
+    const workspaceDir = join(tempDir, "workspace-reset-fallback");
+    await mkdir(workspaceDir, { recursive: true });
+
+    const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-reset.jsonl");
+    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-reset","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"remember this fallback"}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"saved"}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    let llmCalls = 0;
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () => {
+        llmCalls += 1;
+        return '{"type":"fact","content":"Loaded from sessionFile fallback","subject":"auth-migration"}';
+      },
+    });
+
+    await handlers.before_reset?.(
+      {
+        sessionFile: transcriptPath,
+      },
+      { agentId: "agent-1", sessionId: "session-reset", sessionKey: "agent:main", workspaceDir },
+    );
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    expect(llmCalls).toBe(1);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.content).toContain("sessionFile fallback");
   });
 
   test("failed extraction is marked once and not retried after limit", async () => {
@@ -232,6 +406,29 @@ describe("extraction hooks", () => {
     expect(llmCalls).toBe(2);
     expect(state.failedSessions["session-fail"]?.retries).toBe(2);
     expect(state.extractedSessions["session-fail"]).toBeUndefined();
+  });
+
+  test("non-empty invalid extraction output is treated as failure", async () => {
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () => "not-json\nalso-not-json",
+    });
+
+    await handlers.before_reset?.(
+      {
+        messages: [
+          { role: "user", content: "store this please" },
+          { role: "assistant", content: "ok" },
+        ],
+      },
+      { sessionId: "session-invalid-output", sessionKey: "agent:main" },
+    );
+
+    const state = await readState(join(logDir, "state.json"));
+    expect(state.extractedSessions["session-invalid-output"]).toBeUndefined();
+    expect(state.failedSessions["session-invalid-output"]?.retries).toBe(1);
   });
 
   test("passes transcript-relevant existing entries and open items to extraction model", async () => {
@@ -360,6 +557,38 @@ describe("extraction hooks", () => {
     expect(existingIds).toContain("factdup00001");
     expect(entries).toHaveLength(1);
     expect(entries[0]?.id).toBe("factdup00001");
+  });
+
+  test("session_end skips transcripts without user messages", async () => {
+    const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-no-user.jsonl");
+    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-no-user","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"assistant","content":"internal note"}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    let llmCalls = 0;
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () => {
+        llmCalls += 1;
+        return '{"type":"fact","content":"should not happen"}';
+      },
+    });
+
+    await handlers.session_end?.(
+      { sessionId: "session-no-user", messageCount: 2 },
+      { agentId: "agent-1", sessionId: "session-no-user" },
+    );
+
+    const state = await readState(join(logDir, "state.json"));
+    expect(llmCalls).toBe(0);
+    expect(state.extractedSessions["session-no-user"]).toBeUndefined();
   });
 
   test("writes handoff to MEMORY.md markers and overwrites previous handoff", async () => {

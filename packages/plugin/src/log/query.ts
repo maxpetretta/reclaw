@@ -8,6 +8,8 @@ export interface LogQueryFilter {
   subject?: string;
   status?: "open" | "done";
   session?: string;
+  from?: string;
+  to?: string;
   includeReplaced?: boolean;
 }
 
@@ -39,6 +41,21 @@ function matchesFilter(entry: LogEntry, filter: LogQueryFilter): boolean {
 
   if (filter.session && entry.session !== filter.session) {
     return false;
+  }
+
+  const entryTimestamp = Date.parse(entry.timestamp);
+  if (filter.from) {
+    const from = Date.parse(filter.from);
+    if (Number.isFinite(from) && Number.isFinite(entryTimestamp) && entryTimestamp < from) {
+      return false;
+    }
+  }
+
+  if (filter.to) {
+    const to = Date.parse(filter.to);
+    if (Number.isFinite(to) && Number.isFinite(entryTimestamp) && entryTimestamp > to) {
+      return false;
+    }
   }
 
   if (filter.status) {

@@ -30,17 +30,22 @@ You will receive:
    entry concerns something genuinely new, use a new kebab-case slug — the hook
    will add it to the registry automatically. For new subjects, include
    `subjectType` with one of: `project`, `person`, `system`, `topic`.
-   If unsure, use `project`. Don't force a subject on entries that aren't
-   clearly about a specific thing.
+   If unsure, use `topic`. If an existing subject's type should be corrected,
+   include `subjectType` on the entry and the hook may update the registry.
+   Don't force a subject on entries that aren't clearly about a specific thing.
 6. Always produce exactly one handoff entry at the end.
 7. Skip trivial exchanges (greetings, acknowledgments, clarifying questions
    that led nowhere).
 8. Existing entries are provided so you can evolve memory, not duplicate it.
    If a new fact or decision supersedes an existing entry, include `replaces`
    with the old entry ID.
-9. Do not re-extract information that already exists in the log unless it has
+9. If transcript text cites an event id (for example `[<id>]`), use that
+   ID directly for `replaces` when it is the predecessor.
+10. If the transcript does not include a direct ID, use the provided existing entries
+    to find the most relevant predecessor and set `replaces` accordingly.
+11. Do not re-extract information that already exists in the log unless it has
    changed.
-10. If a task is now done, emit a new `task` entry with `status: "done"` and
+12. If a task is now done, emit a new `task` entry with `status: "done"` and
     `replaces` pointing to the previous open task entry.
 
 ## Output format

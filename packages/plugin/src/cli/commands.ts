@@ -91,6 +91,21 @@ interface VerifyResult {
   paths: InitPaths;
 }
 
+interface TraceIssue {
+  kind: "broken" | "branching" | "cycle";
+  id: string;
+  detail: string;
+}
+
+interface TraceChain {
+  ids: string[];
+}
+
+interface TraceReport {
+  chains: TraceChain[];
+  issues: TraceIssue[];
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -147,6 +162,24 @@ function parseStatus(raw: unknown): "open" | "done" | undefined {
   }
 
   return undefined;
+}
+
+function parseIsoDateInput(raw: unknown): string | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return new Date(parsed).toISOString();
 }
 
 function parseImportPlatform(raw: unknown): ImportPlatform | undefined {
@@ -210,12 +243,217 @@ function formatTimestamp(iso: string): string {
 
 function formatEntry(entry: LogEntry): string {
   const subject = entry.subject ? ` (${entry.subject})` : "";
-  const base = `[${formatTimestamp(entry.timestamp)}] [${entry.type}]${subject} ${entry.content}`;
+  const base = `[${formatTimestamp(entry.timestamp)}] [id=${entry.id}] [${entry.type}]${subject} ${entry.content}`;
   if (entry.detail) {
     return `${base}\n  ${entry.detail}`;
   }
 
   return base;
+}
+
+function dedupeIds(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    output.push(id);
+  }
+  return output;
+}
+
+function detectCycles(childrenById: Map<string, string[]>): string[][] {
+  const state = new Map<string, 0 | 1 | 2>();
+  const stack: string[] = [];
+  const cycles: string[][] = [];
+
+  const visit = (id: string): void => {
+    const currentState = state.get(id) ?? 0;
+    if (currentState !== 0) {
+      return;
+    }
+
+    state.set(id, 1);
+    stack.push(id);
+
+    const children = childrenById.get(id) ?? [];
+    for (const child of children) {
+      const childState = state.get(child) ?? 0;
+      if (childState === 0) {
+        visit(child);
+        continue;
+      }
+
+      if (childState === 1) {
+        const cycleStart = stack.lastIndexOf(child);
+        if (cycleStart >= 0) {
+          cycles.push(dedupeIds(stack.slice(cycleStart)));
+        }
+      }
+    }
+
+    stack.pop();
+    state.set(id, 2);
+  };
+
+  for (const id of childrenById.keys()) {
+    visit(id);
+  }
+
+  return cycles;
+}
+
+function buildTraceReport(entries: LogEntry[]): TraceReport {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const childrenById = new Map<string, string[]>();
+  const roots: string[] = [];
+  const issues: TraceIssue[] = [];
+
+  for (const entry of entries) {
+    if (!entry.replaces) {
+      roots.push(entry.id);
+      continue;
+    }
+
+    if (!byId.has(entry.replaces)) {
+      roots.push(entry.id);
+      issues.push({
+        kind: "broken",
+        id: entry.id,
+        detail: `references missing predecessor ${entry.replaces}`,
+      });
+      continue;
+    }
+
+    const children = childrenById.get(entry.replaces) ?? [];
+    children.push(entry.id);
+    childrenById.set(entry.replaces, children);
+  }
+
+  for (const [id, children] of childrenById.entries()) {
+    if (children.length > 1) {
+      issues.push({
+        kind: "branching",
+        id,
+        detail: `has ${children.length} successors (${children.join(", ")})`,
+      });
+    }
+  }
+
+  for (const cycle of detectCycles(childrenById)) {
+    issues.push({
+      kind: "cycle",
+      id: cycle[0] ?? "unknown",
+      detail: cycle.join(" -> "),
+    });
+  }
+
+  const chains: TraceChain[] = [];
+  const seenAcrossChains = new Set<string>();
+
+  const walk = (startId: string, path: string[], localSeen: Set<string>): void => {
+    if (localSeen.has(startId)) {
+      chains.push({ ids: [...path, startId] });
+      return;
+    }
+
+    const nextPath = [...path, startId];
+    localSeen.add(startId);
+    seenAcrossChains.add(startId);
+
+    const children = childrenById.get(startId) ?? [];
+    if (children.length === 0) {
+      chains.push({ ids: nextPath });
+      return;
+    }
+
+    if (children.length === 1) {
+      const next = children[0];
+      if (next) {
+        walk(next, nextPath, localSeen);
+      } else {
+        chains.push({ ids: nextPath });
+      }
+      return;
+    }
+
+    for (const child of children) {
+      walk(child, nextPath, new Set(localSeen));
+    }
+  };
+
+  for (const rootId of dedupeIds(roots)) {
+    walk(rootId, [], new Set());
+  }
+
+  for (const entry of entries) {
+    if (seenAcrossChains.has(entry.id)) {
+      continue;
+    }
+    walk(entry.id, [], new Set());
+  }
+
+  return {
+    chains: chains.sort((left, right) => {
+      const leftHead = left.ids[0] ?? "";
+      const rightHead = right.ids[0] ?? "";
+      return leftHead.localeCompare(rightHead);
+    }),
+    issues: issues.sort((left, right) => left.id.localeCompare(right.id)),
+  };
+}
+
+function printTraceReport(entries: LogEntry[], report: TraceReport, focusId?: string): void {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const chainsToPrint =
+    typeof focusId === "string" && focusId.trim().length > 0
+      ? report.chains.filter((chain) => chain.ids.includes(focusId.trim()))
+      : report.chains;
+
+  if (chainsToPrint.length === 0) {
+    console.log("No chains found.");
+    return;
+  }
+
+  chainsToPrint.forEach((chain, chainIndex) => {
+    console.log(`Chain ${chainIndex + 1}:`);
+    chain.ids.forEach((id, index) => {
+      const entry = byId.get(id);
+      const prefix = index === 0 ? "  " : "  -> ";
+      if (!entry) {
+        console.log(`${prefix}[id=${id}] (missing entry)`);
+        return;
+      }
+      console.log(`${prefix}${formatEntry(entry)}`);
+    });
+  });
+
+  const chainIds = new Set(chainsToPrint.flatMap((chain) => chain.ids));
+  const relevantIssues = report.issues.filter((issue) => {
+    if (chainIds.has(issue.id)) {
+      return true;
+    }
+
+    if (issue.kind === "branching" || issue.kind === "cycle") {
+      return issue.detail
+        .split(/[^A-Za-z0-9_-]+/gu)
+        .some((token) => token.length === 12 && chainIds.has(token));
+    }
+
+    return false;
+  });
+
+  if (relevantIssues.length === 0) {
+    console.log("Irregularities: none");
+    return;
+  }
+
+  console.log("Irregularities:");
+  for (const issue of relevantIssues) {
+    console.log(`- [${issue.kind}] ${issue.id}: ${issue.detail}`);
+  }
 }
 
 function readNumberOption(value: unknown, fallback: number): number {
@@ -1256,6 +1494,16 @@ export async function updateOpenClawConfigForInit(configPath: string): Promise<v
   agents.defaults = defaults;
   root.agents = agents;
 
+  const hooks = toObject(root.hooks);
+  const internalHooks = toObject(hooks.internal);
+  const hookEntries = toObject(internalHooks.entries);
+  const sessionMemoryHook = toObject(hookEntries["session-memory"]);
+  sessionMemoryHook.enabled = false;
+  hookEntries["session-memory"] = sessionMemoryHook;
+  internalHooks.entries = hookEntries;
+  hooks.internal = internalHooks;
+  root.hooks = hooks;
+
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(root, null, 2)}\n`, "utf8");
 }
@@ -1288,6 +1536,14 @@ export async function updateOpenClawConfigForUninit(configPath: string): Promise
   defaults.compaction = compaction;
   agents.defaults = defaults;
   root.agents = agents;
+
+  const hooks = toObject(root.hooks);
+  const internalHooks = toObject(hooks.internal);
+  const hookEntries = toObject(internalHooks.entries);
+  delete hookEntries["session-memory"];
+  internalHooks.entries = hookEntries;
+  hooks.internal = internalHooks;
+  root.hooks = hooks;
 
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(root, null, 2)}\n`, "utf8");
@@ -1567,8 +1823,13 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     const compaction = toObject(defaults.compaction);
     const memoryFlush = compaction.memoryFlush;
     const memoryFlushDisabled = isObject(memoryFlush) && memoryFlush.enabled === false;
+    const hooks = toObject(configRoot.hooks);
+    const internalHooks = toObject(hooks.internal);
+    const hookEntries = toObject(internalHooks.entries);
+    const sessionMemoryHook = toObject(hookEntries["session-memory"]);
+    const sessionMemoryDisabled = sessionMemoryHook.enabled === false;
 
-    if (slotValue === "zettelclaw" && memoryFlushDisabled) {
+    if (slotValue === "zettelclaw" && memoryFlushDisabled && sessionMemoryDisabled) {
       addCheck("openclaw.json", true, "ok");
     } else {
       const issues: string[] = [];
@@ -1581,6 +1842,9 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
         } else {
           issues.push("memoryFlush missing");
         }
+      }
+      if (!sessionMemoryDisabled) {
+        issues.push("hooks.internal.entries.session-memory.enabled is not false");
       }
       addCheck("openclaw.json", false, issues.join("; "));
     }
@@ -1756,10 +2020,14 @@ function registerZettelclawCliCommands(
     .option("--type <type>", "Entry type")
     .option("--subject <slug>", "Subject slug")
     .option("--status <status>", "Task status")
+    .option("--from <date>", "Start date/time (ISO-8601 or date string)")
+    .option("--to <date>", "End date/time (ISO-8601 or date string)")
     .option("--all", "Include replaced entries", false)
     .action(async (query: unknown, opts: unknown) => {
       const options = toObject(opts);
       const paths = resolvePaths(config, workspaceDir);
+      const from = parseIsoDateInput(options.from);
+      const to = parseIsoDateInput(options.to);
 
       const filter = {
         ...(parseEntryType(options.type) ? { type: parseEntryType(options.type) } : {}),
@@ -1767,6 +2035,8 @@ function registerZettelclawCliCommands(
           ? { subject: options.subject.trim() }
           : {}),
         ...(parseStatus(options.status) ? { status: parseStatus(options.status) } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
         includeReplaced: options.all === true,
       };
 
@@ -1776,6 +2046,33 @@ function registerZettelclawCliCommands(
           : await queryLog(paths.logPath, filter);
 
       printEntries(entries);
+    });
+
+  zettelclaw
+    .command("trace [id]")
+    .description("Trace replacement chains and flag irregular links")
+    .option("--subject <slug>", "Filter by subject slug")
+    .action(async (id: unknown, opts: unknown) => {
+      const options = toObject(opts);
+      const paths = resolvePaths(config, workspaceDir);
+      const subject =
+        typeof options.subject === "string" && options.subject.trim().length > 0
+          ? options.subject.trim()
+          : undefined;
+
+      const entries = await queryLog(paths.logPath, {
+        includeReplaced: true,
+        ...(subject ? { subject } : {}),
+      });
+
+      if (entries.length === 0) {
+        console.log("No entries.");
+        return;
+      }
+
+      const report = buildTraceReport(entries);
+      const focusId = typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
+      printTraceReport(entries, report, focusId);
     });
 
   zettelclaw
@@ -1962,7 +2259,7 @@ function registerZettelclawCliCommands(
   subjects
     .command("add <slug>")
     .description("Add a subject")
-    .option("--type <type>", "Subject type", "project")
+    .option("--type <type>", "Subject type", "topic")
     .option("--display <display>", "Display name")
     .action(async (slug: unknown, opts: unknown) => {
       if (typeof slug !== "string" || slug.trim().length === 0) {
@@ -1972,7 +2269,7 @@ function registerZettelclawCliCommands(
       const options = toObject(opts);
       const paths = resolvePaths(config, workspaceDir);
       const normalizedSlug = slug.trim();
-      const inferredType = typeof options.type === "string" && options.type.trim() ? options.type.trim() : "project";
+      const inferredType = typeof options.type === "string" && options.type.trim() ? options.type.trim() : "topic";
 
       await ensureSubject(paths.subjectsPath, normalizedSlug, inferredType);
 
@@ -2050,4 +2347,5 @@ export function registerZettelclawCli(
 
 export const __cliTestExports = {
   resolvePaths,
+  buildTraceReport,
 };

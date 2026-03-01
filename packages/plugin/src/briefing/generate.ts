@@ -137,14 +137,11 @@ function buildBriefingBuckets(
   const openItems = entries.filter(isOpenItem);
 
   const recentSubjects = new Set<string>();
-  for (const entry of entries) {
+  for (const entry of activeEntries) {
     if (!entry.subject) {
       continue;
     }
-
-    if (isWithinDays(entry, nowMs, 7)) {
-      recentSubjects.add(entry.subject);
-    }
+    recentSubjects.add(entry.subject);
   }
 
   const latestBySubject = getMostRecentBySubject(entries);

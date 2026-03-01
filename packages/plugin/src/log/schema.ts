@@ -17,7 +17,7 @@ export function parseSubjectType(rawType: unknown): SubjectType | undefined {
 }
 
 export function normalizeSubjectType(rawType: unknown): SubjectType {
-  return parseSubjectType(rawType) ?? "project";
+  return parseSubjectType(rawType) ?? "topic";
 }
 
 interface BaseEntry {

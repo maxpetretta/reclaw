@@ -105,6 +105,20 @@ describe("query", () => {
     expect(allQuestions.map((entry) => entry.id)).toEqual(["qid000000002", "qid000000001"]);
   });
 
+  test("queryLog supports inclusive date range filters", async () => {
+    const ranged = await queryLog(logPath, {
+      from: "2026-02-22T08:00:00.000Z",
+      to: "2026-02-24T08:00:00.000Z",
+      includeReplaced: true,
+    });
+
+    expect(ranged.map((entry) => entry.id)).toEqual([
+      "hid000000001",
+      "tiddone00001",
+      "tidopen00001",
+    ]);
+  });
+
   test("searchLog finds keyword matches and supports fallback when ripgrep is unavailable", async () => {
     const withRg = await searchLog(logPath, "webhook", { subject: "auth-migration" });
     expect(withRg.map((entry) => entry.id)).toEqual([

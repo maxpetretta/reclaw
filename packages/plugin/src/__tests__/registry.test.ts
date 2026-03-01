@@ -7,6 +7,7 @@ import {
   readRegistry,
   renameSubject,
   slugToDisplay,
+  upsertSubjectFromExtraction,
   writeRegistry,
 } from "../subjects/registry";
 
@@ -45,19 +46,45 @@ describe("registry", () => {
     const registry = await readRegistry(registryPath);
     expect(registry["auth-migration"]).toEqual({
       display: "Auth Migration",
-      type: "project",
+      type: "topic",
     });
     expect(registry.max).toEqual({ display: "Max", type: "person" });
   });
 
-  test("ensureSubject falls back to project type for invalid inferred type", async () => {
+  test("ensureSubject falls back to topic type for invalid inferred type", async () => {
     await ensureSubject(registryPath, "ops-audit", "unknown-type");
 
     const registry = await readRegistry(registryPath);
     expect(registry["ops-audit"]).toEqual({
       display: "Ops Audit",
-      type: "project",
+      type: "topic",
     });
+  });
+
+  test("ensureSubject rejects invalid slug format", async () => {
+    await expect(ensureSubject(registryPath, "Auth_Migration")).rejects.toThrow("invalid slug");
+  });
+
+  test("upsertSubjectFromExtraction updates existing subject type when hint is valid", async () => {
+    await writeRegistry(registryPath, {
+      "auth-migration": { display: "Auth Migration", type: "project" },
+    });
+
+    await upsertSubjectFromExtraction(registryPath, "auth-migration", "system");
+
+    const registry = await readRegistry(registryPath);
+    expect(registry["auth-migration"]?.type).toBe("system");
+  });
+
+  test("upsertSubjectFromExtraction ignores invalid type hints for existing subjects", async () => {
+    await writeRegistry(registryPath, {
+      "auth-migration": { display: "Auth Migration", type: "project" },
+    });
+
+    await upsertSubjectFromExtraction(registryPath, "auth-migration", "invalid-type");
+
+    const registry = await readRegistry(registryPath);
+    expect(registry["auth-migration"]?.type).toBe("project");
   });
 
   test("renameSubject updates registry and log", async () => {
@@ -79,6 +106,10 @@ describe("registry", () => {
     const logContent = await readFile(logPath, "utf8");
     expect(logContent).toContain('"subject":"new"');
     expect(logContent).not.toContain('"subject":"old"');
+  });
+
+  test("renameSubject rejects invalid new slug format", async () => {
+    await expect(renameSubject(registryPath, logPath, "old", "New_Slug")).rejects.toThrow("invalid slug");
   });
 
   test("slugToDisplay converts kebab-case to Title Case", () => {

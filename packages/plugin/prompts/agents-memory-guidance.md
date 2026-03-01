@@ -6,6 +6,7 @@
 - When the user asks to remember something, continue naturally; extraction hooks persist decisions/facts/tasks/questions/handoffs from transcripts.
 - Use `memory_search` for broad recall (semantic + structured filters).
 - Use `memory_get` for exact entry IDs, transcript provenance (`session:<id>`), or precise file reads.
+- When you reference a prior memory event in conversation, include its event ID inline as `[<id>]` so extraction can preserve `replaces` chains. Only cite IDs returned by tools.
 
 ### Retrieval Order
 1. Use `MEMORY.md` + injected handoff context already in prompt.

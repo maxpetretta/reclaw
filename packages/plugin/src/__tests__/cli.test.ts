@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PluginConfig } from "../config";
 import {
+  __cliTestExports,
   AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
   AGENTS_MEMORY_GUIDANCE_END_MARKER,
   BRIEFING_BEGIN_MARKER,
@@ -99,6 +100,13 @@ describe("cli init helpers", () => {
       (
         openClawConfig.agents as { defaults?: { compaction?: { memoryFlush?: { enabled?: unknown } } } }
       ).defaults?.compaction?.memoryFlush?.enabled,
+    ).toBe(false);
+    expect(
+      (
+        openClawConfig.hooks as {
+          internal?: { entries?: { "session-memory"?: { enabled?: unknown } } };
+        }
+      ).internal?.entries?.["session-memory"]?.enabled,
     ).toBe(false);
     expect(cronJobs.jobs?.some((job) => job.name === "zettelclaw-briefing")).toBe(true);
     expect(cronJobs.jobs?.some((job) => job.name === "zettelclaw-reset")).toBe(false);
@@ -219,6 +227,49 @@ describe("cli init helpers", () => {
     const result = await verifySetup(createConfig(logDir), workspaceDir);
     expect(result.ok).toBe(false);
     expect(result.checks.some((check) => check.ok === false)).toBe(true);
+  });
+
+  test("buildTraceReport flags broken and branching chains", () => {
+    const report = __cliTestExports.buildTraceReport([
+      {
+        id: "root00000001",
+        timestamp: "2026-02-20T00:00:00.000Z",
+        type: "decision",
+        content: "Original decision",
+        subject: "auth-migration",
+        session: "s1",
+      },
+      {
+        id: "next00000001",
+        timestamp: "2026-02-21T00:00:00.000Z",
+        type: "decision",
+        content: "Updated decision",
+        subject: "auth-migration",
+        session: "s2",
+        replaces: "root00000001",
+      },
+      {
+        id: "fork00000001",
+        timestamp: "2026-02-22T00:00:00.000Z",
+        type: "decision",
+        content: "Competing update",
+        subject: "auth-migration",
+        session: "s3",
+        replaces: "root00000001",
+      },
+      {
+        id: "broken000001",
+        timestamp: "2026-02-23T00:00:00.000Z",
+        type: "fact",
+        content: "Broken chain node",
+        subject: "auth-migration",
+        session: "s4",
+        replaces: "missing000001",
+      },
+    ]);
+
+    expect(report.issues.some((issue) => issue.kind === "branching" && issue.id === "root00000001")).toBe(true);
+    expect(report.issues.some((issue) => issue.kind === "broken" && issue.id === "broken000001")).toBe(true);
   });
 
   test("runImportCommand backs up and clears legacy memory dir after successful openclaw migration", async () => {

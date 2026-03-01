@@ -93,6 +93,7 @@ describe("memory-search", () => {
     const text = readResultText(result);
 
     expect(builtinCalls).toBe(0);
+    expect(text).toContain("[id=entry00000001]");
     expect(text).toContain("[task] auth-migration");
     expect(text).toContain("Queue retries for webhooks");
   });
@@ -117,6 +118,61 @@ describe("memory-search", () => {
     expect(text).toContain("No results.");
   });
 
+  test("query mode merges builtin semantic matches with direct log keyword matches", async () => {
+    const api = {
+      runtime: {
+        tools: {
+          createMemorySearchTool: () => ({
+            name: "memory_search",
+            description: "builtin",
+            parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+            async execute() {
+              return { content: [{ type: "text", text: "builtin semantic match" }] };
+            },
+          }),
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const tool = createWrappedMemorySearchTool(api, createContext(), createConfig(), {
+      queryLog: async () => [],
+      searchLog: async () => [createEntry({ type: "decision", subject: "auth-migration" })],
+    });
+
+    const result = await tool.execute("call-merged", { query: "webhook retry" });
+    const text = readResultText(result);
+
+    expect(text).toContain("builtin semantic match");
+    expect(text).toContain("[id=entry00000001]");
+    expect(text).toContain("[decision] auth-migration");
+    expect(text).toContain("Queue retries for webhooks");
+  });
+
+  test("schema allows structured filters without requiring query", () => {
+    const api = {
+      runtime: {
+        tools: {
+          createMemorySearchTool: () => ({
+            name: "memory_search",
+            description: "builtin",
+            parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+            async execute() {
+              return { content: [{ type: "text", text: "builtin result" }] };
+            },
+          }),
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const tool = createWrappedMemorySearchTool(api, createContext(), createConfig(), {
+      queryLog: async () => [],
+      searchLog: async () => [],
+    });
+
+    const params = tool.parameters as { required?: string[] };
+    expect(params.required?.includes("query")).toBe(false);
+  });
+
   test("falls back to log-only keyword search when builtin tool is unavailable", async () => {
     const api = {
       runtime: {
@@ -134,6 +190,7 @@ describe("memory-search", () => {
     const result = await tool.execute("call-3", { query: "webhook retry" });
     const text = readResultText(result);
 
+    expect(text).toContain("[id=entry00000001]");
     expect(text).toContain("[decision] auth-migration");
     expect(text).toContain("Queue retries for webhooks");
   });

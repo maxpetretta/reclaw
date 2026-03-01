@@ -1,10 +1,16 @@
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
-import { queryExtractionContext } from "../log/query";
-import { appendEntry, finalizeEntry, parseSubjectType, validateLlmOutput } from "../log/schema";
+import { queryExtractionContext, queryLog, searchLog } from "../log/query";
+import {
+  appendEntry,
+  finalizeEntry,
+  parseSubjectType,
+  validateLlmOutput,
+  type LogEntry,
+} from "../log/schema";
 import { extractFromTranscript } from "../lib/llm";
 import { applyLastHandoffBlock } from "../memory/handoff";
 import {
@@ -21,7 +27,11 @@ import {
   readState,
   shouldRetry,
 } from "../state";
-import { ensureSubject, readRegistry, type SubjectRegistry } from "../subjects/registry";
+import {
+  readRegistry,
+  upsertSubjectFromExtraction,
+  type SubjectRegistry,
+} from "../subjects/registry";
 
 interface ZettelclawPaths {
   logPath: string;
@@ -32,11 +42,15 @@ interface ZettelclawPaths {
 interface SessionCandidate {
   agentId: string;
   sessionId: string;
+  sessionKey?: string;
 }
 
 export interface ExtractionHookDeps {
   extractFromTranscript: typeof extractFromTranscript;
   findTranscriptFile: typeof findTranscriptFile;
+  findSessionKeyForSession: typeof findSessionKeyForSession;
+  queryLog: typeof queryLog;
+  searchLog: typeof searchLog;
   readTranscript: typeof readTranscript;
   formatTranscript: typeof formatTranscript;
   listSessionCandidates: typeof listSessionCandidates;
@@ -47,6 +61,9 @@ export interface ExtractionHookDeps {
 const DEFAULT_DEPS: ExtractionHookDeps = {
   extractFromTranscript,
   findTranscriptFile,
+  findSessionKeyForSession,
+  queryLog,
+  searchLog,
   readTranscript,
   formatTranscript,
   listSessionCandidates,
@@ -124,8 +141,19 @@ function readWorkspaceDir(ctx: unknown): string | undefined {
     : undefined;
 }
 
-function resolveMemoryMdPath(workspaceDir?: string): string {
-  return join(workspaceDir ?? process.cwd(), "MEMORY.md");
+function resolveMemoryMdPath(
+  workspaceDir: string | undefined,
+  resolvePath?: (input: string) => string,
+): string {
+  if (workspaceDir) {
+    return join(workspaceDir, "MEMORY.md");
+  }
+
+  if (resolvePath) {
+    return resolvePath("MEMORY.md");
+  }
+
+  return join(process.cwd(), "MEMORY.md");
 }
 
 function stripSubjectTypeHint(raw: unknown): unknown {
@@ -178,14 +206,48 @@ function parseSessionIdFromFileName(fileName: string): string | null {
   return null;
 }
 
-const DEFAULT_SWEEP_MAX_AGE_MS = 48 * 60 * 60 * 1000; // 48 hours
+function parseSessionStoreCandidates(
+  rawStore: unknown,
+  agentId: string,
+): Array<{ sessionId: string; sessionKey: string }> {
+  if (!isObject(rawStore)) {
+    return [];
+  }
+
+  const candidates: Array<{ sessionId: string; sessionKey: string }> = [];
+
+  for (const [sessionKey, value] of Object.entries(rawStore)) {
+    if (!isObject(value)) {
+      continue;
+    }
+
+    const sessionId = typeof value.sessionId === "string" ? value.sessionId.trim() : "";
+    if (!sessionId) {
+      continue;
+    }
+
+    // Keep sessions keyed for the current agent directory.
+    const normalizedKey = sessionKey.trim();
+    if (normalizedKey.startsWith("agent:")) {
+      const parts = normalizedKey.split(":");
+      if (parts.length >= 2 && parts[1] && parts[1] !== agentId) {
+        continue;
+      }
+    }
+
+    candidates.push({
+      sessionId,
+      sessionKey: normalizedKey,
+    });
+  }
+
+  return candidates;
+}
 
 export async function listSessionCandidates(
   openClawHome = resolveOpenClawHome(),
-  maxAgeMs = DEFAULT_SWEEP_MAX_AGE_MS,
 ): Promise<SessionCandidate[]> {
   const agentsDir = join(openClawHome, "agents");
-  const cutoff = Date.now() - maxAgeMs;
 
   let agentDirs: string[];
   try {
@@ -195,9 +257,32 @@ export async function listSessionCandidates(
   }
 
   const discovered = new Set<string>();
+  const candidatesByKey = new Map<string, SessionCandidate>();
 
   for (const agentId of agentDirs) {
     const sessionsDir = join(agentsDir, agentId, "sessions");
+    const sessionsStorePath = join(sessionsDir, "sessions.json");
+
+    try {
+      const sessionsStoreRaw = await readFile(sessionsStorePath, "utf8");
+      const sessionsStore = JSON.parse(sessionsStoreRaw) as unknown;
+      const storeCandidates = parseSessionStoreCandidates(sessionsStore, agentId);
+
+      for (const candidate of storeCandidates) {
+        const dedupeKey = `${agentId}\u0000${candidate.sessionId}`;
+        if (candidatesByKey.has(dedupeKey)) {
+          continue;
+        }
+
+        candidatesByKey.set(dedupeKey, {
+          agentId,
+          sessionId: candidate.sessionId,
+          sessionKey: candidate.sessionKey,
+        });
+      }
+    } catch {
+      // Fall back to transcript file discovery when sessions.json is missing or unreadable.
+    }
 
     let files: string[];
     try {
@@ -212,14 +297,6 @@ export async function listSessionCandidates(
         continue;
       }
 
-      // Skip old files — only sweep recent sessions
-      try {
-        const fileStat = await stat(join(sessionsDir, fileName));
-        if (fileStat.mtimeMs < cutoff) continue;
-      } catch {
-        continue;
-      }
-
       discovered.add(`${agentId}\u0000${sessionId}`);
     }
   }
@@ -230,16 +307,72 @@ export async function listSessionCandidates(
     if (!agentId || !sessionId) {
       continue;
     }
-    candidates.push({ agentId, sessionId });
+
+    const key = `${agentId}\u0000${sessionId}`;
+    const fromStore = candidatesByKey.get(key);
+    candidates.push(
+      fromStore ?? {
+        agentId,
+        sessionId,
+      },
+    );
+  }
+
+  for (const [dedupeKey, candidate] of candidatesByKey.entries()) {
+    if (discovered.has(dedupeKey)) {
+      continue;
+    }
+    candidates.push(candidate);
   }
 
   return candidates.sort((left, right) => {
-      if (left.agentId !== right.agentId) {
-        return left.agentId.localeCompare(right.agentId);
-      }
+    if (left.agentId !== right.agentId) {
+      return left.agentId.localeCompare(right.agentId);
+    }
 
-      return left.sessionId.localeCompare(right.sessionId);
-    });
+    return left.sessionId.localeCompare(right.sessionId);
+  });
+}
+
+export async function findSessionKeyForSession(
+  agentId: string,
+  sessionId: string,
+  openClawHome = resolveOpenClawHome(),
+): Promise<string | undefined> {
+  const sessionsStorePath = join(openClawHome, "agents", agentId, "sessions", "sessions.json");
+
+  let sessionsStoreRaw: string;
+  try {
+    sessionsStoreRaw = await readFile(sessionsStorePath, "utf8");
+  } catch {
+    return undefined;
+  }
+
+  let parsedStore: unknown;
+  try {
+    parsedStore = JSON.parse(sessionsStoreRaw);
+  } catch {
+    return undefined;
+  }
+
+  if (!isObject(parsedStore)) {
+    return undefined;
+  }
+
+  for (const [sessionKey, value] of Object.entries(parsedStore)) {
+    if (!isObject(value)) {
+      continue;
+    }
+
+    if (typeof value.sessionId !== "string" || value.sessionId !== sessionId) {
+      continue;
+    }
+
+    const normalizedKey = sessionKey.trim();
+    return normalizedKey.length > 0 ? normalizedKey : undefined;
+  }
+
+  return undefined;
 }
 
 function resolvePaths(config: PluginConfig): ZettelclawPaths {
@@ -256,6 +389,404 @@ function shouldSkipSessionKey(sessionKey: string | undefined, skipPrefixes: stri
   }
 
   return skipPrefixes.some((prefix) => sessionKey.startsWith(prefix));
+}
+
+function isMainSessionKey(sessionKey: string | undefined): boolean {
+  if (!sessionKey) {
+    return false;
+  }
+
+  // Supports common key shapes:
+  // - agent:<agentId>:main
+  // - agent:<agentId> (legacy shorthand)
+  // - dm:* (direct-message interactive variants)
+  if (/^agent:[^:]+:main(?:$|:)/u.test(sessionKey)) {
+    return true;
+  }
+
+  if (/^agent:[^:]+$/u.test(sessionKey)) {
+    return true;
+  }
+
+  if (sessionKey.startsWith("dm:")) {
+    return true;
+  }
+
+  return false;
+}
+
+function shouldExtractSession(
+  sessionKey: string | undefined,
+  skipPrefixes: string[],
+): boolean {
+  if (!sessionKey) {
+    return false;
+  }
+
+  if (shouldSkipSessionKey(sessionKey, skipPrefixes)) {
+    return false;
+  }
+
+  return isMainSessionKey(sessionKey);
+}
+
+function hasUserMessage(messages: TranscriptMessage[]): boolean {
+  return messages.some((message) => message.role === "user");
+}
+
+type LlmEntry = Omit<LogEntry, "id" | "timestamp" | "session">;
+
+interface ParsedLlmEntry {
+  entry: LlmEntry;
+  subjectTypeHint?: string;
+}
+
+const EVENT_ID_LENGTH = 12;
+const TRANSCRIPT_EVENT_ID_PATTERN = /\[([A-Za-z0-9_-]{12})\]/gu;
+const MAX_REPLACEMENT_KEYWORDS = 6;
+const STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "also",
+  "an",
+  "and",
+  "are",
+  "because",
+  "before",
+  "being",
+  "between",
+  "but",
+  "can",
+  "could",
+  "did",
+  "does",
+  "done",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "here",
+  "how",
+  "into",
+  "its",
+  "just",
+  "more",
+  "need",
+  "new",
+  "not",
+  "now",
+  "our",
+  "out",
+  "over",
+  "same",
+  "should",
+  "that",
+  "the",
+  "their",
+  "them",
+  "then",
+  "there",
+  "these",
+  "they",
+  "this",
+  "those",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "while",
+  "will",
+  "with",
+  "would",
+  "you",
+  "your",
+]);
+
+function normalizeComparableText(value: string): string {
+  return value
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/gu, " ")
+    .replaceAll(/\s+/gu, " ")
+    .trim();
+}
+
+function tokenizeComparableText(value: string): string[] {
+  return normalizeComparableText(value)
+    .split(" ")
+    .filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
+}
+
+function entryComparableText(entry: Pick<LogEntry, "content" | "detail"> | Pick<LlmEntry, "content" | "detail">): string {
+  return `${entry.content} ${entry.detail ?? ""}`.trim();
+}
+
+function tokenOverlapRatio(left: string[], right: string[]): number {
+  if (left.length === 0 || right.length === 0) {
+    return 0;
+  }
+
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  let intersection = 0;
+  for (const token of leftSet) {
+    if (rightSet.has(token)) {
+      intersection += 1;
+    }
+  }
+
+  const denominator = Math.min(leftSet.size, rightSet.size);
+  return denominator > 0 ? intersection / denominator : 0;
+}
+
+function dedupeEntriesById(entries: LogEntry[]): LogEntry[] {
+  const seen = new Set<string>();
+  const deduped: LogEntry[] = [];
+
+  for (const entry of entries) {
+    if (seen.has(entry.id)) {
+      continue;
+    }
+
+    seen.add(entry.id);
+    deduped.push(entry);
+  }
+
+  return deduped;
+}
+
+function extractReferencedEventIds(transcript: string): string[] {
+  if (!transcript.trim()) {
+    return [];
+  }
+
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const tryPush = (candidate: string): void => {
+    if (candidate.length !== EVENT_ID_LENGTH || seen.has(candidate)) {
+      return;
+    }
+    seen.add(candidate);
+    ids.push(candidate);
+  };
+
+  const bracketMatches = transcript.matchAll(TRANSCRIPT_EVENT_ID_PATTERN);
+  for (const match of bracketMatches) {
+    if (match[1]) {
+      tryPush(match[1]);
+    }
+  }
+
+  return ids;
+}
+
+function buildReplacementKeywordQueries(entry: LlmEntry): string[] {
+  const keywords = tokenizeComparableText(entryComparableText(entry));
+  if (entry.subject) {
+    keywords.unshift(...tokenizeComparableText(entry.subject));
+  }
+
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const token of keywords) {
+    if (seen.has(token)) {
+      continue;
+    }
+    seen.add(token);
+    deduped.push(token);
+    if (deduped.length >= MAX_REPLACEMENT_KEYWORDS) {
+      break;
+    }
+  }
+
+  return deduped;
+}
+
+function isCompatibleReplacement(entry: LlmEntry, candidate: LogEntry): boolean {
+  if (entry.type !== candidate.type) {
+    return false;
+  }
+
+  if (entry.subject && candidate.subject && entry.subject !== candidate.subject) {
+    return false;
+  }
+
+  if (entry.type !== "task") {
+    return true;
+  }
+
+  if (entry.status === "done") {
+    return candidate.status === "open";
+  }
+
+  // Keep open->open transitions only.
+  return candidate.status === "open";
+}
+
+function computeReplacementScore(entry: LlmEntry, candidate: LogEntry): number {
+  if (!isCompatibleReplacement(entry, candidate)) {
+    return 0;
+  }
+
+  const entryText = entryComparableText(entry);
+  const candidateText = entryComparableText(candidate);
+  const normalizedEntryContent = normalizeComparableText(entry.content);
+  const normalizedCandidateContent = normalizeComparableText(candidate.content);
+  const normalizedEntryText = normalizeComparableText(entryText);
+  const normalizedCandidateText = normalizeComparableText(candidateText);
+  const contentOverlap = tokenOverlapRatio(
+    tokenizeComparableText(entry.content),
+    tokenizeComparableText(candidate.content),
+  );
+  const overlap = tokenOverlapRatio(
+    tokenizeComparableText(entryText),
+    tokenizeComparableText(candidateText),
+  );
+
+  let score = overlap * 6 + contentOverlap * 6;
+  if (normalizedEntryContent && normalizedEntryContent === normalizedCandidateContent) {
+    score += 6;
+  }
+
+  if (normalizedEntryText && normalizedEntryText === normalizedCandidateText) {
+    score += 4;
+  }
+
+  if (entry.subject && candidate.subject === entry.subject) {
+    score += 2;
+  }
+
+  if (entry.type === "task" && entry.status === "done" && candidate.type === "task" && candidate.status === "open") {
+    score += 2;
+  }
+
+  return score;
+}
+
+function resolveLatestReplacementId(startId: string, allEntries: LogEntry[]): string {
+  const successorsById = new Map<string, LogEntry[]>();
+  for (const entry of allEntries) {
+    if (!entry.replaces) {
+      continue;
+    }
+
+    const list = successorsById.get(entry.replaces) ?? [];
+    list.push(entry);
+    successorsById.set(entry.replaces, list);
+  }
+
+  let current = startId;
+  const seen = new Set<string>([startId]);
+
+  while (true) {
+    const successors = successorsById.get(current);
+    if (!successors || successors.length === 0) {
+      return current;
+    }
+
+    const next = [...successors].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))[0];
+    if (!next || seen.has(next.id)) {
+      return current;
+    }
+
+    seen.add(next.id);
+    current = next.id;
+  }
+}
+
+async function collectReplacementCandidates(params: {
+  entry: LlmEntry;
+  logPath: string;
+  deps: ExtractionHookDeps;
+}): Promise<LogEntry[]> {
+  const filter = {
+    type: params.entry.type,
+    ...(params.entry.subject ? { subject: params.entry.subject } : {}),
+    includeReplaced: false as const,
+  };
+
+  const [typedCandidates, keywordGroups] = await Promise.all([
+    params.deps.queryLog(params.logPath, filter),
+    Promise.all(
+      buildReplacementKeywordQueries(params.entry).map((keyword) =>
+        params.deps.searchLog(params.logPath, keyword, filter),
+      ),
+    ),
+  ]);
+
+  return dedupeEntriesById([
+    ...typedCandidates,
+    ...keywordGroups.flat(),
+  ]);
+}
+
+async function resolveReplacementForEntry(params: {
+  entry: LlmEntry;
+  transcriptEventIds: string[];
+  logPath: string;
+  deps: ExtractionHookDeps;
+}): Promise<string | undefined> {
+  if (params.entry.replaces || params.entry.type === "handoff") {
+    return params.entry.replaces;
+  }
+
+  const [allEntries, candidates] = await Promise.all([
+    params.deps.queryLog(params.logPath, { includeReplaced: true }),
+    collectReplacementCandidates({
+      entry: params.entry,
+      logPath: params.logPath,
+      deps: params.deps,
+    }),
+  ]);
+
+  if (allEntries.length === 0 || candidates.length === 0) {
+    return undefined;
+  }
+
+  const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  for (const transcriptId of params.transcriptEventIds) {
+    const latestId = resolveLatestReplacementId(transcriptId, allEntries);
+    const matched = candidatesById.get(latestId);
+    if (matched && isCompatibleReplacement(params.entry, matched)) {
+      return matched.id;
+    }
+  }
+
+  let bestCandidate: LogEntry | undefined;
+  let bestScore = 0;
+
+  for (const candidate of candidates) {
+    const score = computeReplacementScore(params.entry, candidate);
+    if (score <= bestScore) {
+      continue;
+    }
+
+    bestScore = score;
+    bestCandidate = candidate;
+  }
+
+  if (!bestCandidate) {
+    return undefined;
+  }
+
+  const requiresStrictSubjectMatch = Boolean(params.entry.subject);
+  const acceptThreshold = params.entry.type === "task" && params.entry.status === "done" ? 7 : 8;
+  if (bestScore < acceptThreshold) {
+    return undefined;
+  }
+
+  if (
+    requiresStrictSubjectMatch &&
+    bestCandidate.subject &&
+    bestCandidate.subject !== params.entry.subject
+  ) {
+    return undefined;
+  }
+
+  return bestCandidate.id;
 }
 
 function readGatewayPort(config: unknown): number | null {
@@ -378,6 +909,45 @@ function extractBeforeResetMessages(rawMessages: unknown[] | undefined): Transcr
   return extracted;
 }
 
+async function loadBeforeResetMessages(
+  params: {
+    event: { messages?: unknown[]; sessionFile?: string };
+    ctx: { agentId?: string; sessionId?: string };
+    deps: ExtractionHookDeps;
+  },
+): Promise<TranscriptMessage[]> {
+  const fromEvent = extractBeforeResetMessages(params.event.messages);
+  if (fromEvent.length > 0) {
+    return fromEvent;
+  }
+
+  const sessionFile =
+    typeof params.event.sessionFile === "string" && params.event.sessionFile.trim().length > 0
+      ? params.event.sessionFile.trim()
+      : undefined;
+
+  if (sessionFile) {
+    try {
+      return await params.deps.readTranscript(sessionFile);
+    } catch {
+      // Fall through to lookup by session id.
+    }
+  }
+
+  if (params.ctx.agentId && params.ctx.sessionId) {
+    const transcriptFile = await params.deps.findTranscriptFile(params.ctx.agentId, params.ctx.sessionId);
+    if (transcriptFile) {
+      try {
+        return await params.deps.readTranscript(transcriptFile);
+      } catch {
+        return [];
+      }
+    }
+  }
+
+  return [];
+}
+
 async function runExtractionPipeline(params: {
   sessionId: string;
   messages: TranscriptMessage[];
@@ -422,36 +992,77 @@ async function runExtractionPipeline(params: {
     });
 
     let appendedCount = 0;
+    let nonEmptyLines = 0;
+    let invalidLineCount = 0;
     const appendedEntries: Array<ReturnType<typeof finalizeEntry>> = [];
+    const parsedEntries: ParsedLlmEntry[] = [];
     const lines = rawOutput.split("\n");
+    const transcriptEventIds = extractReferencedEventIds(transcript);
 
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) {
         continue;
       }
+      nonEmptyLines += 1;
 
       let parsed: unknown;
       try {
         parsed = JSON.parse(trimmed);
       } catch {
+        invalidLineCount += 1;
         continue;
       }
 
       const subjectTypeHint = readSubjectTypeHint(parsed);
       const validation = validateLlmOutput(stripSubjectTypeHint(parsed));
       if (!validation.ok) {
+        invalidLineCount += 1;
         continue;
       }
 
-      const entry = finalizeEntry(validation.entry, { sessionId: params.sessionId });
+      parsedEntries.push({
+        entry: validation.entry,
+        ...(subjectTypeHint ? { subjectTypeHint } : {}),
+      });
+    }
+
+    if (nonEmptyLines > 0 && parsedEntries.length === 0) {
+      throw new Error("extraction model returned non-empty output but no valid entries");
+    }
+
+    for (const parsedEntry of parsedEntries) {
+      const resolvedReplaces =
+        parsedEntry.entry.replaces ??
+        (await resolveReplacementForEntry({
+          entry: parsedEntry.entry,
+          transcriptEventIds,
+          logPath: params.paths.logPath,
+          deps: params.deps,
+        }));
+
+      const finalizedInput =
+        resolvedReplaces && !parsedEntry.entry.replaces
+          ? {
+              ...parsedEntry.entry,
+              replaces: resolvedReplaces,
+            }
+          : parsedEntry.entry;
+
+      const entry = finalizeEntry(finalizedInput, { sessionId: params.sessionId });
       if (entry.subject) {
-        await ensureSubject(params.paths.subjectsPath, entry.subject, subjectTypeHint);
+        await upsertSubjectFromExtraction(params.paths.subjectsPath, entry.subject, parsedEntry.subjectTypeHint);
       }
 
       await appendEntry(params.paths.logPath, entry);
       appendedEntries.push(entry);
       appendedCount += 1;
+    }
+
+    if (invalidLineCount > 0) {
+      params.logger.warn(
+        `zettelclaw extraction for ${params.sessionId}: ignored ${invalidLineCount} invalid entry line(s)`,
+      );
     }
 
     const latestHandoff = [...appendedEntries].reverse().find((entry) => entry.type === "handoff");
@@ -489,12 +1100,13 @@ export function registerExtractionHooks(
   const apiToken = readGatewayToken(api.config);
 
   api.registerHook("session_end", async (event, ctx) => {
-    if (event.messageCount < 4) {
+    if (!ctx.agentId) {
+      api.logger.warn(`zettelclaw extraction skipped ${event.sessionId}: missing agentId`);
       return;
     }
 
-    if (!ctx.agentId) {
-      api.logger.warn(`zettelclaw extraction skipped ${event.sessionId}: missing agentId`);
+    const sessionKey = await runtimeDeps.findSessionKeyForSession(ctx.agentId, event.sessionId);
+    if (sessionKey && !shouldExtractSession(sessionKey, config.extraction.skipSessionTypes)) {
       return;
     }
 
@@ -512,11 +1124,15 @@ export function registerExtractionHooks(
       return;
     }
 
+    if (!hasUserMessage(messages)) {
+      return;
+    }
+
     await runExtractionPipeline({
       sessionId: event.sessionId,
       messages,
       paths,
-      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx)),
+      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
       config,
       deps: runtimeDeps,
       logger: api.logger,
@@ -530,17 +1146,24 @@ export function registerExtractionHooks(
       return;
     }
 
-    if (shouldSkipSessionKey(ctx.sessionKey, config.extraction.skipSessionTypes)) {
+    if (ctx.sessionKey && !shouldExtractSession(ctx.sessionKey, config.extraction.skipSessionTypes)) {
       return;
     }
 
-    const messages = extractBeforeResetMessages(event.messages);
+    const messages = await loadBeforeResetMessages({
+      event,
+      ctx,
+      deps: runtimeDeps,
+    });
+    if (!hasUserMessage(messages)) {
+      return;
+    }
 
     await runExtractionPipeline({
       sessionId: ctx.sessionId,
       messages,
       paths,
-      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx)),
+      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
       config,
       deps: runtimeDeps,
       logger: api.logger,
@@ -553,6 +1176,13 @@ export function registerExtractionHooks(
     const candidates = await runtimeDeps.listSessionCandidates();
 
     for (const candidate of candidates) {
+      const resolvedSessionKey =
+        candidate.sessionKey ??
+        (await runtimeDeps.findSessionKeyForSession(candidate.agentId, candidate.sessionId));
+      if (resolvedSessionKey && !shouldExtractSession(resolvedSessionKey, config.extraction.skipSessionTypes)) {
+        continue;
+      }
+
       const transcriptFile = await runtimeDeps.findTranscriptFile(candidate.agentId, candidate.sessionId);
       if (!transcriptFile) {
         continue;
@@ -566,7 +1196,7 @@ export function registerExtractionHooks(
         continue;
       }
 
-      if (messages.length < 4) {
+      if (!hasUserMessage(messages)) {
         continue;
       }
 
@@ -574,7 +1204,7 @@ export function registerExtractionHooks(
         sessionId: candidate.sessionId,
         messages,
         paths,
-        memoryMdPath: resolveMemoryMdPath(),
+        memoryMdPath: resolveMemoryMdPath(undefined, api.resolvePath),
         config,
         deps: runtimeDeps,
         logger: api.logger,

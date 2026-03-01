@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { normalizeSubjectType, type SubjectType } from "../log/schema";
+import { normalizeSubjectType, parseSubjectType, type SubjectType } from "../log/schema";
 
 export interface Subject {
   display: string;
@@ -24,6 +24,10 @@ function isEnoent(error: unknown): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT"
   );
+}
+
+function isValidSlug(slug: string): boolean {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug);
 }
 
 function escapeRegex(value: string): string {
@@ -90,20 +94,61 @@ export async function ensureSubject(
   slug: string,
   inferredType?: string,
 ): Promise<void> {
-  if (!isNonEmptyString(slug)) {
+  const normalizedSlug = typeof slug === "string" ? slug.trim() : "";
+  if (!isNonEmptyString(normalizedSlug)) {
     throw new Error("slug must be a non-empty string");
+  }
+  if (!isValidSlug(normalizedSlug)) {
+    throw new Error(`invalid slug "${normalizedSlug}" (expected lowercase kebab-case)`);
   }
 
   const registry = await readRegistry(path);
-  if (registry[slug]) {
+  if (registry[normalizedSlug]) {
     return;
   }
 
-  registry[slug] = {
-    display: slugToDisplay(slug),
+  registry[normalizedSlug] = {
+    display: slugToDisplay(normalizedSlug),
     type: normalizeSubjectType(inferredType),
   };
 
+  await writeRegistry(path, registry);
+}
+
+export async function upsertSubjectFromExtraction(
+  path: string,
+  slug: string,
+  inferredType?: string,
+): Promise<void> {
+  const normalizedSlug = typeof slug === "string" ? slug.trim() : "";
+  if (!isNonEmptyString(normalizedSlug)) {
+    throw new Error("slug must be a non-empty string");
+  }
+  if (!isValidSlug(normalizedSlug)) {
+    throw new Error(`invalid slug "${normalizedSlug}" (expected lowercase kebab-case)`);
+  }
+
+  const registry = await readRegistry(path);
+  const existing = registry[normalizedSlug];
+  const hintedType = parseSubjectType(inferredType);
+
+  if (!existing) {
+    registry[normalizedSlug] = {
+      display: slugToDisplay(normalizedSlug),
+      type: hintedType ?? normalizeSubjectType(inferredType),
+    };
+    await writeRegistry(path, registry);
+    return;
+  }
+
+  if (!hintedType || existing.type === hintedType) {
+    return;
+  }
+
+  registry[normalizedSlug] = {
+    ...existing,
+    type: hintedType,
+  };
   await writeRegistry(path, registry);
 }
 
@@ -113,24 +158,30 @@ export async function renameSubject(
   oldSlug: string,
   newSlug: string,
 ): Promise<void> {
-  if (!isNonEmptyString(oldSlug) || !isNonEmptyString(newSlug)) {
+  const normalizedOldSlug = typeof oldSlug === "string" ? oldSlug.trim() : "";
+  const normalizedNewSlug = typeof newSlug === "string" ? newSlug.trim() : "";
+
+  if (!isNonEmptyString(normalizedOldSlug) || !isNonEmptyString(normalizedNewSlug)) {
     throw new Error("oldSlug and newSlug must be non-empty strings");
   }
+  if (!isValidSlug(normalizedNewSlug)) {
+    throw new Error(`invalid slug "${normalizedNewSlug}" (expected lowercase kebab-case)`);
+  }
 
-  if (oldSlug === newSlug) {
+  if (normalizedOldSlug === normalizedNewSlug) {
     return;
   }
 
   const registry = await readRegistry(registryPath);
   let registryChanged = false;
 
-  const oldSubject = registry[oldSlug];
+  const oldSubject = registry[normalizedOldSlug];
   if (oldSubject) {
-    if (!registry[newSlug]) {
-      registry[newSlug] = oldSubject;
+    if (!registry[normalizedNewSlug]) {
+      registry[normalizedNewSlug] = oldSubject;
     }
 
-    delete registry[oldSlug];
+    delete registry[normalizedOldSlug];
     registryChanged = true;
   }
 
@@ -149,8 +200,8 @@ export async function renameSubject(
     throw error;
   }
 
-  const pattern = new RegExp(`(\\"subject\\"\\s*:\\s*\\")${escapeRegex(oldSlug)}(\\")`, "g");
-  const updated = logContent.replace(pattern, `$1${newSlug}$2`);
+  const pattern = new RegExp(`(\\"subject\\"\\s*:\\s*\\")${escapeRegex(normalizedOldSlug)}(\\")`, "g");
+  const updated = logContent.replace(pattern, `$1${normalizedNewSlug}$2`);
 
   if (updated !== logContent) {
     await writeFile(logPath, updated, "utf8");

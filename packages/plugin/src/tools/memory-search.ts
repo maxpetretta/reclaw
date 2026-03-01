@@ -105,7 +105,11 @@ function textResult(text: string, details?: unknown): { content: Array<{ type: s
 
 function formatLogEntry(entry: LogEntry): string {
   const subject = entry.subject ?? "general";
-  return `[${entry.type}] ${subject} — ${entry.content} (${entry.timestamp})`;
+  if (entry.type === "task") {
+    return `[id=${entry.id}] [${entry.type}] ${subject} [status=${entry.status}] — ${entry.content} (${entry.timestamp})`;
+  }
+
+  return `[id=${entry.id}] [${entry.type}] ${subject} — ${entry.content} (${entry.timestamp})`;
 }
 
 function dedupeEntries(entries: LogEntry[]): LogEntry[] {
@@ -171,11 +175,21 @@ function buildParametersSchema(baseParameters: unknown): Record<string, unknown>
         status: { type: "string", enum: ["open", "done"] },
         includeReplaced: { type: "boolean" },
       },
+      anyOf: [
+        { required: ["query"] },
+        { required: ["type"] },
+        { required: ["subject"] },
+        { required: ["status"] },
+      ],
       additionalProperties: false,
     };
   }
 
   const existingProperties = isObject(baseParameters.properties) ? baseParameters.properties : {};
+  const existingRequired = Array.isArray(baseParameters.required)
+    ? baseParameters.required.filter((value): value is string => typeof value === "string")
+    : [];
+  const requiredWithoutQuery = existingRequired.filter((value) => value !== "query");
 
   return {
     ...baseParameters,
@@ -187,6 +201,13 @@ function buildParametersSchema(baseParameters: unknown): Record<string, unknown>
       status: { type: "string", enum: ["open", "done"] },
       includeReplaced: { type: "boolean" },
     },
+    required: requiredWithoutQuery,
+    anyOf: [
+      { required: ["query"] },
+      { required: ["type"] },
+      { required: ["subject"] },
+      { required: ["status"] },
+    ],
   };
 }
 
@@ -234,9 +255,9 @@ export function createWrappedMemorySearchTool(
         return textResult("No results.", { reason: "missing query and structured filters" });
       }
 
-      const [structuredEntries, fallbackKeywordEntries, builtinResult] = await Promise.all([
+      const [structuredEntries, keywordEntries, builtinResult] = await Promise.all([
         hasStructuredFilters ? resolvedDeps.queryLog(logPath, filter) : Promise.resolve([]),
-        query && !builtinExecute ? resolvedDeps.searchLog(logPath, query, filter) : Promise.resolve([]),
+        query ? resolvedDeps.searchLog(logPath, query, filter) : Promise.resolve([]),
         query && builtinExecute
           ? builtinExecute(
               toolCallId,
@@ -252,12 +273,7 @@ export function createWrappedMemorySearchTool(
           : Promise.resolve(null),
       ]);
 
-      const logEntries = dedupeEntries([...structuredEntries, ...fallbackKeywordEntries]);
-
-      // Query-only requests should preserve builtin behavior when available.
-      if (query && !hasStructuredFilters && builtinResult) {
-        return builtinResult;
-      }
+      const logEntries = dedupeEntries([...structuredEntries, ...keywordEntries]);
 
       const logLines = logEntries.map(formatLogEntry);
       const builtinText = extractTextFromToolResult(builtinResult);
@@ -268,7 +284,7 @@ export function createWrappedMemorySearchTool(
       ]);
 
       if (mergedLines.length === 0) {
-          return textResult("No results.", {
+        return textResult("No results.", {
           logMatches: logEntries.length,
           semanticMatches: builtinText ? 1 : 0,
         });
