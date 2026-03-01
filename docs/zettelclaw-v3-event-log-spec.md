@@ -250,8 +250,7 @@ The log doesn't decay. It's append-only, immutable. Decay is a read concern.
 
 The briefing generator applies natural decay through its time windows:
 
-- Active subjects: entries in the last 14 days
-- Recent decisions: last 7 days
+- Active entries: all entries in the last 14 days (includes recent decisions)
 - Open items: open tasks and unanswered questions (no time limit)
 - Stale subjects: old entries about subjects referenced in recent sessions
 
@@ -468,17 +467,27 @@ MEMORY.md has two sections with different authors:
 
 ### 5.2 Generation
 
-The nightly cron job reads recent log entries and rewrites the generated block:
+The nightly cron job pre-filters log entries into three buckets, then sends the union to the LLM for presentation:
 
-1. **Active**: Collect unique `subject` values from entries in the last 14 days. For each, summarize the most recent entry.
-2. **Recent Decisions**: All `type: "decision"` entries from the last 7 days.
-3. **Pending**: All `type: "task"` with `status: "open"`. All `type: "question"` not yet replaced.
-4. **Open Questions**: All `type: "question"` entries not replaced by a decision or fact.
-5. **Stale**: Subjects whose most recent entry is older than 30 days but that appear in the `subject` field of entries from the last 7 days.
-6. **Contradictions**: For each active subject, scan older unreplaced entries (decisions and facts) and compare against entries from the last 14 days. If an older entry appears to conflict with a newer one, flag it. The newer entry is assumed correct — the flag is asking the human to confirm the older entry should be replaced or dismissed.
+**Pre-filtering (code-side, before LLM call):**
+1. **Active entries**: All entries within `activeWindow` days (default 14). This naturally includes recent decisions.
+2. **Open items**: All `type: "task"` with `status: "open"` + all `type: "question"` not yet replaced. No time limit.
+3. **Stale candidates**: Entries whose subject appears in the active window but whose most recent entry is older than `staleThreshold` days (default 30).
+
+These three sets are unioned and deduped by ID. Only the resulting entries are sent to the LLM.
+
+**Presentation (LLM-side):**
+The briefing model receives pre-bucketed entries and produces sections:
+- `## Active` — unique subjects from active entries, one-line summaries
+- `## Recent Decisions` — decision-type entries from the active window
+- `## Pending` — open tasks and unresolved questions
+- `## Stale` — subjects from the stale bucket
+- `## Contradictions` — up to 3 likely conflicts where older entries may disagree with newer ones on the same subject
+
+The LLM handles presentation grouping (e.g. pulling decisions into their own section) but does not need to apply time-window filtering — that's already done.
 
 Constraints:
-- Max 80 lines between markers.
+- Max 80 lines between markers (enforced by `limitLines` post-LLM).
 - Content outside markers is never touched.
 - The generated block is the only part the nightly job writes to.
 - Max 3 contradiction flags per nightly run to avoid noise.
@@ -631,6 +640,9 @@ zettelclaw/
     plugin.ts                     # Plugin entry — registers hooks, tools, CLI commands
     hooks/
       extraction.ts               # session_end / before_reset / gateway_start — extract from transcripts
+    memory/
+      handoff.ts                  # Format and write LAST HANDOFF block in MEMORY.md
+      managed-block.ts            # Shared utility for marker-delimited block replacement
     tools/
       memory-search.ts            # Wraps builtin memory_search — adds structured filters + replacement resolution
       memory-get.ts               # Wraps builtin memory_get — adds entry-by-ID and transcript lookups
@@ -919,11 +931,14 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 | 9 | Session ID format | OpenClaw's `sessionId` from hook event context. Maps to `<sessionId>.jsonl` transcript. |
 | 10 | Duplicate handoffs | `state.json` tracks `extractedSessions` map (set of sessionIds). Same session = skip. Failed sessions tracked with retry count (max 1 retry). Map pruned after 30d. |
 | 11 | JSONL indexing | Builtin indexer is markdown-only. Log search handled by wrapper (structured filters + ripgrep). Semantic search covers MEMORY.md only for v1. |
-| 12 | Handoff persistence | Extraction rewrites MEMORY.md `LAST HANDOFF` block when new handoff entries are appended. |
+| 12 | Handoff persistence | Extraction rewrites MEMORY.md `LAST HANDOFF` block when new handoff entries are appended. `before_prompt_build` hook eliminated — MEMORY.md auto-load handles injection. |
 | 13 | Extraction model | Sonnet (configurable via `extraction.model`). |
 | 14 | Scope filtering | Only main sessions extracted. Skip `cron:`, `sub:`, `hook:` session key prefixes. |
 | 15 | Error handling | Retry extraction once on failure. Mark as permanently failed after second failure. `gateway_start` sweep also retries. |
 | 16 | Migration from v1 | Clean break. Existing Obsidian vault stays as-is. No import tool for v1. |
+| 17 | Subject type enum | Constrained to `project \| person \| system \| topic`. Default `project`. Validated on creation with fallback. |
+| 18 | Briefing pre-filtering | Three buckets (active entries, open items, stale subjects) pre-filtered in code before LLM call. `decisionWindow` config removed — decisions are covered by `activeWindow`. LLM handles presentation only. |
+| 19 | Extraction context | Existing log entries (subject-relevant + open items) fed to extraction LLM so it can reference IDs in `replaces` and avoid duplicates. Capped at 50 entries per subject. |
 
 ## Appendix B: Build Order
 
