@@ -29,7 +29,6 @@ interface BriefingDeps {
 
 interface BriefingBuckets {
   activeEntries: LogEntry[];
-  recentDecisions: LogEntry[];
   openItems: LogEntry[];
   staleSubjects: LogEntry[];
   selectedEntries: LogEntry[];
@@ -135,9 +134,6 @@ function buildBriefingBuckets(
   nowMs: number,
 ): BriefingBuckets {
   const activeEntries = entries.filter((entry) => isWithinDays(entry, nowMs, config.activeWindow));
-  const recentDecisions = entries.filter(
-    (entry) => entry.type === "decision" && isWithinDays(entry, nowMs, config.decisionWindow),
-  );
   const openItems = entries.filter(isOpenItem);
 
   const recentSubjects = new Set<string>();
@@ -173,9 +169,6 @@ function buildBriefingBuckets(
   for (const entry of activeEntries) {
     selectedIds.add(entry.id);
   }
-  for (const entry of recentDecisions) {
-    selectedIds.add(entry.id);
-  }
   for (const entry of openItems) {
     selectedIds.add(entry.id);
   }
@@ -187,7 +180,6 @@ function buildBriefingBuckets(
 
   return {
     activeEntries,
-    recentDecisions,
     openItems,
     staleSubjects,
     selectedEntries,
@@ -283,9 +275,6 @@ export async function generateBriefing(
     "## Active Entries",
     formatBucketIds(buckets.activeEntries),
     "",
-    "## Recent Decisions",
-    formatBucketIds(buckets.recentDecisions),
-    "",
     "## Open Items",
     formatBucketIds(buckets.openItems),
     "",
@@ -297,7 +286,7 @@ export async function generateBriefing(
       ? buckets.selectedEntries.map(formatEntryWithId).join("\n")
       : "- n/a",
     "",
-    `Constraints: activeWindow=${opts.config.briefing.activeWindow}, decisionWindow=${opts.config.briefing.decisionWindow}, staleThreshold=${opts.config.briefing.staleThreshold}, maxLines=${opts.config.briefing.maxLines}`,
+    `Constraints: activeWindow=${opts.config.briefing.activeWindow}, staleThreshold=${opts.config.briefing.staleThreshold}, maxLines=${opts.config.briefing.maxLines}`,
   ].join("\n");
 
   const rawGenerated = await resolvedDeps.callBriefingModel({

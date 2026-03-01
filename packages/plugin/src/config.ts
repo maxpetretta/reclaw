@@ -7,7 +7,6 @@ export interface PluginConfig {
   briefing: {
     model: string;
     activeWindow: number;
-    decisionWindow: number;
     staleThreshold: number;
     maxLines: number;
   };
@@ -26,7 +25,6 @@ const DEFAULT_CONFIG: PluginConfig = {
   briefing: {
     model: "anthropic/claude-sonnet-4-6",
     activeWindow: 14,
-    decisionWindow: 7,
     staleThreshold: 30,
     maxLines: 80,
   },
@@ -100,7 +98,6 @@ export function resolveConfig(
     briefing: {
       model: readString(briefingRaw.model, DEFAULT_CONFIG.briefing.model),
       activeWindow: readNumber(briefingRaw.activeWindow, DEFAULT_CONFIG.briefing.activeWindow),
-      decisionWindow: readNumber(briefingRaw.decisionWindow, DEFAULT_CONFIG.briefing.decisionWindow),
       staleThreshold: readNumber(briefingRaw.staleThreshold, DEFAULT_CONFIG.briefing.staleThreshold),
       maxLines: readNumber(briefingRaw.maxLines, DEFAULT_CONFIG.briefing.maxLines),
     },

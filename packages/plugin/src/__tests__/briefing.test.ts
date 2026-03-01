@@ -20,7 +20,6 @@ function createConfig(logDir: string): PluginConfig {
     briefing: {
       model: "anthropic/claude-sonnet-4-6",
       activeWindow: 14,
-      decisionWindow: 7,
       staleThreshold: 30,
       maxLines: 80,
     },
@@ -221,7 +220,6 @@ describe("briefing generation", () => {
     );
 
     expect(capturedUserInput).toContain("## Active Entries");
-    expect(capturedUserInput).toContain("## Recent Decisions");
     expect(capturedUserInput).toContain("## Open Items");
     expect(capturedUserInput).toContain("## Stale Subjects");
     expect(capturedUserInput).toContain("## Included Entries (Deduped Union)");

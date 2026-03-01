@@ -31,7 +31,6 @@ function createConfig(logDir: string): PluginConfig {
     briefing: {
       model: "anthropic/claude-sonnet-4-6",
       activeWindow: 14,
-      decisionWindow: 7,
       staleThreshold: 30,
       maxLines: 80,
     },
