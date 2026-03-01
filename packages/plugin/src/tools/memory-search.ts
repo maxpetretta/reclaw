@@ -104,7 +104,7 @@ function textResult(text: string, details?: unknown): { content: Array<{ type: s
 }
 
 function formatLogEntry(entry: LogEntry): string {
-  const subject = entry.subject ?? "general";
+  const subject = entry.subject ?? "unknown";
   if (entry.type === "task") {
     return `[id=${entry.id}] [${entry.type}] ${subject} [status=${entry.status}] — ${entry.content} (${entry.timestamp})`;
   }

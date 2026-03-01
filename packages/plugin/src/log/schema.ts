@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 
 export const ENTRY_TYPES = ["task", "fact", "decision", "question", "handoff"] as const;
 export const VALID_SUBJECT_TYPES = ["project", "person", "system", "topic"] as const;
+export const GENERAL_SUBJECT_SLUG = "unknown";
 
 export type EntryType = (typeof ENTRY_TYPES)[number];
 export type SubjectType = (typeof VALID_SUBJECT_TYPES)[number];
@@ -27,35 +28,39 @@ interface BaseEntry {
   content: string;
   session: string;
   detail?: string;
-  subject?: string;
   replaces?: string;
 }
 
-export interface TaskEntry extends BaseEntry {
+interface SubjectScopedEntry extends BaseEntry {
+  subject: string;
+}
+
+export interface TaskEntry extends SubjectScopedEntry {
   type: "task";
   status: "open" | "done";
 }
 
-interface FactEntry extends BaseEntry {
+interface FactEntry extends SubjectScopedEntry {
   type: "fact";
 }
 
-interface DecisionEntry extends BaseEntry {
+interface DecisionEntry extends SubjectScopedEntry {
   type: "decision";
 }
 
-interface QuestionEntry extends BaseEntry {
+interface QuestionEntry extends SubjectScopedEntry {
   type: "question";
 }
 
 interface HandoffEntry extends BaseEntry {
   type: "handoff";
+  subject?: string;
 }
 
 export type LogEntry = TaskEntry | FactEntry | DecisionEntry | QuestionEntry | HandoffEntry;
 
 const COMMON_REQUIRED_FIELDS = ["content", "type"] as const;
-const COMMON_OPTIONAL_FIELDS = ["detail", "subject", "replaces"] as const;
+const COMMON_OPTIONAL_FIELDS = ["detail", "replaces"] as const;
 const VALID_STATUS = new Set(["open", "done"]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -99,6 +104,14 @@ function parseType(rawType: unknown): EntryType | undefined {
   return ENTRY_TYPES.find((entryType) => entryType === rawType);
 }
 
+function parseSubject(rawSubject: unknown): string | undefined {
+  if (!isNonEmptyString(rawSubject)) {
+    return undefined;
+  }
+
+  return rawSubject.trim();
+}
+
 function buildLlmEntry(
   raw: Record<string, unknown>,
 ): { ok: true; entry: Omit<LogEntry, "id" | "timestamp" | "session"> } | { ok: false; error: string } {
@@ -114,8 +127,12 @@ function buildLlmEntry(
 
   const content = raw.content as string;
   const detail = raw.detail as string | undefined;
-  const subject = raw.subject as string | undefined;
+  const subject = parseSubject(raw.subject);
   const replaces = raw.replaces as string | undefined;
+
+  if (type !== "handoff" && !subject) {
+    return { ok: false, error: "subject must be a non-empty string for non-handoff entries" };
+  }
 
   if (type === "task") {
     const status = raw.status;
@@ -129,6 +146,19 @@ function buildLlmEntry(
         type,
         content,
         status,
+        subject: subject as string,
+        ...(detail ? { detail } : {}),
+        ...(replaces ? { replaces } : {}),
+      },
+    };
+  }
+
+  if (type === "handoff") {
+    return {
+      ok: true,
+      entry: {
+        type,
+        content,
         ...(detail ? { detail } : {}),
         ...(subject ? { subject } : {}),
         ...(replaces ? { replaces } : {}),
@@ -141,8 +171,8 @@ function buildLlmEntry(
     entry: {
       type,
       content,
+      subject: subject as string,
       ...(detail ? { detail } : {}),
-      ...(subject ? { subject } : {}),
       ...(replaces ? { replaces } : {}),
     },
   };

@@ -7,6 +7,7 @@
 - Use `memory_search` for broad recall (semantic + structured filters).
 - Use `memory_get` for exact entry IDs, transcript provenance (`session:<id>`), or precise file reads.
 - When you reference a prior memory event in conversation, include its event ID inline as `[<id>]` so extraction can preserve `replaces` chains. Only cite IDs returned by tools.
+- When reconstructing history for a subject, list that subject's events and reason chronologically (oldest to newest) to identify the current state and predecessor links.
 
 ### Retrieval Order
 1. Use `MEMORY.md` + injected handoff context already in prompt.

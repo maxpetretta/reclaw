@@ -30,7 +30,16 @@ function formatExistingEntries(entries: LogEntry[] | undefined): string {
     return "- n/a";
   }
 
-  return entries
+  const sorted = [...entries].sort((left, right) => {
+    const leftTime = Date.parse(left.timestamp);
+    const rightTime = Date.parse(right.timestamp);
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+    return left.id.localeCompare(right.id);
+  });
+
+  return sorted
     .map((entry) => {
       const detailText = entry.detail ?? "-";
       const statusText = entry.type === "task" ? ` status=${entry.status};` : "";

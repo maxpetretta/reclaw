@@ -77,6 +77,7 @@ describe("import run", () => {
         },
       },
       eventUsage: {},
+      importJobs: {},
     });
 
     const conversations = [
@@ -106,6 +107,7 @@ describe("import run", () => {
             {
               type: "fact",
               content: `Imported ${conversation.conversationId}`,
+              subject: "import-test",
             },
             {
               sessionId,
@@ -191,6 +193,7 @@ describe("import run", () => {
             {
               type: "fact",
               content: "Imported legacy memory entry",
+              subject: "import-test",
             },
             {
               sessionId,
@@ -223,6 +226,7 @@ describe("import run", () => {
         },
       },
       eventUsage: {},
+      importJobs: {},
     });
 
     const summary = await runReclawImport(
@@ -244,6 +248,7 @@ describe("import run", () => {
             {
               type: "fact",
               content: "Forced import",
+              subject: "import-test",
             },
             {
               sessionId,
@@ -304,6 +309,51 @@ describe("import run", () => {
     const registry = await readRegistry(subjectsPath);
     expect(registry["auth-migration"]).toBeDefined();
     expect(registry["  auth-migration  "]).toBeUndefined();
+  });
+
+  test("processes selected conversations in chronological order", async () => {
+    const order: string[] = [];
+    const older = makeConversation("older", "2024-01-02T00:00:00.000Z", 6);
+    const newer = makeConversation("newer", "2024-01-05T00:00:00.000Z", 6);
+
+    const summary = await runReclawImport(
+      {
+        platform: "chatgpt",
+        filePath: join(tempDir, "unused.json"),
+        logPath,
+        subjectsPath,
+        statePath,
+        model: "anthropic/claude-haiku-4-5",
+        jobs: 1,
+        openClawHome,
+      },
+      {
+        readImportFile: async () => ({}),
+        parseConversations: () => [newer, older],
+        extractConversation: async ({ conversation, sessionId }) => {
+          order.push(conversation.conversationId);
+          return [
+            {
+              entry: finalizeEntry(
+                {
+                  type: "fact",
+                  content: `Imported ${conversation.conversationId}`,
+                  subject: "ordering",
+                },
+                {
+                  sessionId,
+                  timestamp: conversation.updatedAt,
+                },
+              ),
+            },
+          ];
+        },
+      },
+      silentLogger,
+    );
+
+    expect(summary.imported).toBe(2);
+    expect(order).toEqual(["older", "newer"]);
   });
 
   test("writes transcript session JSONL and registers in sessions.json", async () => {

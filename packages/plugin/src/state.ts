@@ -28,11 +28,61 @@ export interface EventUsageState {
 
 export type EventUsageKind = "memory_get" | "citation";
 
+export type ImportJobStatus = "queued" | "running" | "completed" | "failed";
+
+export interface ImportJobOptionsState {
+  after?: string;
+  before?: string;
+  minMessages?: number;
+  jobs?: number;
+  model?: string;
+  force?: boolean;
+  transcripts?: boolean;
+  verbose?: boolean;
+  keepSource?: boolean;
+  backupMemoryDocs?: boolean;
+}
+
+export interface ImportJobSummaryState {
+  platform: "chatgpt" | "claude" | "grok" | "openclaw";
+  parsed: number;
+  dedupedInInput: number;
+  selected: number;
+  skippedByDate: number;
+  skippedByMinMessages: number;
+  skippedAlreadyImported: number;
+  imported: number;
+  failed: number;
+  entriesWritten: number;
+  transcriptsWritten: number;
+  dryRun: boolean;
+}
+
+export interface ImportJobState {
+  id: string;
+  status: ImportJobStatus;
+  platform: "chatgpt" | "claude" | "grok" | "openclaw";
+  filePath: string;
+  options: ImportJobOptionsState;
+  createdAt: string;
+  updatedAt: string;
+  queuedAt: string;
+  attempts: number;
+  workspaceDir?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  summary?: ImportJobSummaryState;
+  cronJobId?: string;
+  cronJobName?: string;
+}
+
 export interface ZettelclawState {
   extractedSessions: Record<string, ExtractedSession>;
   failedSessions: Record<string, FailedSession>;
   importedConversations: Record<string, ImportedConversationState>;
   eventUsage: Record<string, EventUsageState>;
+  importJobs: Record<string, ImportJobState>;
 }
 
 function createEmptyState(): ZettelclawState {
@@ -41,6 +91,7 @@ function createEmptyState(): ZettelclawState {
     failedSessions: {},
     importedConversations: {},
     eventUsage: {},
+    importJobs: {},
   };
 }
 
@@ -58,6 +109,114 @@ function isEnoent(error: unknown): boolean {
 }
 
 const IMPORTED_PLATFORM_SET = new Set(["chatgpt", "claude", "grok", "openclaw"]);
+const IMPORT_JOB_STATUS_SET: ReadonlySet<ImportJobStatus> = new Set([
+  "queued",
+  "running",
+  "completed",
+  "failed",
+]);
+
+function isValidTimestamp(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function normalizeImportJobOptions(raw: unknown): ImportJobOptionsState {
+  if (!isObject(raw)) {
+    return {};
+  }
+
+  const options: ImportJobOptionsState = {};
+
+  if (typeof raw.after === "string" && Number.isFinite(Date.parse(raw.after))) {
+    options.after = raw.after;
+  }
+
+  if (typeof raw.before === "string" && Number.isFinite(Date.parse(raw.before))) {
+    options.before = raw.before;
+  }
+
+  if (typeof raw.minMessages === "number" && Number.isFinite(raw.minMessages) && raw.minMessages > 0) {
+    options.minMessages = Math.floor(raw.minMessages);
+  }
+
+  if (typeof raw.jobs === "number" && Number.isFinite(raw.jobs) && raw.jobs > 0) {
+    options.jobs = Math.floor(raw.jobs);
+  }
+
+  if (typeof raw.model === "string" && raw.model.trim().length > 0) {
+    options.model = raw.model.trim();
+  }
+
+  if (typeof raw.force === "boolean") {
+    options.force = raw.force;
+  }
+
+  if (typeof raw.transcripts === "boolean") {
+    options.transcripts = raw.transcripts;
+  }
+
+  if (typeof raw.verbose === "boolean") {
+    options.verbose = raw.verbose;
+  }
+
+  if (typeof raw.keepSource === "boolean") {
+    options.keepSource = raw.keepSource;
+  }
+
+  if (typeof raw.backupMemoryDocs === "boolean") {
+    options.backupMemoryDocs = raw.backupMemoryDocs;
+  }
+
+  return options;
+}
+
+function isValidPlatform(value: unknown): value is ImportJobSummaryState["platform"] {
+  return typeof value === "string" && IMPORTED_PLATFORM_SET.has(value);
+}
+
+function normalizeImportJobSummary(raw: unknown): ImportJobSummaryState | undefined {
+  if (!isObject(raw) || !isValidPlatform(raw.platform)) {
+    return undefined;
+  }
+
+  const numericKeys = [
+    "parsed",
+    "dedupedInInput",
+    "selected",
+    "skippedByDate",
+    "skippedByMinMessages",
+    "skippedAlreadyImported",
+    "imported",
+    "failed",
+    "entriesWritten",
+    "transcriptsWritten",
+  ] as const;
+
+  for (const key of numericKeys) {
+    if (typeof raw[key] !== "number" || !Number.isFinite(raw[key])) {
+      return undefined;
+    }
+  }
+
+  if (typeof raw.dryRun !== "boolean") {
+    return undefined;
+  }
+
+  return {
+    platform: raw.platform,
+    parsed: raw.parsed,
+    dedupedInInput: raw.dedupedInInput,
+    selected: raw.selected,
+    skippedByDate: raw.skippedByDate,
+    skippedByMinMessages: raw.skippedByMinMessages,
+    skippedAlreadyImported: raw.skippedAlreadyImported,
+    imported: raw.imported,
+    failed: raw.failed,
+    entriesWritten: raw.entriesWritten,
+    transcriptsWritten: raw.transcriptsWritten,
+    dryRun: raw.dryRun,
+  };
+}
 
 function parseConversationKey(value: string): { platform: string; conversationId: string } | null {
   const delimiterIndex = value.indexOf(":");
@@ -89,11 +248,13 @@ function normalizeState(raw: unknown): ZettelclawState {
   const failedSessions: Record<string, FailedSession> = {};
   const importedConversations: Record<string, ImportedConversationState> = {};
   const eventUsage: Record<string, EventUsageState> = {};
+  const importJobs: Record<string, ImportJobState> = {};
 
   const extractedRaw = isObject(raw.extractedSessions) ? raw.extractedSessions : {};
   const failedRaw = isObject(raw.failedSessions) ? raw.failedSessions : {};
   const importedRaw = isObject(raw.importedConversations) ? raw.importedConversations : {};
   const eventUsageRaw = isObject(raw.eventUsage) ? raw.eventUsage : {};
+  const importJobsRaw = isObject(raw.importJobs) ? raw.importJobs : {};
 
   for (const [sessionId, sessionValue] of Object.entries(extractedRaw)) {
     if (!isObject(sessionValue)) {
@@ -191,11 +352,86 @@ function normalizeState(raw: unknown): ZettelclawState {
     };
   }
 
+  for (const [jobId, jobValue] of Object.entries(importJobsRaw)) {
+    if (!isObject(jobValue)) {
+      continue;
+    }
+
+    const status =
+      typeof jobValue.status === "string" && IMPORT_JOB_STATUS_SET.has(jobValue.status as ImportJobStatus)
+        ? (jobValue.status as ImportJobStatus)
+        : null;
+    const platform = isValidPlatform(jobValue.platform) ? jobValue.platform : null;
+    const filePath = typeof jobValue.filePath === "string" ? jobValue.filePath.trim() : "";
+    const createdAt = jobValue.createdAt;
+    const updatedAt = jobValue.updatedAt;
+    const queuedAt = jobValue.queuedAt;
+    const attempts = jobValue.attempts;
+
+    if (
+      !status ||
+      !platform ||
+      filePath.length === 0 ||
+      !isValidTimestamp(createdAt) ||
+      !isValidTimestamp(updatedAt) ||
+      !isValidTimestamp(queuedAt) ||
+      typeof attempts !== "number" ||
+      !Number.isFinite(attempts) ||
+      attempts < 0
+    ) {
+      continue;
+    }
+
+    const normalized: ImportJobState = {
+      id: jobId,
+      status,
+      platform,
+      filePath,
+      options: normalizeImportJobOptions(jobValue.options),
+      createdAt,
+      updatedAt,
+      queuedAt,
+      attempts: Math.floor(attempts),
+    };
+
+    if (typeof jobValue.workspaceDir === "string" && jobValue.workspaceDir.trim().length > 0) {
+      normalized.workspaceDir = jobValue.workspaceDir.trim();
+    }
+
+    if (isValidTimestamp(jobValue.startedAt)) {
+      normalized.startedAt = jobValue.startedAt;
+    }
+
+    if (isValidTimestamp(jobValue.finishedAt)) {
+      normalized.finishedAt = jobValue.finishedAt;
+    }
+
+    if (typeof jobValue.error === "string" && jobValue.error.trim().length > 0) {
+      normalized.error = jobValue.error;
+    }
+
+    const summary = normalizeImportJobSummary(jobValue.summary);
+    if (summary) {
+      normalized.summary = summary;
+    }
+
+    if (typeof jobValue.cronJobId === "string" && jobValue.cronJobId.trim().length > 0) {
+      normalized.cronJobId = jobValue.cronJobId.trim();
+    }
+
+    if (typeof jobValue.cronJobName === "string" && jobValue.cronJobName.trim().length > 0) {
+      normalized.cronJobName = jobValue.cronJobName.trim();
+    }
+
+    importJobs[jobId] = normalized;
+  }
+
   return {
     extractedSessions,
     failedSessions,
     importedConversations,
     eventUsage,
+    importJobs,
   };
 }
 

@@ -32,7 +32,7 @@ import { parseGrokConversations } from "../import/adapters/grok";
 import { queryLog, searchLog } from "../log/query";
 import type { EntryType, LogEntry } from "../log/schema";
 import { ensureSubject, readRegistry, renameSubject, writeRegistry } from "../subjects/registry";
-import { writeState } from "../state";
+import { readState, writeState, type ImportJobOptionsState, type ImportJobState, type ImportJobStatus } from "../state";
 
 export const BRIEFING_BEGIN_MARKER = "<!-- BEGIN GENERATED BRIEFING -->";
 export const BRIEFING_END_MARKER = "<!-- END GENERATED BRIEFING -->";
@@ -577,6 +577,7 @@ export async function ensureImportStoreFiles(paths: InitPaths, statePath: string
       failedSessions: {},
       importedConversations: {},
       eventUsage: {},
+      importJobs: {},
     });
   }
 }
@@ -629,6 +630,480 @@ const DEFAULT_IMPORT_DEPS: ImportCommandDeps = {
   clearDirectory: clearDirectoryContents,
 };
 
+const IMPORT_WORKER_NAME_PREFIX = "zettelclaw-import-worker-";
+const IMPORT_WORKER_TIMEOUT_SECONDS = 60 * 60;
+const IMPORT_WORKER_EXEC_TIMEOUT_SECONDS = 2 * 60 * 60;
+const IMPORT_WORKER_SCHEDULE_DELAY_MS = 2_000;
+
+interface QueueImportJobResult {
+  job: ImportJobState;
+  statePath: string;
+  cronJobId: string;
+  cronJobName: string;
+  nextRunAt: string;
+}
+
+interface ResumeImportJobsResult {
+  statePath: string;
+  resumedJobIds: string[];
+  skippedJobIds: string[];
+  schedulingErrors: Array<{ jobId: string; error: string }>;
+}
+
+async function hasFinishedCronRun(cronRunsDir: string, cronJobId: string): Promise<boolean> {
+  const runPath = join(cronRunsDir, `${cronJobId}.jsonl`);
+  let raw = "";
+  try {
+    raw = await readFile(runPath, "utf8");
+  } catch (error) {
+    if (isEnoent(error)) {
+      return false;
+    }
+    throw error;
+  }
+
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    try {
+      const parsed = JSON.parse(line) as { action?: unknown };
+      if (parsed.action === "finished") {
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return false;
+}
+
+function createImportJobId(): string {
+  return randomUUID().replace(/-/gu, "");
+}
+
+function readPositiveIntOption(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function sanitizeImportOptionsForJob(raw: Record<string, unknown>): ImportJobOptionsState {
+  const after = parseIsoDateInput(raw.after);
+  const before = parseIsoDateInput(raw.before);
+  const minMessages = readPositiveIntOption(raw.minMessages);
+  const jobs = readPositiveIntOption(raw.jobs);
+  const model =
+    typeof raw.model === "string" && raw.model.trim().length > 0 ? raw.model.trim() : undefined;
+
+  const options: ImportJobOptionsState = {
+    ...(after ? { after } : {}),
+    ...(before ? { before } : {}),
+    ...(minMessages !== undefined ? { minMessages } : {}),
+    ...(jobs !== undefined ? { jobs } : {}),
+    ...(model ? { model } : {}),
+    ...(typeof raw.force === "boolean" ? { force: raw.force } : {}),
+    ...(typeof raw.transcripts === "boolean" ? { transcripts: raw.transcripts } : {}),
+    ...(typeof raw.verbose === "boolean" ? { verbose: raw.verbose } : {}),
+    ...(typeof raw.keepSource === "boolean" ? { keepSource: raw.keepSource } : {}),
+    ...(typeof raw.backupMemoryDocs === "boolean"
+      ? { backupMemoryDocs: raw.backupMemoryDocs }
+      : {}),
+  };
+
+  return options;
+}
+
+function buildImportWorkerCronName(jobId: string): string {
+  return `${IMPORT_WORKER_NAME_PREFIX}${jobId}`;
+}
+
+function buildImportWorkerSessionKey(cronJobId: string): string {
+  return `agent:main:cron:${cronJobId}`;
+}
+
+function buildImportWorkerCronJob(
+  jobId: string,
+  existing: Record<string, unknown> | undefined,
+): { job: Record<string, unknown>; nextRunAt: string } {
+  const now = Date.now();
+  const nextRunAt = new Date(now + IMPORT_WORKER_SCHEDULE_DELAY_MS).toISOString();
+  const createdAtMs =
+    typeof existing?.createdAtMs === "number" && Number.isFinite(existing.createdAtMs)
+      ? existing.createdAtMs
+      : now;
+  const id = typeof existing?.id === "string" ? existing.id : randomUUID();
+  const name = buildImportWorkerCronName(jobId);
+
+  return {
+    nextRunAt,
+    job: {
+      ...existing,
+      id,
+      name,
+      description: `Zettelclaw async import worker (${jobId})`,
+      enabled: true,
+      deleteAfterRun: true,
+      createdAtMs,
+      updatedAtMs: now,
+      schedule: {
+        kind: "at",
+        at: nextRunAt,
+      },
+      sessionTarget: "isolated",
+      wakeMode: "now",
+      payload: {
+        kind: "agentTurn",
+        message: [
+          "Execute exactly one command using the exec tool.",
+          `Set exec timeout to ${IMPORT_WORKER_EXEC_TIMEOUT_SECONDS} seconds and wait for completion (do not background it).`,
+          `Command: openclaw zettelclaw import-worker --job ${jobId}`,
+          "After it completes, return a concise success/failure summary.",
+        ].join("\n"),
+        timeoutSeconds: IMPORT_WORKER_TIMEOUT_SECONDS,
+      },
+      delivery: {
+        mode: "none",
+        channel: "last",
+      },
+      state: isObject(existing?.state) ? existing.state : {},
+    },
+  };
+}
+
+async function scheduleImportWorkerCron(
+  cronJobsPath: string,
+  jobId: string,
+): Promise<{ cronJobId: string; cronJobName: string; nextRunAt: string }> {
+  const doc = await readCronJobsDocument(cronJobsPath);
+  const cronJobName = buildImportWorkerCronName(jobId);
+  const existingIndex = doc.jobs.findIndex((entry) => readJobName(entry) === cronJobName);
+  const existing = existingIndex >= 0 ? doc.jobs[existingIndex] : undefined;
+  const { job, nextRunAt } = buildImportWorkerCronJob(jobId, existing);
+
+  const nextJobs = [...doc.jobs];
+  if (existingIndex >= 0) {
+    nextJobs[existingIndex] = job;
+  } else {
+    nextJobs.push(job);
+  }
+
+  await writeCronJobsDocument(cronJobsPath, {
+    ...doc,
+    jobs: nextJobs,
+  });
+
+  const cronJobId = typeof job.id === "string" ? job.id : randomUUID();
+  return {
+    cronJobId,
+    cronJobName,
+    nextRunAt,
+  };
+}
+
+function createImportJobRecord(input: {
+  platform: ImportPlatform;
+  filePath: string;
+  options: ImportJobOptionsState;
+  workspaceDir?: string;
+  jobId?: string;
+}): ImportJobState {
+  const nowIso = new Date().toISOString();
+  return {
+    id: input.jobId ?? createImportJobId(),
+    status: "queued",
+    platform: input.platform,
+    filePath: input.filePath,
+    options: input.options,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    queuedAt: nowIso,
+    attempts: 0,
+    ...(typeof input.workspaceDir === "string" && input.workspaceDir.trim().length > 0
+      ? { workspaceDir: input.workspaceDir.trim() }
+      : {}),
+  };
+}
+
+export async function queueImportJob(
+  input: RunImportCommandOptions,
+): Promise<QueueImportJobResult> {
+  const options = toObject(input.opts);
+  if (options.dryRun === true) {
+    throw new Error("`--dry-run` cannot be combined with `--async`");
+  }
+
+  const paths = resolvePaths(input.config, input.workspaceDir);
+  const importPath = input.filePath.trim();
+  const isOpenClawMigration = input.platform === "openclaw";
+
+  if (isOpenClawMigration) {
+    const metadata = await stat(importPath);
+    if (!metadata.isDirectory()) {
+      throw new Error(isDirectoryErrorMessage(importPath));
+    }
+  }
+
+  await ensureImportStoreFiles(paths, paths.statePath);
+  const state = await readState(paths.statePath);
+
+  const job = createImportJobRecord({
+    platform: input.platform,
+    filePath: importPath,
+    options: sanitizeImportOptionsForJob(options),
+    workspaceDir: input.workspaceDir,
+  });
+
+  state.importJobs[job.id] = job;
+  await writeState(paths.statePath, state);
+
+  try {
+    const scheduled = await scheduleImportWorkerCron(paths.cronJobsPath, job.id);
+    const persisted = state.importJobs[job.id];
+    if (persisted) {
+      persisted.cronJobId = scheduled.cronJobId;
+      persisted.cronJobName = scheduled.cronJobName;
+      persisted.updatedAt = new Date().toISOString();
+      state.importJobs[job.id] = persisted;
+      await writeState(paths.statePath, state);
+      return {
+        job: persisted,
+        statePath: paths.statePath,
+        ...scheduled,
+      };
+    }
+  } catch (error) {
+    const persisted = state.importJobs[job.id];
+    if (persisted) {
+      persisted.status = "failed";
+      persisted.error = `failed to schedule worker: ${error instanceof Error ? error.message : String(error)}`;
+      persisted.finishedAt = new Date().toISOString();
+      persisted.updatedAt = persisted.finishedAt;
+      state.importJobs[job.id] = persisted;
+      await writeState(paths.statePath, state);
+    }
+    throw error;
+  }
+
+  throw new Error(`failed to persist queued job ${job.id}`);
+}
+
+export async function runImportWorker(
+  input: {
+    config: PluginConfig;
+    apiConfig: unknown;
+    jobId: string;
+    workspaceDir?: string;
+  },
+  deps: {
+    runImportCommand?: typeof runImportCommand;
+  } = {},
+): Promise<RunImportCommandResult | null> {
+  const jobId = input.jobId.trim();
+  if (!jobId) {
+    throw new Error("job id is required");
+  }
+
+  const paths = resolvePaths(input.config, input.workspaceDir);
+  await ensureImportStoreFiles(paths, paths.statePath);
+
+  const state = await readState(paths.statePath);
+  const job = state.importJobs[jobId];
+  if (!job) {
+    throw new Error(`import job not found: ${jobId}`);
+  }
+
+  if (job.status === "completed") {
+    return null;
+  }
+
+  const startIso = new Date().toISOString();
+  job.status = "running";
+  job.updatedAt = startIso;
+  job.startedAt = startIso;
+  job.attempts += 1;
+  delete job.finishedAt;
+  delete job.error;
+  state.importJobs[jobId] = job;
+  await writeState(paths.statePath, state);
+
+  try {
+    const runImport = deps.runImportCommand ?? runImportCommand;
+    const result = await runImport({
+      config: input.config,
+      workspaceDir: job.workspaceDir ?? input.workspaceDir,
+      apiConfig: input.apiConfig,
+      platform: job.platform,
+      filePath: job.filePath,
+      opts: {
+        ...job.options,
+        async: false,
+        dryRun: false,
+      },
+      logger: {
+        info(message) {
+          console.log(message);
+        },
+        warn(message) {
+          console.warn(message);
+        },
+      },
+    });
+
+    const finishedState = await readState(paths.statePath);
+    const finishedJob = finishedState.importJobs[jobId];
+    if (finishedJob) {
+      const finishedAt = new Date().toISOString();
+      finishedJob.status = "completed";
+      finishedJob.updatedAt = finishedAt;
+      finishedJob.finishedAt = finishedAt;
+      finishedJob.summary = result.summary;
+      delete finishedJob.error;
+      finishedState.importJobs[jobId] = finishedJob;
+      await writeState(paths.statePath, finishedState);
+    }
+
+    return result;
+  } catch (error) {
+    const failedState = await readState(paths.statePath);
+    const failedJob = failedState.importJobs[jobId];
+    if (failedJob) {
+      const failedAt = new Date().toISOString();
+      failedJob.status = "failed";
+      failedJob.updatedAt = failedAt;
+      failedJob.finishedAt = failedAt;
+      failedJob.error = error instanceof Error ? error.message : String(error);
+      failedState.importJobs[jobId] = failedJob;
+      await writeState(paths.statePath, failedState);
+    }
+    throw error;
+  }
+}
+
+export async function resumeImportJobs(
+  input: {
+    config: PluginConfig;
+    workspaceDir?: string;
+    jobId?: string;
+  },
+): Promise<ResumeImportJobsResult> {
+  const paths = resolvePaths(input.config, input.workspaceDir);
+  await ensureImportStoreFiles(paths, paths.statePath);
+  const state = await readState(paths.statePath);
+  const cronRunsDir = join(dirname(paths.cronJobsPath), "runs");
+
+  for (const job of Object.values(state.importJobs)) {
+    if (job.status !== "running" || typeof job.cronJobId !== "string" || job.cronJobId.trim().length === 0) {
+      continue;
+    }
+
+    if (!(await hasFinishedCronRun(cronRunsDir, job.cronJobId.trim()))) {
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    job.status = "failed";
+    job.error = "import worker run ended before writing terminal state (marked failed by resume)";
+    job.finishedAt = now;
+    job.updatedAt = now;
+    state.importJobs[job.id] = job;
+  }
+
+  const requestedJobId = input.jobId?.trim();
+  const candidates = requestedJobId
+    ? [requestedJobId]
+    : Object.values(state.importJobs)
+        .filter((job) => job.status === "queued" || job.status === "failed")
+        .map((job) => job.id);
+
+  const resumedJobIds: string[] = [];
+  const skippedJobIds: string[] = [];
+  const schedulingErrors: Array<{ jobId: string; error: string }> = [];
+
+  for (const jobId of candidates) {
+    const job = state.importJobs[jobId];
+    if (!job) {
+      skippedJobIds.push(jobId);
+      continue;
+    }
+
+    if (job.status === "completed" || job.status === "running") {
+      skippedJobIds.push(jobId);
+      continue;
+    }
+
+    const queuedAt = new Date().toISOString();
+    job.status = "queued";
+    job.queuedAt = queuedAt;
+    job.updatedAt = queuedAt;
+    delete job.finishedAt;
+    delete job.error;
+
+    try {
+      const scheduled = await scheduleImportWorkerCron(paths.cronJobsPath, jobId);
+      job.cronJobId = scheduled.cronJobId;
+      job.cronJobName = scheduled.cronJobName;
+      job.updatedAt = new Date().toISOString();
+      resumedJobIds.push(jobId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      job.status = "failed";
+      job.error = `failed to schedule worker: ${message}`;
+      job.finishedAt = new Date().toISOString();
+      job.updatedAt = job.finishedAt;
+      schedulingErrors.push({ jobId, error: message });
+    }
+
+    state.importJobs[jobId] = job;
+  }
+
+  await writeState(paths.statePath, state);
+
+  return {
+    statePath: paths.statePath,
+    resumedJobIds,
+    skippedJobIds,
+    schedulingErrors,
+  };
+}
+
+function formatImportJobLine(job: ImportJobState): string {
+  const pieces = [
+    `${job.id}`,
+    `status=${job.status}`,
+    `platform=${job.platform}`,
+    `attempts=${job.attempts}`,
+    `updated=${job.updatedAt}`,
+  ];
+
+  if (job.summary) {
+    pieces.push(
+      `imported=${job.summary.imported}`,
+      `failed=${job.summary.failed}`,
+      `entries=${job.summary.entriesWritten}`,
+    );
+  }
+
+  if (job.error) {
+    pieces.push(`error=${job.error}`);
+  }
+
+  return pieces.join(" | ");
+}
+
 export async function runImportCommand(
   input: RunImportCommandOptions,
   deps: Partial<ImportCommandDeps> = {},
@@ -643,6 +1118,7 @@ export async function runImportCommand(
   const dryRun = options.dryRun === true;
   const isOpenClawMigration = input.platform === "openclaw";
   const defaultMinMessages = isOpenClawMigration ? 1 : DEFAULT_IMPORT_MIN_MESSAGES;
+  const defaultJobs = isOpenClawMigration ? 1 : DEFAULT_IMPORT_JOBS;
   const statePath = paths.statePath;
   const keepSource = options.keepSource === true;
   const backupMemoryDocs = options.backupMemoryDocs === true;
@@ -680,7 +1156,7 @@ export async function runImportCommand(
       after: typeof options.after === "string" ? options.after : undefined,
       before: typeof options.before === "string" ? options.before : undefined,
       minMessages: readNumberOption(options.minMessages, defaultMinMessages),
-      jobs: readNumberOption(options.jobs, DEFAULT_IMPORT_JOBS),
+      jobs: readNumberOption(options.jobs, defaultJobs),
       model: typeof options.model === "string" ? options.model : DEFAULT_IMPORT_MODEL,
       force: options.force === true,
       transcripts: options.transcripts !== false,
@@ -1327,28 +1803,6 @@ function createSilentImportLogger(): ImportProgressLogger {
   };
 }
 
-function createInteractiveImportLogger(
-  progressSpin: ReturnType<typeof clackSpinner>,
-  verbose: boolean,
-): ImportProgressLogger {
-  return {
-    info(message) {
-      if (/^\[\d+\/\d+\]\s+/u.test(message)) {
-        progressSpin.message(message);
-        return;
-      }
-
-      if (verbose) {
-        clackLog.message(message);
-      }
-    },
-    warn(message) {
-      progressSpin.message(message);
-      clackLog.message(`Warning: ${message}`);
-    },
-  };
-}
-
 function sortRegistryEntries(registry: Record<string, { display: string; type: string }>): Array<[string, { display: string; type: string }]> {
   return Object.entries(registry).sort(([left], [right]) => left.localeCompare(right));
 }
@@ -1457,6 +1911,7 @@ export async function ensureLogStoreFiles(paths: InitPaths): Promise<void> {
       failedSessions: {},
       importedConversations: {},
       eventUsage: {},
+      importJobs: {},
     });
   }
 }
@@ -1800,12 +2255,30 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     if (!isObject(parsed)) {
       addCheck("state.json", false, "expected JSON object");
     } else {
-      const hasExpectedKeys =
+      const hasCoreKeys =
         isObject(parsed.extractedSessions) &&
         isObject(parsed.failedSessions) &&
-        isObject(parsed.importedConversations) &&
-        isObject(parsed.eventUsage);
-      addCheck("state.json", hasExpectedKeys, hasExpectedKeys ? "ok" : "missing expected state keys");
+        isObject(parsed.importedConversations);
+      const hasValidEventUsage = parsed.eventUsage === undefined || isObject(parsed.eventUsage);
+      const hasValidImportJobs = parsed.importJobs === undefined || isObject(parsed.importJobs);
+      const isLegacyState = parsed.eventUsage === undefined;
+
+      const hasExpectedKeys = hasCoreKeys && hasValidEventUsage && hasValidImportJobs;
+      if (!hasExpectedKeys) {
+        const issues: string[] = [];
+        if (!hasCoreKeys) {
+          issues.push("missing core state keys");
+        }
+        if (!hasValidEventUsage) {
+          issues.push("eventUsage is not an object");
+        }
+        if (!hasValidImportJobs) {
+          issues.push("importJobs is not an object");
+        }
+        addCheck("state.json", false, issues.join("; "));
+      } else {
+        addCheck("state.json", true, isLegacyState ? "ok (legacy state without eventUsage)" : "ok");
+      }
     }
   } catch (error) {
     const detail = isEnoent(error) ? "missing" : `invalid JSON or unreadable: ${String(error)}`;
@@ -2078,9 +2551,9 @@ function registerZettelclawCliCommands(
       printTraceReport(entries, report, focusId);
     });
 
-  zettelclaw
+  const importCommand = zettelclaw
     .command("import [platform] [file]")
-    .description("Import historical data (interactive if args are omitted)")
+    .description("Import historical data as async worker jobs (interactive if args are omitted)")
     .option("--dry-run", "Preview import without writing files", false)
     .option("--after <date>", "Only include conversations updated on/after this date")
     .option("--before <date>", "Only include conversations updated on/before this date")
@@ -2095,6 +2568,7 @@ function registerZettelclawCliCommands(
     .action(async (platform: unknown, file: unknown, opts: unknown) => {
       try {
         const options = toObject(opts);
+
         const selection = await resolveImportSelection({
           platformArg: platform,
           fileArg: file,
@@ -2198,24 +2672,46 @@ function registerZettelclawCliCommands(
             return;
           }
 
-          const runSpin = clackSpinner();
-          runSpin.start("Running import");
-          const result = await runImportCommand({
+          const queueSpin = clackSpinner();
+          queueSpin.start("Queueing async import worker");
+          const queued = await queueImportJob({
             config,
             workspaceDir,
             apiConfig: api.config,
             platform: selection.platform,
             filePath: selection.filePath,
             opts: importOptions,
-            logger: createInteractiveImportLogger(runSpin, importOptions.verbose === true),
           });
-          runSpin.stop("Import complete");
-          printImportSummary(result, selection.platform);
-          clackOutro("Import finished.");
+          queueSpin.stop("Import queued");
+          clackLog.message(`Job: ${queued.job.id}`);
+          clackLog.message(`Status: ${queued.job.status}`);
+          clackLog.message(`Next run: ${queued.nextRunAt}`);
+          clackLog.message(`State file: ${queued.statePath}`);
+          const sessionKey = buildImportWorkerSessionKey(queued.cronJobId);
+          clackLog.message(`Worker session key: ${sessionKey}`);
+          clackLog.message(`Attach with: openclaw tui --session ${sessionKey}`);
+          clackLog.message(`Track with: openclaw zettelclaw import status ${queued.job.id}`);
+          clackOutro("Async import queued.");
           return;
         }
 
-        const result = await runImportCommand({
+        if (options.dryRun === true) {
+          const result = await runImportCommand({
+            config,
+            workspaceDir,
+            apiConfig: api.config,
+            platform: selection.platform,
+            filePath: selection.filePath,
+            opts: {
+              ...options,
+              dryRun: true,
+            },
+          });
+          printImportSummary(result, selection.platform);
+          return;
+        }
+
+        const queued = await queueImportJob({
           config,
           workspaceDir,
           apiConfig: api.config,
@@ -2223,7 +2719,14 @@ function registerZettelclawCliCommands(
           filePath: selection.filePath,
           opts: options,
         });
-        printImportSummary(result, selection.platform);
+        console.log(`Queued async import job: ${queued.job.id}`);
+        console.log(`Status: ${queued.job.status}`);
+        console.log(`Next run: ${queued.nextRunAt}`);
+        console.log(`State file: ${queued.statePath}`);
+        const sessionKey = buildImportWorkerSessionKey(queued.cronJobId);
+        console.log(`Worker session key: ${sessionKey}`);
+        console.log(`Attach with: openclaw tui --session ${sessionKey}`);
+        console.log(`Track with: openclaw zettelclaw import status ${queued.job.id}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message === "Import canceled") {
@@ -2237,6 +2740,109 @@ function registerZettelclawCliCommands(
         }
         throw error;
       }
+    });
+
+  importCommand
+    .command("status [jobId]")
+    .description("Show async import job status")
+    .action(async (jobId: unknown) => {
+      const paths = resolvePaths(config, workspaceDir);
+      const state = await readState(paths.statePath);
+      const requestedJobId = typeof jobId === "string" && jobId.trim().length > 0 ? jobId.trim() : undefined;
+
+      const jobs = Object.values(state.importJobs).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      if (requestedJobId) {
+        const match = state.importJobs[requestedJobId];
+        if (!match) {
+          throw new Error(`import job not found: ${requestedJobId}`);
+        }
+        console.log(formatImportJobLine(match));
+        console.log(`filePath=${match.filePath}`);
+        return;
+      }
+
+      if (jobs.length === 0) {
+        console.log(`No async import jobs. State file: ${paths.statePath}`);
+        return;
+      }
+
+      const counts = {
+        queued: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      };
+
+      for (const job of jobs) {
+        counts[job.status as ImportJobStatus] += 1;
+      }
+
+      console.log(
+        `Import jobs: total=${jobs.length} queued=${counts.queued} running=${counts.running} completed=${counts.completed} failed=${counts.failed}`,
+      );
+      console.log(`State file: ${paths.statePath}`);
+      for (const job of jobs) {
+        console.log(formatImportJobLine(job));
+      }
+    });
+
+  importCommand
+    .command("resume [jobId]")
+    .description("Re-queue failed/queued async import jobs")
+    .action(async (jobId: unknown) => {
+      const result = await resumeImportJobs({
+        config,
+        workspaceDir,
+        jobId: typeof jobId === "string" && jobId.trim().length > 0 ? jobId.trim() : undefined,
+      });
+
+      if (result.resumedJobIds.length === 0 && result.skippedJobIds.length === 0) {
+        console.log("No jobs to resume.");
+        console.log(`State file: ${result.statePath}`);
+        return;
+      }
+
+      if (result.resumedJobIds.length > 0) {
+        console.log(`Resumed jobs (${result.resumedJobIds.length}): ${result.resumedJobIds.join(", ")}`);
+      }
+
+      if (result.skippedJobIds.length > 0) {
+        console.log(`Skipped jobs (${result.skippedJobIds.length}): ${result.skippedJobIds.join(", ")}`);
+      }
+
+      if (result.schedulingErrors.length > 0) {
+        for (const failure of result.schedulingErrors) {
+          console.warn(`Failed to schedule ${failure.jobId}: ${failure.error}`);
+        }
+      }
+
+      console.log(`State file: ${result.statePath}`);
+    });
+
+  zettelclaw
+    .command("import-worker")
+    .description("Internal async import worker executor")
+    .option("--job <id>", "Import job id")
+    .action(async (opts: unknown) => {
+      const options = toObject(opts);
+      const jobId = typeof options.job === "string" ? options.job.trim() : "";
+      if (!jobId) {
+        throw new Error("--job is required");
+      }
+
+      const result = await runImportWorker({
+        config,
+        workspaceDir,
+        apiConfig: api.config,
+        jobId,
+      });
+
+      if (result === null) {
+        console.log(`Import job ${jobId} already completed.`);
+        return;
+      }
+
+      printImportSummary(result, result.summary.platform);
     });
 
   const subjects = zettelclaw.command("subjects").description("Manage subject registry");

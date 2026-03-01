@@ -14,13 +14,17 @@ import {
   MEMORY_NOTICE_BEGIN_MARKER,
   MEMORY_NOTICE_END_MARKER,
   detectImportSources,
+  queueImportJob,
+  resumeImportJobs,
   runImportCommand,
+  runImportWorker,
   buildPostInitSystemEventText,
   runInit,
   runUninstall,
   runVerify,
   verifySetup,
 } from "../cli/commands";
+import { readState, writeState } from "../state";
 
 function createConfig(logDir: string): PluginConfig {
   return {
@@ -221,6 +225,53 @@ describe("cli init helpers", () => {
 
     const result = await runVerify(createConfig(logDir), workspaceDir);
     expect(result.ok).toBe(true);
+  });
+
+  test("runVerify accepts legacy state.json without eventUsage", async () => {
+    const agentsPath = join(workspaceDir, "AGENTS.md");
+    const memoryPath = join(workspaceDir, "MEMORY.md");
+    const statePath = join(logDir, "state.json");
+
+    await runInit(createConfig(logDir), workspaceDir, {
+      fireGuidanceEvent: fakeGuidanceEvent,
+    });
+
+    const stateRaw = await readFile(statePath, "utf8");
+    const parsedState = JSON.parse(stateRaw) as Record<string, unknown>;
+    delete parsedState.eventUsage;
+    await writeFile(statePath, `${JSON.stringify(parsedState, null, 2)}\n`, "utf8");
+
+    await writeFile(
+      agentsPath,
+      [
+        "## Workspace Rules",
+        "",
+        AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
+        "## Memory System (Zettelclaw)",
+        AGENTS_MEMORY_GUIDANCE_END_MARKER,
+      ].join("\n"),
+      "utf8",
+    );
+
+    const existingMemory = await readFile(memoryPath, "utf8");
+    await writeFile(
+      memoryPath,
+      [
+        MEMORY_NOTICE_BEGIN_MARKER,
+        "## Zettelclaw Memory Mode",
+        MEMORY_NOTICE_END_MARKER,
+        "",
+        existingMemory.trim(),
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await runVerify(createConfig(logDir), workspaceDir);
+    expect(result.ok).toBe(true);
+    const stateCheck = result.checks.find((check) => check.name === "state.json");
+    expect(stateCheck?.ok).toBe(true);
+    expect(stateCheck?.detail).toContain("legacy state");
   });
 
   test("verifySetup fails before initialization", async () => {
@@ -468,5 +519,151 @@ describe("cli init helpers", () => {
     const detections = await detectImportSources(workspaceDir);
     expect(detections.openclaw.some((detection) => detection.path === memoryDir)).toBe(true);
     expect(detections.chatgpt.some((detection) => detection.path === chatgptExportPath)).toBe(true);
+  });
+
+  test("queueImportJob persists async job and schedules one-shot cron worker", async () => {
+    const sourcePath = join(workspaceDir, "chatgpt-export.json");
+    await writeFile(sourcePath, "[]", "utf8");
+
+    const queued = await queueImportJob({
+      config: createConfig(logDir),
+      workspaceDir,
+      apiConfig: {},
+      platform: "chatgpt",
+      filePath: sourcePath,
+      opts: {
+        async: true,
+        model: "anthropic/claude-haiku-4-5",
+        jobs: 4,
+      },
+    });
+
+    expect(queued.job.status).toBe("queued");
+    expect(queued.job.platform).toBe("chatgpt");
+    expect(queued.job.options.model).toBe("anthropic/claude-haiku-4-5");
+    expect(queued.job.options.jobs).toBe(4);
+
+    const state = await readState(join(logDir, "state.json"));
+    const persisted = state.importJobs[queued.job.id];
+    expect(persisted).toBeDefined();
+    expect(persisted?.status).toBe("queued");
+
+    const cronDoc = JSON.parse(await readFile(join(openClawHome, "cron", "jobs.json"), "utf8")) as {
+      jobs?: Array<Record<string, unknown>>;
+    };
+    const workerJob = cronDoc.jobs?.find(
+      (entry) => entry.name === `zettelclaw-import-worker-${queued.job.id}`,
+    );
+    expect(workerJob).toBeDefined();
+    expect(workerJob?.deleteAfterRun).toBe(true);
+    expect((workerJob?.schedule as { kind?: string }).kind).toBe("at");
+    expect((workerJob?.payload as { message?: string }).message).toContain(
+      `openclaw zettelclaw import-worker --job ${queued.job.id}`,
+    );
+  });
+
+  test("runImportWorker marks queued job completed with summary", async () => {
+    const sourcePath = join(workspaceDir, "chatgpt-export.json");
+    await writeFile(sourcePath, "[]", "utf8");
+
+    const queued = await queueImportJob({
+      config: createConfig(logDir),
+      workspaceDir,
+      apiConfig: {},
+      platform: "chatgpt",
+      filePath: sourcePath,
+      opts: {
+        async: true,
+      },
+    });
+
+    const calls: Array<Record<string, unknown>> = [];
+    const result = await runImportWorker(
+      {
+        config: createConfig(logDir),
+        workspaceDir,
+        apiConfig: {},
+        jobId: queued.job.id,
+      },
+      {
+        runImportCommand: async (input) => {
+          calls.push({
+            platform: input.platform,
+            filePath: input.filePath,
+            opts: input.opts,
+          });
+          return {
+            summary: {
+              platform: "chatgpt",
+              parsed: 1,
+              dedupedInInput: 0,
+              selected: 1,
+              skippedByDate: 0,
+              skippedByMinMessages: 0,
+              skippedAlreadyImported: 0,
+              imported: 1,
+              failed: 0,
+              entriesWritten: 2,
+              transcriptsWritten: 1,
+              dryRun: false,
+            },
+            statePath: join(logDir, "state.json"),
+          };
+        },
+      },
+    );
+
+    expect(result).not.toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.platform).toBe("chatgpt");
+    expect(calls[0]?.filePath).toBe(sourcePath);
+
+    const state = await readState(join(logDir, "state.json"));
+    const finished = state.importJobs[queued.job.id];
+    expect(finished?.status).toBe("completed");
+    expect(finished?.attempts).toBe(1);
+    expect(finished?.summary?.entriesWritten).toBe(2);
+  });
+
+  test("resumeImportJobs re-queues failed jobs and clears error", async () => {
+    const sourcePath = join(workspaceDir, "chatgpt-export.json");
+    await writeFile(sourcePath, "[]", "utf8");
+
+    const queued = await queueImportJob({
+      config: createConfig(logDir),
+      workspaceDir,
+      apiConfig: {},
+      platform: "chatgpt",
+      filePath: sourcePath,
+      opts: {
+        async: true,
+      },
+    });
+
+    const statePath = join(logDir, "state.json");
+    const state = await readState(statePath);
+    const job = state.importJobs[queued.job.id];
+    expect(job).toBeDefined();
+    if (job) {
+      job.status = "failed";
+      job.error = "simulated failure";
+      job.finishedAt = new Date().toISOString();
+      state.importJobs[queued.job.id] = job;
+      await writeState(statePath, state);
+    }
+
+    const resumed = await resumeImportJobs({
+      config: createConfig(logDir),
+      workspaceDir,
+      jobId: queued.job.id,
+    });
+
+    expect(resumed.resumedJobIds).toContain(queued.job.id);
+    expect(resumed.schedulingErrors).toHaveLength(0);
+
+    const nextState = await readState(statePath);
+    const resumedJob = nextState.importJobs[queued.job.id];
+    expect(resumedJob?.status).toBe("queued");
+    expect(resumedJob?.error).toBeUndefined();
   });
 });

@@ -32,6 +32,7 @@ describe("state", () => {
       failedSessions: {},
       importedConversations: {},
       eventUsage: {},
+      importJobs: {},
     });
   });
 
@@ -59,6 +60,7 @@ describe("state", () => {
         },
       },
       eventUsage: {},
+      importJobs: {},
     });
 
     const state = await readState(statePath);
@@ -104,6 +106,7 @@ describe("state", () => {
         },
       },
       eventUsage: {},
+      importJobs: {},
     });
 
     await pruneState(statePath);

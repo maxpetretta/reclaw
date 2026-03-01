@@ -38,6 +38,7 @@ describe("schema", () => {
       timestamp: new Date().toISOString(),
       type: "task",
       content: "Ship plugin",
+      subject: "release",
       session: "session-1",
       status: "open",
     };
@@ -59,6 +60,27 @@ describe("schema", () => {
     }
   });
 
+  test("validateLlmOutput requires subject for non-handoff entries", () => {
+    const validated = validateLlmOutput({
+      type: "fact",
+      content: "bad",
+    });
+
+    expect(validated.ok).toBe(false);
+    if (!validated.ok) {
+      expect(validated.error).toContain("subject must be a non-empty string");
+    }
+  });
+
+  test("validateLlmOutput allows handoff without subject", () => {
+    const validated = validateLlmOutput({
+      type: "handoff",
+      content: "Need follow-up",
+    });
+
+    expect(validated.ok).toBe(true);
+  });
+
   test("subject type helpers enforce enum values", () => {
     expect(VALID_SUBJECT_TYPES).toEqual(["project", "person", "system", "topic"]);
     expect(parseSubjectType("person")).toBe("person");
@@ -72,6 +94,7 @@ describe("schema", () => {
         type: "decision",
         content: "Use JSONL",
         detail: "Simple append-only log",
+        subject: "storage",
       },
       "session-2",
     );
@@ -87,6 +110,7 @@ describe("schema", () => {
         type: "task",
         content: "Write tests",
         status: "open",
+        subject: "testing",
       },
       "session-3",
     );
@@ -95,6 +119,7 @@ describe("schema", () => {
       {
         type: "fact",
         content: "Tests use bun:test",
+        subject: "testing",
       },
       "session-3",
     );

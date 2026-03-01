@@ -32,7 +32,8 @@ You will receive:
    `subjectType` with one of: `project`, `person`, `system`, `topic`.
    If unsure, use `topic`. If an existing subject's type should be corrected,
    include `subjectType` on the entry and the hook may update the registry.
-   Don't force a subject on entries that aren't clearly about a specific thing.
+   Subject is required for all non-handoff entries. If you truly cannot choose,
+   use `unknown`.
 6. Always produce exactly one handoff entry at the end.
 7. Skip trivial exchanges (greetings, acknowledgments, clarifying questions
    that led nowhere).
@@ -43,6 +44,8 @@ You will receive:
    ID directly for `replaces` when it is the predecessor.
 10. If the transcript does not include a direct ID, use the provided existing entries
     to find the most relevant predecessor and set `replaces` accordingly.
+    To determine predecessor history, list entries for the same subject in
+    chronological order and pick the most recent matching prior state.
 11. Do not re-extract information that already exists in the log unless it has
    changed.
 12. If a task is now done, emit a new `task` entry with `status: "done"` and
@@ -51,13 +54,17 @@ You will receive:
 ## Output format
 
 One JSON object per line. No markdown fences, no commentary.
-**Do not include `id`, `timestamp`, or `session` fields** — these are injected
-programmatically by the extraction hook after your output.
+Do not include `id` or `session` fields — these are injected programmatically.
+For standard live extraction, do not include `timestamp`.
+For historical import mode, you may include an optional `timestamp` field.
+If only a day is known, use noon for that date.
 
 {"type":"decision","content":"...","detail":"...","subject":"..."}
 {"type":"fact","content":"...","subject":"..."}
 {"type":"task","content":"...","status":"open","subject":"..."}
 {"type":"task","content":"...","status":"done","subject":"...","replaces":"<open-task-id>"}
+{"type":"fact","content":"...","subject":"unknown"}
+{"type":"fact","content":"...","subject":"...","timestamp":"2026-02-12T12:00:00.000Z"}
 {"type":"handoff","content":"...","detail":"..."}
 
 When introducing a new subject slug, add `"subjectType":"project|person|system|topic"` on that entry.

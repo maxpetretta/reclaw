@@ -8,6 +8,7 @@ import { getLatestVersionId } from "../log/resolve";
 import {
   appendEntry,
   finalizeEntry,
+  GENERAL_SUBJECT_SLUG,
   parseSubjectType,
   validateLlmOutput,
   type LogEntry,
@@ -166,6 +167,27 @@ function stripSubjectTypeHint(raw: unknown): unknown {
   const candidate = { ...raw };
   delete candidate.subjectType;
   delete candidate.subject_type;
+  return candidate;
+}
+
+function applyRequiredSubjectFallback(raw: unknown): unknown {
+  if (!isObject(raw)) {
+    return raw;
+  }
+
+  const candidate: Record<string, unknown> = { ...raw };
+  const type = typeof candidate.type === "string" ? candidate.type : undefined;
+  const subject = typeof candidate.subject === "string" ? candidate.subject.trim() : "";
+
+  if (type !== "handoff" && subject.length === 0) {
+    candidate.subject = GENERAL_SUBJECT_SLUG;
+    return candidate;
+  }
+
+  if (subject.length > 0) {
+    candidate.subject = subject;
+  }
+
   return candidate;
 }
 
@@ -1030,7 +1052,8 @@ async function runExtractionPipeline(params: {
       }
 
       const subjectTypeHint = readSubjectTypeHint(parsed);
-      const validation = validateLlmOutput(stripSubjectTypeHint(parsed));
+      const normalizedCandidate = applyRequiredSubjectFallback(stripSubjectTypeHint(parsed));
+      const validation = validateLlmOutput(normalizedCandidate);
       if (!validation.ok) {
         invalidLineCount += 1;
         continue;

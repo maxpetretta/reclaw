@@ -32,7 +32,7 @@ function createConfig(logDir: string): PluginConfig {
 }
 
 const LOG_LINE =
-  '{"id":"abc123def456","timestamp":"2026-02-20T00:00:00.000Z","type":"fact","content":"Queue retries enabled","session":"session-1"}\n';
+  '{"id":"abc123def456","timestamp":"2026-02-20T00:00:00.000Z","type":"fact","content":"Queue retries enabled","subject":"unknown","session":"session-1"}\n';
 
 describe("briefing generation", () => {
   let tempDir = "";
@@ -269,6 +269,7 @@ describe("briefing generation", () => {
           lastAccessAt: "2026-02-27T00:00:00.000Z",
         },
       },
+      importJobs: {},
     });
 
     let capturedUserInput = "";

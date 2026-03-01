@@ -6,12 +6,12 @@ import {
   type ZettelclawState,
   writeState,
 } from "../state";
-import { ensureSubject } from "../subjects/registry";
+import { upsertSubjectFromExtraction } from "../subjects/registry";
 import { parseChatGptConversations } from "./adapters/chatgpt";
 import { parseClaudeConversations } from "./adapters/claude";
 import { parseGrokConversations } from "./adapters/grok";
 import { loadOpenClawImportSource, parseOpenClawConversations } from "./adapters/openclaw";
-import { extractImportedConversation } from "./extract";
+import { extractImportedConversation, type ExtractedImportedEntry } from "./extract";
 import { writeImportedSession } from "./sessions";
 import type { ImportPlatform, ImportedConversation } from "./types";
 
@@ -77,11 +77,12 @@ interface ReclawImportDeps {
     conversation: ImportedConversation;
     sessionId: string;
     subjectsPath: string;
+    logPath: string;
     model: string;
     apiBaseUrl?: string;
     apiToken?: string;
-  }) => Promise<LogEntry[]>;
-  ensureSubject: (path: string, slug: string) => Promise<void>;
+  }) => Promise<Array<LogEntry | ExtractedImportedEntry>>;
+  upsertSubject: (path: string, slug: string, inferredType?: string) => Promise<void>;
   appendEntry: (logPath: string, entry: LogEntry) => Promise<void>;
   readState: (path: string) => Promise<ZettelclawState>;
   writeState: (path: string, state: ZettelclawState) => Promise<void>;
@@ -134,18 +135,40 @@ const DEFAULT_DEPS: ReclawImportDeps = {
       conversation: params.conversation,
       sessionId: params.sessionId,
       subjectsPath: params.subjectsPath,
+      logPath: params.logPath,
       model: params.model,
       apiBaseUrl: params.apiBaseUrl,
       apiToken: params.apiToken,
       ensureSubjects: false,
     });
   },
-  ensureSubject,
+  upsertSubject: upsertSubjectFromExtraction,
   appendEntry,
   readState,
   writeState,
   writeImportedSession,
 };
+
+function normalizeExtractedImportEntry(
+  value: LogEntry | ExtractedImportedEntry,
+): ExtractedImportedEntry {
+  if (
+    value &&
+    typeof value === "object" &&
+    "entry" in value &&
+    value.entry &&
+    typeof value.entry === "object"
+  ) {
+    return value as ExtractedImportedEntry;
+  }
+
+  return { entry: value as LogEntry };
+}
+
+function parseConversationTimestamp(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
 
 function parseBoundary(raw: string | undefined, optionName: "--after" | "--before"): number | undefined {
   if (!raw) {
@@ -290,7 +313,7 @@ export async function runReclawImport(
   });
   const parsedRaw = runtimeDeps.parseConversations(options.platform, rawImport);
   const deduped = dedupeInputConversations(options.platform, parsedRaw);
-  const state = await runtimeDeps.readState(options.statePath);
+  const initialState = await runtimeDeps.readState(options.statePath);
 
   const summary: ReclawImportSummary = {
     platform: options.platform,
@@ -337,7 +360,7 @@ export async function runReclawImport(
       continue;
     }
 
-    if (!options.force && state.importedConversations[key]) {
+    if (!options.force && initialState.importedConversations[key]) {
       summary.skippedAlreadyImported += 1;
       if (options.verbose) {
         logger.info(`skip (already-imported) ${key}`);
@@ -350,6 +373,16 @@ export async function runReclawImport(
       conversation,
     });
   }
+
+  selected.sort((left, right) => {
+    const leftTimestamp = parseConversationTimestamp(left.conversation.updatedAt);
+    const rightTimestamp = parseConversationTimestamp(right.conversation.updatedAt);
+    if (leftTimestamp !== rightTimestamp) {
+      return leftTimestamp - rightTimestamp;
+    }
+
+    return left.key.localeCompare(right.key);
+  });
 
   summary.selected = selected.length;
   logger.info(
@@ -380,15 +413,18 @@ export async function runReclawImport(
         conversation: candidate.conversation,
         sessionId,
         subjectsPath: options.subjectsPath,
+        logPath: options.logPath,
         model,
         apiBaseUrl: options.apiBaseUrl,
         apiToken: options.apiToken,
       });
-      const entries: LogEntry[] = extractedEntries.map((entry) => {
-        const { subject, ...rest } = entry;
+      const normalizedExtracted = extractedEntries.map((entry) => normalizeExtractedImportEntry(entry));
+      const entries = normalizedExtracted.map((parsedEntry) => {
+        const { subject, ...rest } = parsedEntry.entry;
         const normalizedSubject = typeof subject === "string" ? subject.trim() : "";
 
         return {
+          subjectTypeHint: parsedEntry.subjectTypeHint,
           ...rest,
           ...(normalizedSubject ? { subject: normalizedSubject } : {}),
           // Preserve import invariants even if extraction dependencies drift.
@@ -398,18 +434,22 @@ export async function runReclawImport(
       });
 
       await withCommitLock(async () => {
-        const subjects = new Set(
-          entries
-            .map((entry) => (typeof entry.subject === "string" ? entry.subject : ""))
-            .filter((subject): subject is string => subject.length > 0),
-        );
+        for (const entry of entries) {
+          if (!entry.subject) {
+            continue;
+          }
 
-        for (const subject of subjects) {
-          await runtimeDeps.ensureSubject(options.subjectsPath, subject);
+          await runtimeDeps.upsertSubject(
+            options.subjectsPath,
+            entry.subject,
+            entry.subjectTypeHint,
+          );
         }
 
         for (const entry of entries) {
-          await runtimeDeps.appendEntry(options.logPath, entry);
+          const { subjectTypeHint, ...logEntry } = entry;
+          void subjectTypeHint;
+          await runtimeDeps.appendEntry(options.logPath, logEntry);
         }
 
         if (transcripts) {
@@ -424,12 +464,13 @@ export async function runReclawImport(
 
         summary.entriesWritten += entries.length;
         summary.imported += 1;
-        state.importedConversations[candidate.key] = createImportedStateRecord(
+        const latestState = await runtimeDeps.readState(options.statePath);
+        latestState.importedConversations[candidate.key] = createImportedStateRecord(
           sessionId,
           candidate.conversation,
           entries.length,
         );
-        await runtimeDeps.writeState(options.statePath, state);
+        await runtimeDeps.writeState(options.statePath, latestState);
       });
 
       completed += 1;
