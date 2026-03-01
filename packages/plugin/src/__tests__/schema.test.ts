@@ -133,7 +133,7 @@ describe("schema", () => {
     expect(entries[1]?.id).toBe(second.id);
   });
 
-  test("writes id/timestamp first and session last in JSONL", async () => {
+  test("writes timestamp first and session last in JSONL", async () => {
     const entry = injectMeta(
       {
         type: "task",
@@ -150,8 +150,11 @@ describe("schema", () => {
     expect(line).toContain(`"id":"${entry.id}"`);
     expect(line).toContain(`"timestamp":"${entry.timestamp}"`);
     expect(line).toContain(`"session":"${entry.session}"`);
-    expect(line.indexOf('"id"')).toBeLessThan(line.indexOf('"timestamp"'));
-    expect(line.indexOf('"timestamp"')).toBeLessThan(line.indexOf('"type"'));
-    expect(line.lastIndexOf('"session"')).toBeGreaterThan(line.lastIndexOf('"subject"'));
+    expect(line.indexOf('"timestamp"')).toBeLessThan(line.indexOf('"id"'));
+    expect(line.indexOf('"id"')).toBeLessThan(line.indexOf('"type"'));
+    expect(line.indexOf('"type"')).toBeLessThan(line.indexOf('"status"'));
+    expect(line.indexOf('"status"')).toBeLessThan(line.indexOf('"subject"'));
+    expect(line.indexOf('"subject"')).toBeLessThan(line.indexOf('"content"'));
+    expect(line.lastIndexOf('"session"')).toBeGreaterThan(line.lastIndexOf('"status"'));
   });
 });

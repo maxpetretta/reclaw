@@ -175,22 +175,23 @@ function buildLlmEntry(
 
 function orderEntryFields(entry: LogEntry): LogEntry {
   const ordered: Record<string, unknown> = {
-    id: entry.id,
     timestamp: entry.timestamp,
+    id: entry.id,
     type: entry.type,
-    content: entry.content,
   };
 
-  if (entry.detail) {
-    ordered.detail = entry.detail;
+  if (entry.type === "task") {
+    ordered.status = entry.status;
   }
 
   if (entry.subject) {
     ordered.subject = entry.subject;
   }
 
-  if (entry.type === "task") {
-    ordered.status = entry.status;
+  ordered.content = entry.content;
+
+  if (entry.detail) {
+    ordered.detail = entry.detail;
   }
 
   ordered.session = entry.session;
