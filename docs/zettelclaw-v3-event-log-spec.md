@@ -11,7 +11,7 @@ Zettelclaw is the single active memory system when installed and initialized:
 - Memory slot ownership: `plugins.slots.memory = "zettelclaw"` (replaces `memory-core`).
 - Persistence path: extraction hooks write structured events from transcripts.
 - Recall path: wrapped `memory_search` and `memory_get`.
-- Curation path: nightly briefing job rewrites only the managed generated block in `MEMORY.md`.
+- Curation path: nightly memory snapshot job rewrites only the managed generated block in `MEMORY.md`.
 
 Legacy memory behaviors are disabled by init:
 - `memory/YYYY-MM-DD.md` usage is not part of this system.
@@ -22,12 +22,12 @@ Legacy memory behaviors are disabled by init:
 
 1. Log writes are append-only; corrections use `replaces` and never mutate prior entries.
 2. Event identity fields (`id`, `timestamp`, `session`) are hook-injected, not model-authored.
-3. Extraction and briefing are separate: extraction captures, briefing summarizes.
+3. Extraction and snapshot generation are separate: extraction captures, snapshot generation summarizes.
 4. The hard extraction filter is mandatory: only user-specific information is stored.
 5. Query surfaces must prefer current entries by default (`includeReplaced=false`) and expose full history when requested.
 6. Subject slugs are registry-backed (`kebab-case`) with constrained type enum and `topic` fallback.
 7. Main-session scope only for extraction (`agent:*:main`, `agent:*`, `dm:*`), with skip prefixes for non-interactive traffic.
-8. Managed-block writes are isolated: briefing and handoff writers only edit their own marker regions.
+8. Managed-block writes are isolated: snapshot and handoff writers only edit their own marker regions.
 
 ## 3. Event Log
 
@@ -43,13 +43,29 @@ Legacy memory behaviors are disabled by init:
 
 `subjects.json` is a registry of known subject slugs. The extraction agent reads it before writing to ensure consistent slugs across sessions.
 
-`state.json` is a record of extraction/import bookkeeping, including session extraction status, failed retries, and imported-conversation dedupe metadata.
+`state.json` is a record of extraction/import bookkeeping, including session extraction status, failed retries, imported-conversation dedupe metadata, and per-event usage counters used by snapshot generation.
 
 ```json
 {
-  "auth-migration": { "display": "Auth Migration", "type": "project" },
-  "whisper-stt": { "display": "Whisper STT", "type": "system" },
-  "max": { "display": "Max", "type": "person" }
+  "extractedSessions": {
+    "abc123def456": { "at": "2026-02-20T15:30:00Z", "entries": 7 }
+  },
+  "failedSessions": {},
+  "importedConversations": {
+    "chatgpt:conv-123": {
+      "at": "2026-02-22T09:10:00Z",
+      "updatedAt": "2026-02-20T14:20:00Z",
+      "sessionId": "reclaw:chatgpt:conv-123",
+      "entries": 12
+    }
+  },
+  "eventUsage": {
+    "abc123def456": {
+      "memoryGetCount": 4,
+      "citationCount": 2,
+      "lastAccessAt": "2026-03-01T18:22:11.000Z"
+    }
+  }
 }
 ```
 
@@ -160,7 +176,7 @@ No type-specific fields. Uses `content` for the headline and `detail` for the fu
 {"id":"Ym8kP_3wNx5Q","timestamp":"2026-02-20T15:30:00Z","type":"handoff","content":"Auth migration — retry logic implementation, backfill script not started","detail":"Exponential backoff working in staging. Still need backfill script for 47 failed jobs, then canary deploy. Load testing not done yet.","subject":"auth-migration","session":"abc12345"}
 ```
 
-The handoff does not repeat decisions or tasks — those are already captured as separate entries from the same session. The briefing generator pulls them by session ID when it needs the full picture. The handoff's job is to summarize where things stand in prose.
+The handoff does not repeat decisions or tasks — those are already captured as separate entries from the same session. The snapshot generator pulls them by session ID when it needs the full picture. The handoff's job is to summarize where things stand in prose.
 
 #### Replacement examples
 
@@ -184,7 +200,7 @@ The original entry is never modified. The replacement points back to it. The res
 
 The resolver builds a `Map<id, replacedById>` in a single forward pass over the log. Any entry whose `id` appears as a key is superseded — skip it, use the replacement instead. At a few thousand entries this is <10ms. No index or cache needed for v1. Used by:
 
-1. **Briefing generation** — to show only current versions of facts/decisions.
+1. **Snapshot generation** — to show only current versions of facts/decisions.
 2. **CLI search** — to filter out superseded entries by default (add `--all` to include them).
 
 ### 3.4 Queryability
@@ -219,25 +235,27 @@ The log carries priority information without explicit scoring:
 | Signal | How it works |
 |---|---|
 | **Type** | Decisions matter more than facts. Questions are open loops demanding attention. Tasks have status. |
-| **Recency** | Recent entries matter more. The briefing windows filter by time. |
+| **Recency** | Recent entries matter more. Snapshot windows filter by time. |
 | **Frequency** | A subject with 30 entries this month is more active than one with 2. |
 | **Replacement depth** | An entry replaced multiple times is actively refined — clearly important. |
 | **Handoff presence** | The handoff entry captures what the user cared about at session end. |
 | **Open-loop status** | Unanswered questions and open tasks are inherently high-priority until resolved. |
 
-If these prove insufficient, a `pinned: true` boolean can be added later. Pinned entries always appear in the briefing regardless of age. One-field addition, no schema change.
+If these prove insufficient, a `pinned: true` boolean can be added later. Pinned entries always appear in the snapshot regardless of age. One-field addition, no schema change.
 
 ### 3.6 Memory Decay
 
 The log doesn't decay. It's append-only, immutable. Decay is a read concern.
 
-The briefing generator applies natural decay through its time windows:
+The snapshot generator applies natural decay through its time windows:
 
 - Active entries: all entries in the last 14 days (includes recent decisions)
 - Open items: open tasks and unanswered questions (no time limit)
 - Stale subjects: old entries about subjects referenced in recent sessions
+- Durable entries: older `decision`/`fact` entries with positive usage score from `state.json.eventUsage`
+  (`score = 2*citationCount + memoryGetCount`, top 10)
 
-If an entry isn't recent, isn't pending, and isn't being referenced — it doesn't show up in the briefing. It's still in the log, still findable by search. That's decay without deletion.
+If an entry isn't recent, isn't pending, isn't durable, and isn't being referenced — it doesn't show up in the snapshot. It's still in the log, still findable by search. That's decay without deletion.
 
 The time windows are the decay knobs. Tighten them and memory fades faster. Loosen them and more history stays visible.
 
@@ -280,7 +298,15 @@ The extraction hook maintains a state file at `~/.openclaw/zettelclaw/state.json
     "chatgpt:conv-123": {
       "at": "2026-02-22T09:10:00Z",
       "updatedAt": "2026-02-20T14:20:00Z",
-      "sessionId": "reclaw:chatgpt:conv-123"
+      "sessionId": "reclaw:chatgpt:conv-123",
+      "entries": 12
+    }
+  },
+  "eventUsage": {
+    "abc123def456": {
+      "memoryGetCount": 4,
+      "citationCount": 2,
+      "lastAccessAt": "2026-03-01T18:22:11.000Z"
     }
   }
 }
@@ -289,6 +315,8 @@ The extraction hook maintains a state file at `~/.openclaw/zettelclaw/state.json
 Before extracting, the hook checks if the `sessionId` is already in `extractedSessions`. If so, extraction is skipped. This prevents duplicate entries when both `before_reset` and `session_end` fire for the same session.
 
 Failed extractions are recorded in `failedSessions` with retry count. The hook retries once on the next trigger. After one retry failure, the session is marked as permanently failed and skipped on subsequent triggers. The `gateway_start` sweep also retries failed sessions once.
+
+During extraction, transcript citations (`[<12-char-id>]`) increment `eventUsage.citationCount` for the cited event. If the cited event has been replaced, usage is recorded on the latest replacement target.
 
 The `extractedSessions` map is pruned periodically — entries older than 30 days are removed to keep the file small.
 
@@ -419,9 +447,9 @@ The filter is the most important rule in the system. It applies at extraction ti
 - No general knowledge, no dependency lists, no version inventories, no boilerplate.
 - Decisions, preferences, and user-specific facts pass. Generic information doesn't.
 
-The filter keeps the log lean. A lean log means the briefing is high-signal and search results are relevant.
+The filter keeps the log lean. A lean log means the generated snapshot is high-signal and search results are relevant.
 
-## 5. Briefing (MEMORY.md)
+## 5. Memory Snapshot (MEMORY.md)
 
 ### 5.1 Two halves
 
@@ -429,7 +457,7 @@ MEMORY.md has two sections with different authors:
 
 **Manual section (human/agent-written):** Goals, priorities, working preferences, identity context. The user's "Polaris" — intent and values that tell the agent why things matter. Persists until the human changes it. Not touched by the nightly job.
 
-**Generated section (nightly-written):** Active subjects, recent decisions, pending items, stale subjects. The current state of the world derived from the log. Rewritten every night.
+**Generated section (nightly-written):** A memory snapshot derived from the log that prioritizes current interests, active work, conversation focus, and open loops. Rewritten every night.
 
 ```markdown
 ## Goals
@@ -443,59 +471,75 @@ MEMORY.md has two sections with different authors:
 - Prefer simple solutions over configurable ones
 
 <!-- BEGIN GENERATED BRIEFING -->
-## Active
-- auth-migration — Queue-based retries implemented, backfill script pending
-- zettelclaw — V3 event log spec in progress
+## Snapshot
+- Auth migration is active with retry logic in place; delivery hardening and backfill remain.
+- Zettelclaw memory system work is focused on chain quality and snapshot relevance.
+
+## Human Interests
+- Reliable automation that preserves continuity across sessions
+- Clear event history and correction chains over one-off summaries
+
+## Active Projects and Systems
+- auth-migration — queue retries enabled, backfill/canary still pending
+- zettelclaw — memory snapshot and event-chain improvements in progress
+
+## Conversation Focus
+- Improving `replaces` reliability and keeping references explicit in transcripts
+- Tightening plugin behavior so MEMORY.md reflects current priorities clearly
+
+## Active Tasks
+- Backfill script for 47 failed webhook jobs
+- Canary deploy + 24h monitoring
+
+## Open Questions
+- Is retry strategy sufficient for 10k+/min webhook bursts?
 
 ## Recent Decisions
 - 2026-02-20: Queue-based retries with exponential backoff for webhooks
 - 2026-02-18: Bun over yarn — 3-4x faster, one-way door
 
-## Pending
-- Backfill script for 47 failed webhook jobs
-- Canary deploy + 24h monitoring
-- Is retry strategy sufficient for 10k+/min webhook bursts?
-
-## Stale
+## Stale Threads
 - whisper-stt — last entry 2026-01-08, referenced in recent session
-
-## Contradictions
-- auth-migration: "Synchronous retries with 5 max" (2026-02-10) may conflict with "Queue-based retries with 3 max" (2026-02-20)
 <!-- END GENERATED BRIEFING -->
 ```
 
 ### 5.2 Generation
 
-The nightly cron job pre-filters log entries into three buckets, then sends the union to the LLM for presentation:
+The nightly cron job pre-filters log entries into four buckets, then sends the union to the LLM for presentation:
 
 **Pre-filtering (code-side, before LLM call):**
 1. **Active entries**: All entries within `activeWindow` days (default 14). This naturally includes recent decisions.
 2. **Open items**: All `type: "task"` with `status: "open"` + all `type: "question"` not yet replaced. No time limit.
 3. **Stale candidates**: Entries whose subject appears in the active window but whose most recent entry is older than `staleThreshold` days (default 30).
+4. **Durable entries**: Older current `decision`/`fact` entries with positive usage score from `state.json.eventUsage`, scored as `2*citationCount + memoryGetCount`, capped to top 10.
 
-These three sets are unioned and deduped by ID. Only the resulting entries are sent to the LLM.
+These sets are unioned and deduped by ID. Only the resulting entries are sent to the LLM.
 
 **Presentation (LLM-side):**
-The briefing model receives pre-bucketed entries and produces sections:
-- `## Active` — unique subjects from active entries, one-line summaries
-- `## Recent Decisions` — decision-type entries from the active window
-- `## Pending` — open tasks and unresolved questions
-- `## Stale` — subjects from the stale bucket
-- `## Contradictions` — up to 3 likely conflicts where older entries may disagree with newer ones on the same subject
+The snapshot model receives pre-bucketed entries plus subject-activity summaries and produces a MEMORY snapshot, typically using:
+- `## Snapshot`
+- `## Human Interests`
+- `## Active Projects and Systems`
+- `## Conversation Focus`
+- `## Active Tasks`
+- `## Open Questions`
+- `## Recent Decisions`
+- `## Stale Threads`
+- `## Durable Memory`
+- `## Risks or Watchouts` (optional)
 
-The LLM handles presentation grouping (e.g. pulling decisions into their own section) but does not need to apply time-window filtering — that's already done.
+The LLM handles presentation grouping, prioritization, and consolidation but does not need to apply time-window filtering — that's already done.
 
 Constraints:
 - Max 80 lines between markers (enforced by `limitLines` post-LLM).
 - Content outside markers is never touched.
 - The generated block is the only part the nightly job writes to.
-- Max 3 contradiction flags per nightly run to avoid noise.
 
 ### 5.3 Contract
 
 MEMORY.md is auto-loaded into every OpenClaw session (first 200 lines). The manual section provides intent. The generated section provides state. Together they orient the agent without any search or file reads.
 
-The log is authoritative. The briefing is a cache. When they disagree, the log wins.
+The log is authoritative. The generated snapshot is a cache. When they disagree, the log wins.
 
 **MEMORY.md is the only file from OpenClaw's default memory layout that survives.** Daily notes (`memory/YYYY-MM-DD.md`) are eliminated — the log replaces their function. MEMORY.md persists because it's auto-loaded by OpenClaw's session bootstrap (this behavior is independent of the memory plugin slot).
 
@@ -508,7 +552,7 @@ When the agent needs information beyond what MEMORY.md and the handoff provide, 
 3. **`memory_search`** — zettelclaw's wrapped tool. Two search paths:
    - **Log search** (structured filters + ripgrep): precise lookups by type, subject, status. Keyword search over content/detail fields. Replacement-chain-aware.
    - **MEMORY.md search** (builtin semantic): delegated to OpenClaw's builtin for hybrid BM25+vector search over the manual section.
-4. **`memory_get`** — zettelclaw's wrapped tool. Reads specific log entries by ID, MEMORY.md content, or transcript files by session ID (provenance lookups).
+4. **`memory_get`** — zettelclaw's wrapped tool. Reads specific log entries by ID, MEMORY.md content, or transcript files by session ID (provenance lookups). ID reads increment usage counters used by durable snapshot selection.
 
 Each step is more expensive than the last. Most sessions should resolve from steps 1-2 (zero tool calls). Step 3 covers specific lookups and exploration. Step 4 is for deep dives into specific entries or original session transcripts when the log entry alone doesn't have enough context.
 
@@ -537,7 +581,7 @@ handoff between them.
 ### 6.2 Implementation note
 
 MEMORY.md now has two generated sections:
-- **Nightly briefing block** (`BEGIN/END GENERATED BRIEFING`) written by the cron briefing job.
+- **Nightly snapshot block** (`BEGIN/END GENERATED BRIEFING`) written by the cron snapshot job.
 - **Last handoff block** (`BEGIN/END LAST HANDOFF`) written by extraction when a new handoff is appended.
 
 Each writer only edits its own marker block, so the two generated sections do not overwrite each other.
@@ -563,7 +607,7 @@ zettelclaw/
   openclaw.plugin.json            # Plugin manifest — kind: "memory", configSchema, etc.
   prompts/
     extraction.md                 # Extraction agent prompt (section 4.2)
-    briefing.md                   # Briefing generation prompt for nightly cron
+    briefing.md                   # Memory snapshot generation prompt for nightly cron
     agents-memory-guidance.md     # Managed guidance block inserted into AGENTS.md
     memory-zettelclaw-notice.md   # Managed notice block inserted into MEMORY.md
     post-init-system-event.md     # System-event template used by init guidance notification
@@ -578,7 +622,7 @@ zettelclaw/
       memory-search.ts            # Wraps builtin memory_search — adds structured filters + replacement resolution
       memory-get.ts               # Wraps builtin memory_get — adds entry-by-ID and transcript lookups
     briefing/
-      generate.ts                 # Read log, run briefing prompt, rewrite MEMORY.md block
+      generate.ts                 # Read log, run snapshot prompt, rewrite MEMORY.md block
     log/
       schema.ts                   # Entry types, validation, nanoid generation
       resolve.ts                  # Replacement resolution (forward-pass Map<id, replacedById>)
@@ -624,17 +668,17 @@ The pre-compaction memory flush (`agents.defaults.compaction.memoryFlush`) is di
 | Extraction hook | Plugin hook: `before_reset` | Secondary — provides `messages[]` inline on `/new`/`/reset` |
 | Extraction hook | Plugin hook: `gateway_start` | Sweep for un-extracted and failed sessions |
 | Handoff writer | Extraction post-processing | Rewrites MEMORY.md `LAST HANDOFF` managed block when new handoff is appended |
-| Nightly cron | `cron/jobs.json` job upsert during init | Rewrite MEMORY.md briefing block (LLM-powered) |
+| Nightly cron | `cron/jobs.json` job upsert during init | Rewrite MEMORY.md generated snapshot block (LLM-powered) |
 | Skill | `skills/zettelclaw/SKILL.md` | Agent instructions for the memory system |
-| CLI: init | Plugin-registered command | Create log directory, set memory slot, disable flush, register cron, add briefing + handoff markers to MEMORY.md |
-| CLI: uninstall | Plugin-registered command | Revert init-time OpenClaw config changes and remove generated briefing block from MEMORY.md (log data preserved) |
+| CLI: init | Plugin-registered command | Create log directory, set memory slot, disable flush, register cron, add generated snapshot + handoff markers to MEMORY.md |
+| CLI: uninstall | Plugin-registered command | Revert init-time OpenClaw config changes and remove generated snapshot block from MEMORY.md (log data preserved) |
 | CLI: verify | Plugin-registered command | Validate setup files/config/markers/cron and print per-check pass/fail |
 | CLI: log | Plugin-registered command | Pretty-print recent log entries |
 | CLI: search | Plugin-registered command | Search log with filters (type, subject, date range, `--all` for replaced) |
 | CLI: trace | Plugin-registered command | Trace replacement chains, with irregularity flags (broken links, branching, cycles) |
 | CLI: import | Plugin-registered command | Import historical conversations (chatgpt/claude/grok/openclaw), dedupe by state, optional transcript generation, optional source backup/cleanup |
 | CLI: subjects | Plugin-registered command | `add`, `rename`, `list` — manage subject registry (`add` defaults type to `topic`) |
-| CLI: briefing generate | Plugin-registered command | Run briefing generation immediately and rewrite MEMORY.md generated block |
+| CLI: briefing generate | Plugin-registered command | Run snapshot generation immediately and rewrite MEMORY.md generated block (`snapshot generate` alias available) |
 
 ### 8.3 Installation
 
@@ -648,8 +692,8 @@ openclaw zettelclaw init
 2. Sets `plugins.slots.memory = "zettelclaw"` in config (replaces `memory-core`)
 3. Disables `agents.defaults.compaction.memoryFlush` (zettelclaw handles persistence)
 4. Disables the `session-memory` bundled hook if enabled
-5. Registers the nightly cron job for briefing generation
-6. Adds briefing markers and handoff markers to MEMORY.md:
+5. Registers the nightly cron job for snapshot generation
+6. Adds generated snapshot markers and handoff markers to MEMORY.md:
    - `<!-- BEGIN GENERATED BRIEFING -->` / `<!-- END GENERATED BRIEFING -->`
    - `<!-- BEGIN LAST HANDOFF -->` / `<!-- END LAST HANDOFF -->`
 7. Fires a post-init system event that instructs the main session to update managed Zettelclaw guidance blocks in `AGENTS.md` and `MEMORY.md`
@@ -758,6 +802,8 @@ Extends the builtin schema with optional structured filters:
 4. If `query` is provided and builtin `memory_search` is available, also run builtin semantic search over indexed markdown content (e.g., `MEMORY.md`).
 5. Merge and dedupe lines from all sources. Log-backed lines are rendered with IDs inline (e.g., `[id=abc123def456] ...`) so they can be cited in transcript references.
 
+`memory_search` does not increment `eventUsage` counters; only exact-ID reads and transcript citations do.
+
 **Indexing:** The builtin indexer only indexes Markdown files — it will not index `log.jsonl`. The search wrapper handles this split:
 - **MEMORY.md semantic search** — delegated to the builtin (hybrid BM25+vector, MMR, temporal decay, all inherited).
 - **Log search** — handled by the wrapper directly via structured filters (in-process JSONL parsing by type/subject/status) + ripgrep keyword search over `content` and `detail` fields. No vector index over log entries for v1.
@@ -776,7 +822,7 @@ Extends the builtin with log entry and transcript lookups:
 
 **Execution flow:**
 1. If `path` is `MEMORY.md` or any file path — delegate to the builtin `memory_get` (backward compatible).
-2. If `path` matches a 12-character nanoid pattern (e.g., `r7Wp3nKx_mZe`) — look up the log entry by ID in `log.jsonl` and return the full entry JSON with all fields.
+2. If `path` matches a 12-character nanoid pattern (e.g., `r7Wp3nKx_mZe`) — look up the log entry by ID in `log.jsonl`, increment `eventUsage.memoryGetCount` (attributed to the latest replacement target when applicable), and return the full entry JSON with all fields.
 3. If `path` starts with `session:` (e.g., `session:abc123def456`) — locate and read the transcript file at `~/.openclaw/agents/<agentId>/sessions/<sessionId>.jsonl`, filtered to user/assistant messages. This is the provenance lookup — from a log entry's `session` field to the full conversation context.
 
 ### 9.4 What's eliminated
@@ -820,7 +866,7 @@ By replacing `memory-core`, zettelclaw eliminates:
 
 6. **Handoff persistence**: End a session that emits a handoff. Verify MEMORY.md `LAST HANDOFF` block is updated. Start a new session and confirm the handoff appears via MEMORY.md auto-load.
 
-7. **Nightly briefing**: Run `openclaw cron run <zettelclaw-briefing>`. Verify MEMORY.md's generated block is updated. Verify manual content outside the markers is preserved. Verify active subjects, recent decisions, pending items, and stale subjects are populated correctly from the log.
+7. **Nightly snapshot**: Run `openclaw cron run <zettelclaw-briefing>`. Verify MEMORY.md's generated block is updated. Verify manual content outside the markers is preserved. Verify the snapshot reflects current interests, active projects/systems, conversation focus, active tasks, open questions, and durable memory from the log.
 
 8. **Memory tools**: Verify `memory_search` returns structured log entries with type/subject/status filters and includes event IDs in log-backed result lines. Verify keyword search over log entries works via ripgrep ("webhook" finds the retry decision). Verify semantic search over MEMORY.md works via the builtin. Verify `memory_get` reads entries by ID, MEMORY.md by path, and transcripts by `session:` prefix. Verify `memory-core` is disabled (slot occupied by zettelclaw).
 
@@ -828,9 +874,11 @@ By replacing `memory-core`, zettelclaw eliminates:
 
 8b. **CLI trace**: Run `openclaw zettelclaw trace` (and `openclaw zettelclaw trace <id>`). Verify chains render correctly and irregularities are flagged for broken links, branching, and cycles.
 
-9. **End-to-end continuity**: Work across 3 sessions in one day. Verify each session starts with the previous session's handoff. Start a session the next morning after the nightly cron. Verify MEMORY.md briefing reflects all three sessions' activity.
+8c. **Usage counters**: Read an entry via `memory_get` by ID and cite `[<id>]` in a later transcript. Verify `state.json.eventUsage` increments (`memoryGetCount`, `citationCount`) and that usage is attributed to the latest replacement target when the cited/read ID has been replaced.
 
-10. **Replacement**: Tell the agent a previous fact was wrong and reference the old entry as `[<id>]` in transcript text. Verify the correction enters the log with `replaces` pointing to the original entry (or best matched predecessor when no citation is present). Verify the next briefing reflects the corrected version. Verify replaced entries are hidden in default search results.
+9. **End-to-end continuity**: Work across 3 sessions in one day. Verify each session starts with the previous session's handoff. Start a session the next morning after the nightly cron. Verify MEMORY.md snapshot reflects all three sessions' activity.
+
+10. **Replacement**: Tell the agent a previous fact was wrong and reference the old entry as `[<id>]` in transcript text. Verify the correction enters the log with `replaces` pointing to the original entry (or best matched predecessor when no citation is present). Verify the next snapshot reflects the corrected version. Verify replaced entries are hidden in default search results.
 
 ## Appendix A: Implementation Review Resolutions (2026-02-28)
 
@@ -843,9 +891,9 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 | 3 | Timestamp source | Injected by hook at extraction time. Not LLM-generated. |
 | 4 | Extraction triggers | Plugin hook API provides `session_end`, `before_reset`, `before_compaction`, `after_compaction`, `session_start` — richer than internal hooks. Primary: `session_end` (all session ends). Secondary: `before_reset` (provides `messages[]` inline). Sweep: `gateway_start`. Scope: main sessions only (skip subagents, cron, hooks). |
 | 5 | Transcript access | `before_reset` uses `messages[]` first, then `sessionFile`, then `(agentId, sessionId)` transcript lookup fallback. `session_end` resolves by `sessionId`. `.reset.*` variants are supported. |
-| 6 | Briefing generation | LLM-powered summarization for the generated MEMORY.md block. |
+| 6 | Snapshot generation | LLM-powered summarization for the generated MEMORY.md block. |
 | 7 | Obsidian layer | Deferred to v2. |
-| 8 | Replacement chain | Forward-pass `Map<id, replacedById>` at query time. Used by briefing gen and CLI search. No index for v1. |
+| 8 | Replacement chain | Forward-pass `Map<id, replacedById>` at query time. Used by snapshot generation and CLI search. No index for v1. |
 | 9 | Session ID format | OpenClaw's `sessionId` from hook event context. Maps to `<sessionId>.jsonl` transcript. |
 | 10 | Duplicate handoffs | `state.json` tracks `extractedSessions` map (set of sessionIds). Same session = skip. Failed sessions tracked with retry count (max 1 retry). Map pruned after 30d. |
 | 11 | JSONL indexing | Builtin indexer is markdown-only. Log search handled by wrapper (structured filters + ripgrep). Semantic search covers MEMORY.md only for v1. |
@@ -855,9 +903,10 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 | 15 | Error handling | Retry extraction once on failure. Mark as permanently failed after second failure. `gateway_start` sweep also retries. |
 | 16 | Migration/import | Includes CLI import tooling (`openclaw zettelclaw import`) for chatgpt/claude/grok/openclaw sources, with state-based dedupe and optional source backup/cleanup for openclaw migration. |
 | 17 | Subject type enum | Constrained to `project \| person \| system \| topic`. Default `topic`. Validated on creation with fallback. |
-| 18 | Briefing pre-filtering | Three buckets (active entries, open items, stale subjects) pre-filtered in code before LLM call. `decisionWindow` config removed — decisions are covered by `activeWindow`. LLM handles presentation only. |
+| 18 | Snapshot pre-filtering | Four buckets (active entries, open items, stale subjects, durable entries) pre-filtered in code before LLM call. `decisionWindow` config removed — decisions are covered by `activeWindow`. LLM handles presentation only. |
 | 19 | Extraction context | Existing log entries (subject-relevant + open items) fed to extraction LLM so it can reference IDs in `replaces` and avoid duplicates. Capped at 50 entries per subject. |
 | 20 | `replaces` reliability | Deterministic linker resolves missing `replaces` using strict transcript citations (`[<12-char-id>]`) first, then targeted log candidate search + compatibility/confidence checks. |
+| 21 | Long-term recall signals | `state.json.eventUsage` tracks `memoryGetCount` and `citationCount` per event. Usage is attributed to latest replacement target, and nightly snapshot includes top durable entries outside recency window using score `2*citationCount + memoryGetCount`. |
 
 ## Appendix B: Build Order
 
@@ -891,14 +940,14 @@ Recommended implementation sequence. Each phase is independently testable.
 - Extraction post-processing writes `LAST HANDOFF` markers in MEMORY.md
 - **Test:** End a session with a handoff, verify MEMORY.md handoff block updates and is loaded in the next session
 
-### Phase 5: Briefing generation
-- `prompts/briefing.md` — briefing generation prompt
+### Phase 5: Memory snapshot generation
+- `prompts/briefing.md` — memory snapshot generation prompt
 - `briefing/generate.ts` — read log, run LLM, rewrite MEMORY.md generated block
 - Nightly cron registration
-- **Test:** Run cron manually, verify MEMORY.md generated block reflects log state
+- **Test:** Run cron manually, verify MEMORY.md generated block reflects snapshot state
 
 ### Phase 6: CLI + init
-- CLI commands: `init`, `uninstall`, `verify`, `log`, `search`, `trace`, `import`, `subjects add/rename/list`, `briefing generate`
+- CLI commands: `init`, `uninstall`, `verify`, `log`, `search`, `trace`, `import`, `subjects add/rename/list`, `briefing generate` (`snapshot generate` alias)
 - `init` flow: create log dir, set memory slot, disable flush, register cron, add markers
 - SKILL.md — agent instructions for the memory system
 - **Test:** Full `openclaw plugins install zettelclaw && openclaw zettelclaw init` flow
