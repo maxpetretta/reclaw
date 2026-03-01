@@ -11,7 +11,6 @@ interface SearchParams {
   type?: string;
   subject?: string;
   status?: string;
-  includeReplaced?: boolean;
 }
 
 interface MemorySearchDeps {
@@ -63,10 +62,6 @@ function normalizeSubject(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function normalizeBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
 }
 
 function extractTextFromToolResult(result: unknown): string {
@@ -149,14 +144,12 @@ function buildStructuredFilter(params: SearchParams): { filter: LogQueryFilter; 
   const type = normalizeEntryType(params.type);
   const subject = normalizeSubject(params.subject);
   const status = normalizeStatus(params.status);
-  const includeReplaced = normalizeBoolean(params.includeReplaced) ?? false;
 
   return {
     filter: {
       ...(type ? { type } : {}),
       ...(subject ? { subject } : {}),
       ...(status ? { status } : {}),
-      includeReplaced,
     },
     hasStructuredFilters: Boolean(type || subject || status),
   };
@@ -173,7 +166,6 @@ function buildParametersSchema(baseParameters: unknown): Record<string, unknown>
         type: { type: "string" },
         subject: { type: "string" },
         status: { type: "string", enum: ["open", "done"] },
-        includeReplaced: { type: "boolean" },
       },
       anyOf: [
         { required: ["query"] },
@@ -199,7 +191,6 @@ function buildParametersSchema(baseParameters: unknown): Record<string, unknown>
       type: { type: "string", enum: ["task", "fact", "decision", "question", "handoff"] },
       subject: { type: "string" },
       status: { type: "string", enum: ["open", "done"] },
-      includeReplaced: { type: "boolean" },
     },
     required: requiredWithoutQuery,
     anyOf: [

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   confirm as clackConfirm,
@@ -92,7 +92,7 @@ interface VerifyResult {
 }
 
 interface TraceIssue {
-  kind: "broken" | "branching" | "cycle";
+  kind: "info";
   id: string;
   detail: string;
 }
@@ -251,157 +251,33 @@ function formatEntry(entry: LogEntry): string {
   return base;
 }
 
-function dedupeIds(ids: string[]): string[] {
-  const seen = new Set<string>();
-  const output: string[] = [];
-  for (const id of ids) {
-    if (seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    output.push(id);
-  }
-  return output;
-}
-
-function detectCycles(childrenById: Map<string, string[]>): string[][] {
-  const state = new Map<string, 0 | 1 | 2>();
-  const stack: string[] = [];
-  const cycles: string[][] = [];
-
-  const visit = (id: string): void => {
-    const currentState = state.get(id) ?? 0;
-    if (currentState !== 0) {
-      return;
-    }
-
-    state.set(id, 1);
-    stack.push(id);
-
-    const children = childrenById.get(id) ?? [];
-    for (const child of children) {
-      const childState = state.get(child) ?? 0;
-      if (childState === 0) {
-        visit(child);
-        continue;
-      }
-
-      if (childState === 1) {
-        const cycleStart = stack.lastIndexOf(child);
-        if (cycleStart >= 0) {
-          cycles.push(dedupeIds(stack.slice(cycleStart)));
-        }
-      }
-    }
-
-    stack.pop();
-    state.set(id, 2);
-  };
-
-  for (const id of childrenById.keys()) {
-    visit(id);
-  }
-
-  return cycles;
-}
-
 function buildTraceReport(entries: LogEntry[]): TraceReport {
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  const childrenById = new Map<string, string[]>();
-  const roots: string[] = [];
-  const issues: TraceIssue[] = [];
-
+  const bySubject = new Map<string, LogEntry[]>();
   for (const entry of entries) {
-    if (!entry.replaces) {
-      roots.push(entry.id);
-      continue;
-    }
-
-    if (!byId.has(entry.replaces)) {
-      roots.push(entry.id);
-      issues.push({
-        kind: "broken",
-        id: entry.id,
-        detail: `references missing predecessor ${entry.replaces}`,
-      });
-      continue;
-    }
-
-    const children = childrenById.get(entry.replaces) ?? [];
-    children.push(entry.id);
-    childrenById.set(entry.replaces, children);
-  }
-
-  for (const [id, children] of childrenById.entries()) {
-    if (children.length > 1) {
-      issues.push({
-        kind: "branching",
-        id,
-        detail: `has ${children.length} successors (${children.join(", ")})`,
-      });
-    }
-  }
-
-  for (const cycle of detectCycles(childrenById)) {
-    issues.push({
-      kind: "cycle",
-      id: cycle[0] ?? "unknown",
-      detail: cycle.join(" -> "),
-    });
+    const subject = entry.subject?.trim() || "__unscoped__";
+    const group = bySubject.get(subject) ?? [];
+    group.push(entry);
+    bySubject.set(subject, group);
   }
 
   const chains: TraceChain[] = [];
-  const seenAcrossChains = new Set<string>();
-
-  const walk = (startId: string, path: string[], localSeen: Set<string>): void => {
-    if (localSeen.has(startId)) {
-      chains.push({ ids: [...path, startId] });
-      return;
-    }
-
-    const nextPath = [...path, startId];
-    localSeen.add(startId);
-    seenAcrossChains.add(startId);
-
-    const children = childrenById.get(startId) ?? [];
-    if (children.length === 0) {
-      chains.push({ ids: nextPath });
-      return;
-    }
-
-    if (children.length === 1) {
-      const next = children[0];
-      if (next) {
-        walk(next, nextPath, localSeen);
-      } else {
-        chains.push({ ids: nextPath });
-      }
-      return;
-    }
-
-    for (const child of children) {
-      walk(child, nextPath, new Set(localSeen));
-    }
-  };
-
-  for (const rootId of dedupeIds(roots)) {
-    walk(rootId, [], new Set());
-  }
-
-  for (const entry of entries) {
-    if (seenAcrossChains.has(entry.id)) {
-      continue;
-    }
-    walk(entry.id, [], new Set());
+  for (const group of bySubject.values()) {
+    const ids = [...group]
+      .sort((left, right) => {
+        const leftTs = Date.parse(left.timestamp);
+        const rightTs = Date.parse(right.timestamp);
+        if (Number.isFinite(leftTs) && Number.isFinite(rightTs) && leftTs !== rightTs) {
+          return leftTs - rightTs;
+        }
+        return left.id.localeCompare(right.id);
+      })
+      .map((entry) => entry.id);
+    chains.push({ ids });
   }
 
   return {
-    chains: chains.sort((left, right) => {
-      const leftHead = left.ids[0] ?? "";
-      const rightHead = right.ids[0] ?? "";
-      return leftHead.localeCompare(rightHead);
-    }),
-    issues: issues.sort((left, right) => left.id.localeCompare(right.id)),
+    chains: chains.filter((chain) => chain.ids.length > 0),
+    issues: [],
   };
 }
 
@@ -430,28 +306,13 @@ function printTraceReport(entries: LogEntry[], report: TraceReport, focusId?: st
     });
   });
 
-  const chainIds = new Set(chainsToPrint.flatMap((chain) => chain.ids));
-  const relevantIssues = report.issues.filter((issue) => {
-    if (chainIds.has(issue.id)) {
-      return true;
-    }
-
-    if (issue.kind === "branching" || issue.kind === "cycle") {
-      return issue.detail
-        .split(/[^A-Za-z0-9_-]+/gu)
-        .some((token) => token.length === 12 && chainIds.has(token));
-    }
-
-    return false;
-  });
-
-  if (relevantIssues.length === 0) {
+  if (report.issues.length === 0) {
     console.log("Irregularities: none");
     return;
   }
 
   console.log("Irregularities:");
-  for (const issue of relevantIssues) {
+  for (const issue of report.issues) {
     console.log(`- [${issue.kind}] ${issue.id}: ${issue.detail}`);
   }
 }
@@ -950,6 +811,7 @@ export async function runImportWorker(
       filePath: job.filePath,
       opts: {
         ...job.options,
+        ...(job.options.jobs === undefined ? { jobs: 1 } : {}),
         async: false,
         dryRun: false,
       },
@@ -1235,6 +1097,23 @@ function normalizePathList(values: Array<string | undefined>): string[] {
   return output;
 }
 
+function expandHomePath(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "~") {
+    return homedir();
+  }
+
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
+    return join(homedir(), trimmed.slice(2));
+  }
+
+  return trimmed;
+}
+
+function normalizeCliInputPath(value: string): string {
+  return resolvePath(expandHomePath(value));
+}
+
 function normalizeModelOption(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
@@ -1452,6 +1331,104 @@ async function pathType(path: string): Promise<"file" | "dir" | null> {
   }
 }
 
+async function readJsonFile(path: string): Promise<unknown | null> {
+  try {
+    const metadata = await stat(path);
+    if (!metadata.isFile() || metadata.size > 75 * 1024 * 1024) {
+      return null;
+    }
+
+    const rawText = await readFile(path, "utf8");
+    return JSON.parse(rawText) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveImportJsonPathFromDirectory(
+  directory: string,
+  platform: Exclude<ImportPlatform, "openclaw">,
+): Promise<string | null> {
+  const candidates = await listJsonCandidates(directory, 6, 500);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  let bestParsedCandidate: { path: string; score: number } | null = null;
+  for (const candidatePath of candidates) {
+    const parsed = await readJsonFile(candidatePath);
+    if (parsed === null) {
+      continue;
+    }
+
+    const parsedCount = countParsedConversations(platform, parsed);
+    if (parsedCount <= 0) {
+      continue;
+    }
+
+    const score = parsedCount * 100 + scorePathHint(platform, candidatePath);
+    if (!bestParsedCandidate || score > bestParsedCandidate.score) {
+      bestParsedCandidate = {
+        path: candidatePath,
+        score,
+      };
+    }
+  }
+
+  if (bestParsedCandidate) {
+    return bestParsedCandidate.path;
+  }
+
+  const sortedCandidates = [...candidates].sort((left, right) => left.localeCompare(right));
+  if (sortedCandidates.length === 1) {
+    return sortedCandidates[0] ?? null;
+  }
+
+  const preferredByName = sortedCandidates.filter((candidatePath) => {
+    const lowerName = basename(candidatePath).toLowerCase();
+    return lowerName === "conversations.json" || lowerName === "conversation.json";
+  });
+  if (preferredByName.length === 1) {
+    return preferredByName[0] ?? null;
+  }
+
+  const hinted = sortedCandidates.filter((candidatePath) => scorePathHint(platform, candidatePath) > 0);
+  if (hinted.length === 1) {
+    return hinted[0] ?? null;
+  }
+
+  return null;
+}
+
+async function resolveImportPathForPlatform(platform: ImportPlatform, rawPath: string): Promise<string> {
+  const normalizedPath = normalizeCliInputPath(rawPath);
+  const detectedType = await pathType(normalizedPath);
+
+  if (platform === "openclaw") {
+    if (detectedType !== "dir") {
+      throw new Error(isDirectoryErrorMessage(normalizedPath));
+    }
+    return normalizedPath;
+  }
+
+  if (detectedType === "file") {
+    return normalizedPath;
+  }
+
+  if (detectedType === "dir") {
+    const resolvedJson = await resolveImportJsonPathFromDirectory(
+      normalizedPath,
+      platform as Exclude<ImportPlatform, "openclaw">,
+    );
+    if (!resolvedJson) {
+      throw new Error(`No ${platformLabel(platform)} JSON export found under directory: ${normalizedPath}`);
+    }
+    return resolvedJson;
+  }
+
+  throw new Error(`Import file does not exist: ${normalizedPath}`);
+}
+
 async function countMarkdownFiles(root: string, maxDepth = 3, maxFiles = 1_000): Promise<number> {
   let count = 0;
   const stack: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
@@ -1665,7 +1642,7 @@ async function resolveImportSelection(input: {
   if (parsedPlatform && fileArg) {
     return {
       platform: parsedPlatform,
-      filePath: fileArg,
+      filePath: await resolveImportPathForPlatform(parsedPlatform, fileArg),
       interactive: false,
     };
   }
@@ -1729,7 +1706,7 @@ async function resolveImportSelection(input: {
             message:
               platform === "openclaw"
                 ? "Path to legacy OpenClaw memory directory"
-                : `Path to ${platformLabel(platform)} JSON export`,
+                : `Path to ${platformLabel(platform)} JSON export (file or directory)`,
             placeholder: platform === "openclaw" ? "./memory" : "./export.json",
           }),
         );
@@ -1742,25 +1719,18 @@ async function resolveImportSelection(input: {
           message:
             platform === "openclaw"
               ? "Path to legacy OpenClaw memory directory"
-              : `Path to ${platformLabel(platform)} JSON export`,
+              : `Path to ${platformLabel(platform)} JSON export (file or directory)`,
           placeholder: platform === "openclaw" ? "./memory" : "./export.json",
         }),
       );
     }
   }
 
-  const normalizedPath = selectedPath.trim();
-  const detectedType = await pathType(normalizedPath);
-  if (platform === "openclaw" && detectedType !== "dir") {
-    throw new Error(isDirectoryErrorMessage(normalizedPath));
-  }
-  if (platform !== "openclaw" && detectedType !== "file") {
-    throw new Error(`Import file does not exist: ${normalizedPath}`);
-  }
+  const resolvedPath = await resolveImportPathForPlatform(platform, selectedPath.trim());
 
   return {
     platform,
-    filePath: normalizedPath,
+    filePath: resolvedPath,
     interactive: true,
   };
 }
@@ -2498,7 +2468,6 @@ function registerZettelclawCliCommands(
     .option("--status <status>", "Task status")
     .option("--from <date>", "Start date/time (ISO-8601 or date string)")
     .option("--to <date>", "End date/time (ISO-8601 or date string)")
-    .option("--all", "Include replaced entries", false)
     .action(async (query: unknown, opts: unknown) => {
       const options = toObject(opts);
       const paths = resolvePaths(config, workspaceDir);
@@ -2513,7 +2482,6 @@ function registerZettelclawCliCommands(
         ...(parseStatus(options.status) ? { status: parseStatus(options.status) } : {}),
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
-        includeReplaced: options.all === true,
       };
 
       const entries =
@@ -2526,7 +2494,7 @@ function registerZettelclawCliCommands(
 
   zettelclaw
     .command("trace [id]")
-    .description("Trace replacement chains and flag irregular links")
+    .description("Trace chronological event sequences by subject")
     .option("--subject <slug>", "Filter by subject slug")
     .action(async (id: unknown, opts: unknown) => {
       const options = toObject(opts);
@@ -2537,7 +2505,6 @@ function registerZettelclawCliCommands(
           : undefined;
 
       const entries = await queryLog(paths.logPath, {
-        includeReplaced: true,
         ...(subject ? { subject } : {}),
       });
 
@@ -2964,4 +2931,6 @@ export function registerZettelclawCli(
 export const __cliTestExports = {
   resolvePaths,
   buildTraceReport,
+  resolveImportPathForPlatform,
+  normalizeCliInputPath,
 };

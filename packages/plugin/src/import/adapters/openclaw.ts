@@ -413,6 +413,7 @@ export function parseOpenClawConversations(raw: unknown): ImportedConversation[]
       platform: "openclaw",
       conversationId: buildConversationId(file.relativePath),
       title: `OpenClaw memory: ${file.relativePath}${transcriptLabel}`,
+      sourcePath: file.relativePath,
       createdAt: toIso(createdAtMs, fallbackCreatedAt),
       updatedAt: toIso(updatedAtMs, fallbackUpdatedAt),
       messages,

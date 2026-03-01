@@ -200,6 +200,19 @@ function resolveHistoricalTimestamp(conversation: ImportedConversation): string 
   return new Date(updatedAtMs).toISOString();
 }
 
+function normalizeImportedEntryTimestamp(rawTimestamp: unknown, fallback: string): string {
+  if (typeof rawTimestamp !== "string" || rawTimestamp.trim().length === 0) {
+    return fallback;
+  }
+
+  const parsed = Date.parse(rawTimestamp);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return new Date(parsed).toISOString();
+}
+
 function countExtractableMessages(conversation: ImportedConversation): number {
   return conversation.messages.filter(
     (message) => message.role === "user" || message.role === "assistant",
@@ -420,7 +433,7 @@ export async function runReclawImport(
       });
       const normalizedExtracted = extractedEntries.map((entry) => normalizeExtractedImportEntry(entry));
       const entries = normalizedExtracted.map((parsedEntry) => {
-        const { subject, ...rest } = parsedEntry.entry;
+        const { subject, timestamp, ...rest } = parsedEntry.entry;
         const normalizedSubject = typeof subject === "string" ? subject.trim() : "";
 
         return {
@@ -429,7 +442,7 @@ export async function runReclawImport(
           ...(normalizedSubject ? { subject: normalizedSubject } : {}),
           // Preserve import invariants even if extraction dependencies drift.
           session: sessionId,
-          timestamp: historicalTimestamp,
+          timestamp: normalizeImportedEntryTimestamp(timestamp, historicalTimestamp),
         };
       });
 

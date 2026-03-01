@@ -32,7 +32,6 @@ describe("query", () => {
       content: "Use queue-based webhook retries",
       detail: "staging verified",
       subject: "auth-migration",
-      replaces: "qid000000001",
       session: "s2",
     },
     {
@@ -94,22 +93,18 @@ describe("query", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  test("queryLog applies structured filters and replacement resolution", async () => {
+  test("queryLog applies structured filters", async () => {
     const openTasks = await queryLog(logPath, { type: "task", status: "open" });
     expect(openTasks.map((entry) => entry.id)).toEqual(["tidopen00001"]);
 
     const questions = await queryLog(logPath, { type: "question" });
-    expect(questions.map((entry) => entry.id)).toEqual(["qid000000002"]);
-
-    const allQuestions = await queryLog(logPath, { type: "question", includeReplaced: true });
-    expect(allQuestions.map((entry) => entry.id)).toEqual(["qid000000002", "qid000000001"]);
+    expect(questions.map((entry) => entry.id)).toEqual(["qid000000002", "qid000000001"]);
   });
 
   test("queryLog supports inclusive date range filters", async () => {
     const ranged = await queryLog(logPath, {
       from: "2026-02-22T08:00:00.000Z",
       to: "2026-02-24T08:00:00.000Z",
-      includeReplaced: true,
     });
 
     expect(ranged.map((entry) => entry.id)).toEqual([
@@ -125,6 +120,7 @@ describe("query", () => {
       "tiddone00001",
       "tidopen00001",
       "did000000001",
+      "qid000000001",
     ]);
 
     const originalPath = process.env.PATH;
@@ -150,12 +146,13 @@ describe("query", () => {
       "tiddone00001",
       "tidopen00001",
       "did000000001",
+      "qid000000001",
     ]);
   });
 
   test("queryOpenItems returns unresolved questions and open tasks", async () => {
     const openItems = await queryOpenItems(logPath);
-    expect(openItems.map((entry) => entry.id)).toEqual(["qid000000002", "tidopen00001"]);
+    expect(openItems.map((entry) => entry.id)).toEqual(["qid000000002", "tidopen00001", "qid000000001"]);
   });
 
   test("queryExtractionContext unions subject entries with open items", async () => {
@@ -167,6 +164,7 @@ describe("query", () => {
       "tiddone00001",
       "tidopen00001",
       "did000000001",
+      "qid000000001",
     ]);
   });
 });

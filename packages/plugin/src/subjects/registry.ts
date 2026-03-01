@@ -30,6 +30,117 @@ function isValidSlug(slug: string): boolean {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug);
 }
 
+const LIKELY_FIRST_NAME_TOKENS = new Set([
+  "adam",
+  "alex",
+  "andrew",
+  "anthony",
+  "ben",
+  "brandon",
+  "brian",
+  "chris",
+  "dan",
+  "david",
+  "eric",
+  "ethan",
+  "evan",
+  "jack",
+  "jake",
+  "james",
+  "jason",
+  "jeremy",
+  "john",
+  "jon",
+  "jordan",
+  "josh",
+  "justin",
+  "kevin",
+  "kyle",
+  "mark",
+  "max",
+  "matt",
+  "michael",
+  "mike",
+  "nick",
+  "noah",
+  "patrick",
+  "paul",
+  "peter",
+  "ryan",
+  "sam",
+  "scott",
+  "steve",
+  "thomas",
+  "tim",
+  "tyler",
+  "will",
+  "zach",
+]);
+
+const NON_PERSON_TRAILING_TOKENS = new Set([
+  "agent",
+  "analysis",
+  "api",
+  "app",
+  "benchmark",
+  "bot",
+  "cli",
+  "client",
+  "code",
+  "dashboard",
+  "export",
+  "hook",
+  "import",
+  "memory",
+  "model",
+  "pipeline",
+  "platform",
+  "plugin",
+  "project",
+  "report",
+  "research",
+  "sdk",
+  "search",
+  "server",
+  "service",
+  "shell",
+  "system",
+  "task",
+  "test",
+  "tool",
+  "workflow",
+]);
+
+function inferSubjectTypeFromSlug(slug: string): SubjectType | undefined {
+  const normalizedSlug = slug.trim().toLowerCase();
+  if (!isValidSlug(normalizedSlug)) {
+    return undefined;
+  }
+
+  const tokens = normalizedSlug.split("-");
+  if (tokens.length < 2 || tokens.length > 3) {
+    return undefined;
+  }
+
+  const [firstToken, ...trailingTokens] = tokens;
+  if (!LIKELY_FIRST_NAME_TOKENS.has(firstToken)) {
+    return undefined;
+  }
+
+  const hasInvalidTrailingToken = trailingTokens.some(
+    (token) =>
+      !/^[a-z]+$/u.test(token) ||
+      token.length < 2 ||
+      NON_PERSON_TRAILING_TOKENS.has(token),
+  );
+
+  if (hasInvalidTrailingToken) {
+    return undefined;
+  }
+
+  return "person";
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -107,9 +218,11 @@ export async function ensureSubject(
     return;
   }
 
+  const hintedType = parseSubjectType(inferredType);
+  const inferredFromSlug = inferSubjectTypeFromSlug(normalizedSlug);
   registry[normalizedSlug] = {
     display: slugToDisplay(normalizedSlug),
-    type: normalizeSubjectType(inferredType),
+    type: hintedType ?? inferredFromSlug ?? normalizeSubjectType(inferredType),
   };
 
   await writeRegistry(path, registry);
@@ -131,17 +244,31 @@ export async function upsertSubjectFromExtraction(
   const registry = await readRegistry(path);
   const existing = registry[normalizedSlug];
   const hintedType = parseSubjectType(inferredType);
+  const inferredFromSlug = inferSubjectTypeFromSlug(normalizedSlug);
 
   if (!existing) {
     registry[normalizedSlug] = {
       display: slugToDisplay(normalizedSlug),
-      type: hintedType ?? normalizeSubjectType(inferredType),
+      type: hintedType ?? inferredFromSlug ?? normalizeSubjectType(inferredType),
     };
     await writeRegistry(path, registry);
     return;
   }
 
-  if (!hintedType || existing.type === hintedType) {
+  if (!hintedType) {
+    if (!inferredFromSlug || existing.type === inferredFromSlug) {
+      return;
+    }
+
+    registry[normalizedSlug] = {
+      ...existing,
+      type: inferredFromSlug,
+    };
+    await writeRegistry(path, registry);
+    return;
+  }
+
+  if (existing.type === hintedType) {
     return;
   }
 

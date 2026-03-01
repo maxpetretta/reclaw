@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -131,5 +131,27 @@ describe("schema", () => {
     expect(entries).toHaveLength(2);
     expect(entries[0]?.id).toBe(first.id);
     expect(entries[1]?.id).toBe(second.id);
+  });
+
+  test("writes id/timestamp first and session last in JSONL", async () => {
+    const entry = injectMeta(
+      {
+        type: "task",
+        content: "Keep key order stable",
+        status: "open",
+        subject: "formatting",
+      },
+      "session-order",
+    );
+
+    await appendEntry(logPath, entry);
+    const line = (await readFile(logPath, "utf8")).trim();
+
+    expect(line).toContain(`"id":"${entry.id}"`);
+    expect(line).toContain(`"timestamp":"${entry.timestamp}"`);
+    expect(line).toContain(`"session":"${entry.session}"`);
+    expect(line.indexOf('"id"')).toBeLessThan(line.indexOf('"timestamp"'));
+    expect(line.indexOf('"timestamp"')).toBeLessThan(line.indexOf('"type"'));
+    expect(line.lastIndexOf('"session"')).toBeGreaterThan(line.lastIndexOf('"subject"'));
   });
 });

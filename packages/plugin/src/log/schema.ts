@@ -28,7 +28,6 @@ interface BaseEntry {
   content: string;
   session: string;
   detail?: string;
-  replaces?: string;
 }
 
 interface SubjectScopedEntry extends BaseEntry {
@@ -60,7 +59,7 @@ interface HandoffEntry extends BaseEntry {
 export type LogEntry = TaskEntry | FactEntry | DecisionEntry | QuestionEntry | HandoffEntry;
 
 const COMMON_REQUIRED_FIELDS = ["content", "type"] as const;
-const COMMON_OPTIONAL_FIELDS = ["detail", "replaces"] as const;
+const COMMON_OPTIONAL_FIELDS = ["detail"] as const;
 const VALID_STATUS = new Set(["open", "done"]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -128,7 +127,6 @@ function buildLlmEntry(
   const content = raw.content as string;
   const detail = raw.detail as string | undefined;
   const subject = parseSubject(raw.subject);
-  const replaces = raw.replaces as string | undefined;
 
   if (type !== "handoff" && !subject) {
     return { ok: false, error: "subject must be a non-empty string for non-handoff entries" };
@@ -148,7 +146,6 @@ function buildLlmEntry(
         status,
         subject: subject as string,
         ...(detail ? { detail } : {}),
-        ...(replaces ? { replaces } : {}),
       },
     };
   }
@@ -161,7 +158,6 @@ function buildLlmEntry(
         content,
         ...(detail ? { detail } : {}),
         ...(subject ? { subject } : {}),
-        ...(replaces ? { replaces } : {}),
       },
     };
   }
@@ -173,9 +169,33 @@ function buildLlmEntry(
       content,
       subject: subject as string,
       ...(detail ? { detail } : {}),
-      ...(replaces ? { replaces } : {}),
     },
   };
+}
+
+function orderEntryFields(entry: LogEntry): LogEntry {
+  const ordered: Record<string, unknown> = {
+    id: entry.id,
+    timestamp: entry.timestamp,
+    type: entry.type,
+    content: entry.content,
+  };
+
+  if (entry.detail) {
+    ordered.detail = entry.detail;
+  }
+
+  if (entry.subject) {
+    ordered.subject = entry.subject;
+  }
+
+  if (entry.type === "task") {
+    ordered.status = entry.status;
+  }
+
+  ordered.session = entry.session;
+
+  return ordered as LogEntry;
 }
 
 export function generateId(): string {
@@ -195,7 +215,6 @@ export function validateEntry(raw: unknown): { ok: true; entry: LogEntry } | { o
     "session",
     "detail",
     "subject",
-    "replaces",
     "status",
   ]);
 
@@ -229,12 +248,12 @@ export function validateEntry(raw: unknown): { ok: true; entry: LogEntry } | { o
 
   return {
     ok: true,
-    entry: {
-      ...llmValidation.entry,
+    entry: orderEntryFields({
       id: raw.id,
       timestamp: raw.timestamp,
       session: raw.session,
-    } as LogEntry,
+      ...llmValidation.entry,
+    } as LogEntry),
   };
 }
 
@@ -261,7 +280,6 @@ export function validateLlmOutput(
     "content",
     "detail",
     "subject",
-    "replaces",
     ...(type === "task" ? ["status"] : []),
   ]);
 
@@ -302,15 +320,15 @@ export function finalizeEntry(
     throw new Error(`invalid entry payload: ${validation.error}`);
   }
 
-  return {
-    ...validation.entry,
+  return orderEntryFields({
     id: opts.id && isNonEmptyString(opts.id) ? opts.id : generateId(),
     timestamp:
       opts.timestamp && isNonEmptyString(opts.timestamp) && isIsoTimestamp(opts.timestamp)
         ? opts.timestamp
         : new Date().toISOString(),
     session: opts.sessionId,
-  } as LogEntry;
+    ...validation.entry,
+  } as LogEntry);
 }
 
 export async function appendEntry(logPath: string, entry: LogEntry): Promise<void> {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve as resolvePath } from "node:path";
 import type { PluginConfig } from "../config";
 import {
   __cliTestExports,
@@ -280,7 +280,7 @@ describe("cli init helpers", () => {
     expect(result.checks.some((check) => check.ok === false)).toBe(true);
   });
 
-  test("buildTraceReport flags broken and branching chains", () => {
+  test("buildTraceReport groups entries by subject chronology", () => {
     const report = __cliTestExports.buildTraceReport([
       {
         id: "root00000001",
@@ -297,7 +297,6 @@ describe("cli init helpers", () => {
         content: "Updated decision",
         subject: "auth-migration",
         session: "s2",
-        replaces: "root00000001",
       },
       {
         id: "fork00000001",
@@ -306,7 +305,6 @@ describe("cli init helpers", () => {
         content: "Competing update",
         subject: "auth-migration",
         session: "s3",
-        replaces: "root00000001",
       },
       {
         id: "broken000001",
@@ -315,12 +313,17 @@ describe("cli init helpers", () => {
         content: "Broken chain node",
         subject: "auth-migration",
         session: "s4",
-        replaces: "missing000001",
       },
     ]);
 
-    expect(report.issues.some((issue) => issue.kind === "branching" && issue.id === "root00000001")).toBe(true);
-    expect(report.issues.some((issue) => issue.kind === "broken" && issue.id === "broken000001")).toBe(true);
+    expect(report.issues).toEqual([]);
+    expect(report.chains).toHaveLength(1);
+    expect(report.chains[0]?.ids).toEqual([
+      "root00000001",
+      "next00000001",
+      "fork00000001",
+      "broken000001",
+    ]);
   });
 
   test("runImportCommand backs up and clears legacy memory dir after successful openclaw migration", async () => {
@@ -521,6 +524,36 @@ describe("cli init helpers", () => {
     expect(detections.chatgpt.some((detection) => detection.path === chatgptExportPath)).toBe(true);
   });
 
+  test("normalizeCliInputPath expands tilde to home directory", () => {
+    const resolved = __cliTestExports.normalizeCliInputPath("~/Desktop/extracts-mini/grok");
+    expect(resolved).toBe(resolvePath(join(homedir(), "Desktop/extracts-mini/grok")));
+  });
+
+  test("resolveImportPathForPlatform accepts grok directory input and resolves JSON export", async () => {
+    const grokDir = join(workspaceDir, "grok-export");
+    await mkdir(grokDir, { recursive: true });
+    const grokExportPath = join(grokDir, "conversations.json");
+    await writeFile(
+      grokExportPath,
+      JSON.stringify({
+        conversations: [
+          {
+            _id: "grok-1",
+            title: "Grok test",
+            messages: [
+              { id: "m1", role: "user", content: "hello", timestamp: 1704067200 },
+              { id: "m2", role: "assistant", content: "world", timestamp: 1704067260 },
+            ],
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const resolved = await __cliTestExports.resolveImportPathForPlatform("grok", grokDir);
+    expect(resolved).toBe(grokExportPath);
+  });
+
   test("queueImportJob persists async job and schedules one-shot cron worker", async () => {
     const sourcePath = join(workspaceDir, "chatgpt-export.json");
     await writeFile(sourcePath, "[]", "utf8");
@@ -617,6 +650,7 @@ describe("cli init helpers", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.platform).toBe("chatgpt");
     expect(calls[0]?.filePath).toBe(sourcePath);
+    expect((calls[0]?.opts as { jobs?: number } | undefined)?.jobs).toBe(1);
 
     const state = await readState(join(logDir, "state.json"));
     const finished = state.importJobs[queued.job.id];

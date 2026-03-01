@@ -93,7 +93,7 @@ describe("memory-get", () => {
     expect(usageCalls).toEqual([["abc123def456"]]);
   });
 
-  test("usage increment resolves to latest replacement id", async () => {
+  test("usage increment tracks the requested event id", async () => {
     const usageCalls: string[][] = [];
     const api = {
       runtime: {
@@ -108,7 +108,6 @@ describe("memory-get", () => {
         createEntry({ id: "old000000001" }),
         createEntry({
           id: "new000000001",
-          replaces: "old000000001",
           timestamp: "2026-02-22T00:00:00.000Z",
         }),
       ],
@@ -123,7 +122,7 @@ describe("memory-get", () => {
     const text = readResultText(result);
 
     expect(text).toContain('"id": "old000000001"');
-    expect(usageCalls).toEqual([["new000000001"]]);
+    expect(usageCalls).toEqual([["old000000001"]]);
   });
 
   test("session: path returns formatted transcript text", async () => {

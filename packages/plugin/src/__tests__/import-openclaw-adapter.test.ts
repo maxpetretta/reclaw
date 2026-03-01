@@ -67,6 +67,7 @@ describe("openclaw import adapter", () => {
 
     expect(conversations).toHaveLength(1);
     expect(conversations[0]?.platform).toBe("openclaw");
+    expect(conversations[0]?.sourcePath).toBe("2026-02-27.md");
     expect(conversations[0]?.messages.map((message) => message.content)).toEqual([
       "Transcript question",
       "Transcript answer",
@@ -99,6 +100,7 @@ describe("openclaw import adapter", () => {
     const conversations = parseOpenClawConversations(source);
 
     expect(conversations).toHaveLength(1);
+    expect(conversations[0]?.sourcePath).toBe("projects/roadmap.md");
     expect(conversations[0]?.messages).toHaveLength(1);
     expect(conversations[0]?.messages[0]?.role).toBe("user");
     expect(conversations[0]?.messages[0]?.content).toContain("Ship billing migration in March.");

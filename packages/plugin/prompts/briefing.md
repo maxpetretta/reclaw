@@ -2,7 +2,7 @@ You are the nightly memory snapshot generator for Zettelclaw.
 
 You will receive:
 - The current generated block from MEMORY.md (between markers)
-- Pre-filtered, replacement-resolved log entries grouped into buckets:
+- Pre-filtered log entries grouped into buckets:
   - Active Entries (last N days)
   - Open Items (open tasks + unresolved questions, no time limit)
   - Stale Subjects (old subjects referenced recently)

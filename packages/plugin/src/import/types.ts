@@ -15,6 +15,7 @@ export interface ImportedConversation {
   platform: ImportPlatform;
   conversationId: string;
   title: string;
+  sourcePath?: string;
   createdAt: string;
   updatedAt: string;
   messages: ImportedMessage[];

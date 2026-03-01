@@ -224,7 +224,7 @@ describe("extraction hooks", () => {
     expect(registry["ops-audit"]?.type).toBe("topic");
   });
 
-  test("uses transcript-cited event id for replaces when output omits it", async () => {
+  test("accepts transcript-cited event ids without generating linkage fields", async () => {
     await seedLogEntry(logDir, {
       id: "opentask0001",
       timestamp: "2026-02-11T00:00:00.000Z",
@@ -261,10 +261,13 @@ describe("extraction hooks", () => {
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     const doneTask = entries.find((entry) => entry.type === "task" && entry.session === "session-cited-id");
-    expect(doneTask?.replaces).toBe("opentask0001");
+    expect(doneTask?.type).toBe("task");
+    if (doneTask?.type === "task") {
+      expect(doneTask.status).toBe("done");
+    }
   });
 
-  test("citation usage is recorded against latest replacement id", async () => {
+  test("citation usage is recorded against cited event id", async () => {
     await seedLogEntry(logDir, {
       id: "old000000001",
       timestamp: "2026-02-11T00:00:00.000Z",
@@ -272,15 +275,6 @@ describe("extraction hooks", () => {
       content: "Old decision",
       subject: "auth-migration",
       session: "seed-1",
-    });
-    await seedLogEntry(logDir, {
-      id: "new000000001",
-      timestamp: "2026-02-12T00:00:00.000Z",
-      type: "decision",
-      content: "New decision",
-      subject: "auth-migration",
-      session: "seed-2",
-      replaces: "old000000001",
     });
 
     const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-cite-usage.jsonl");
@@ -308,11 +302,10 @@ describe("extraction hooks", () => {
     );
 
     const state = await readState(join(logDir, "state.json"));
-    expect(state.eventUsage["old000000001"]).toBeUndefined();
-    expect(state.eventUsage["new000000001"]?.citationCount).toBe(1);
+    expect(state.eventUsage["old000000001"]?.citationCount).toBe(1);
   });
 
-  test("searches log to resolve replaces when transcript has no direct id", async () => {
+  test("appends updated entries without replacement linking", async () => {
     await seedLogEntry(logDir, {
       id: "dec000000001",
       timestamp: "2026-02-11T00:00:00.000Z",
@@ -349,7 +342,7 @@ describe("extraction hooks", () => {
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     const decision = entries.find((entry) => entry.type === "decision" && entry.session === "session-search-link");
-    expect(decision?.replaces).toBe("dec000000001");
+    expect(decision?.type).toBe("decision");
   });
 
   test("before_reset skips scoped session types", async () => {
@@ -538,7 +531,7 @@ describe("extraction hooks", () => {
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async (opts) => {
         existingIds = (opts.existingEntries ?? []).map((entry) => entry.id);
-        return '{"type":"task","content":"Backfill failed jobs","status":"done","subject":"other-project","replaces":"opentask0001"}';
+        return '{"type":"task","content":"Backfill failed jobs","status":"done","subject":"other-project"}';
       },
     });
 
@@ -553,7 +546,7 @@ describe("extraction hooks", () => {
     expect(existingIds).not.toContain("oldfact0001b");
 
     const entries = await readLog(join(logDir, "log.jsonl"));
-    const completed = entries.find((entry) => entry.replaces === "opentask0001");
+    const completed = entries.find((entry) => entry.session === "session-context" && entry.type === "task");
     expect(completed?.type).toBe("task");
     if (completed?.type === "task") {
       expect(completed.status).toBe("done");

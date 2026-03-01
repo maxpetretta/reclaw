@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readLog, finalizeEntry } from "../log/schema";
+import { readLog, finalizeEntry, type LogEntry } from "../log/schema";
 import { runReclawImport } from "../import/run";
 import type { ImportedConversation, ImportedMessage } from "../import/types";
 import { readState, writeState } from "../state";
@@ -265,7 +265,7 @@ describe("import run", () => {
     expect(summary.skippedAlreadyImported).toBe(0);
   });
 
-  test("import run normalizes entry metadata for historical invariants", async () => {
+  test("import run normalizes session/subject and preserves extracted timestamp", async () => {
     const conversation = makeConversation("normalize", "2024-01-08T00:00:00.000Z", 6);
 
     const summary = await runReclawImport(
@@ -303,12 +303,55 @@ describe("import run", () => {
 
     const entries = await readLog(logPath);
     expect(entries[0]?.session).toBe("reclaw:chatgpt:normalize");
-    expect(entries[0]?.timestamp).toBe(conversation.updatedAt);
+    expect(entries[0]?.timestamp).toBe("2025-01-01T00:00:00.000Z");
     expect(entries[0]?.subject).toBe("auth-migration");
 
     const registry = await readRegistry(subjectsPath);
     expect(registry["auth-migration"]).toBeDefined();
     expect(registry["  auth-migration  "]).toBeUndefined();
+  });
+
+  test("falls back to conversation updatedAt when extracted timestamp is invalid", async () => {
+    const conversation = makeConversation("fallback-ts", "2024-01-09T00:00:00.000Z", 6);
+
+    const summary = await runReclawImport(
+      {
+        platform: "chatgpt",
+        filePath: join(tempDir, "unused.json"),
+        logPath,
+        subjectsPath,
+        statePath,
+        model: "anthropic/claude-haiku-4-5",
+        openClawHome,
+      },
+      {
+        readImportFile: async () => ({}),
+        parseConversations: () => [conversation],
+        extractConversation: async ({ sessionId }) => {
+          const valid = finalizeEntry(
+            {
+              type: "fact",
+              content: "Timestamp fallback",
+              subject: "import-test",
+            },
+            {
+              sessionId,
+              timestamp: "2025-01-02T00:00:00.000Z",
+            },
+          );
+          const invalidTimestamp = {
+            ...valid,
+            timestamp: "not-a-date",
+          } as LogEntry;
+          return [invalidTimestamp];
+        },
+      },
+      silentLogger,
+    );
+
+    expect(summary.imported).toBe(1);
+    const entries = await readLog(logPath);
+    expect(entries[0]?.timestamp).toBe(conversation.updatedAt);
   });
 
   test("processes selected conversations in chronological order", async () => {

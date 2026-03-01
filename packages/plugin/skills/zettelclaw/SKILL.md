@@ -28,8 +28,6 @@ read_when:
 - Structured filters:
   - `memory_search({"type":"decision","subject":"auth-migration"})`
   - `memory_search({"type":"task","status":"open"})`
-- Include superseded entries only when needed:
-  - `{"includeReplaced":true}`
 
 ## `memory_get` Usage
 - By entry ID (12-char ID):
@@ -39,9 +37,9 @@ read_when:
 - By memory file path:
   - `memory_get({"path":"MEMORY.md"})`
 
-## Corrections and Replacements
+## Corrections and Updates
 - If memory is wrong/outdated, state the correction clearly.
-- Extraction writes a new entry that points to the older one via `replaces`.
+- Extraction writes a new entry with current details.
 - Log is append-only; old entries are not edited in place.
 
 ## Hard Filter

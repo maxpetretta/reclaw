@@ -3,8 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
-import { queryExtractionContext, queryLog, searchLog } from "../log/query";
-import { getLatestVersionId } from "../log/resolve";
+import { queryExtractionContext, queryLog } from "../log/query";
 import {
   appendEntry,
   finalizeEntry,
@@ -53,7 +52,6 @@ export interface ExtractionHookDeps {
   findTranscriptFile: typeof findTranscriptFile;
   findSessionKeyForSession: typeof findSessionKeyForSession;
   queryLog: typeof queryLog;
-  searchLog: typeof searchLog;
   readTranscript: typeof readTranscript;
   formatTranscript: typeof formatTranscript;
   listSessionCandidates: typeof listSessionCandidates;
@@ -66,7 +64,6 @@ const DEFAULT_DEPS: ExtractionHookDeps = {
   findTranscriptFile,
   findSessionKeyForSession,
   queryLog,
-  searchLog,
   readTranscript,
   formatTranscript,
   listSessionCandidates,
@@ -467,120 +464,6 @@ interface ParsedLlmEntry {
 
 const EVENT_ID_LENGTH = 12;
 const TRANSCRIPT_EVENT_ID_PATTERN = /\[([A-Za-z0-9_-]{12})\]/gu;
-const MAX_REPLACEMENT_KEYWORDS = 6;
-const STOP_WORDS = new Set([
-  "about",
-  "after",
-  "again",
-  "also",
-  "an",
-  "and",
-  "are",
-  "because",
-  "before",
-  "being",
-  "between",
-  "but",
-  "can",
-  "could",
-  "did",
-  "does",
-  "done",
-  "for",
-  "from",
-  "had",
-  "has",
-  "have",
-  "here",
-  "how",
-  "into",
-  "its",
-  "just",
-  "more",
-  "need",
-  "new",
-  "not",
-  "now",
-  "our",
-  "out",
-  "over",
-  "same",
-  "should",
-  "that",
-  "the",
-  "their",
-  "them",
-  "then",
-  "there",
-  "these",
-  "they",
-  "this",
-  "those",
-  "was",
-  "were",
-  "what",
-  "when",
-  "where",
-  "which",
-  "while",
-  "will",
-  "with",
-  "would",
-  "you",
-  "your",
-]);
-
-function normalizeComparableText(value: string): string {
-  return value
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/gu, " ")
-    .replaceAll(/\s+/gu, " ")
-    .trim();
-}
-
-function tokenizeComparableText(value: string): string[] {
-  return normalizeComparableText(value)
-    .split(" ")
-    .filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
-}
-
-function entryComparableText(entry: Pick<LogEntry, "content" | "detail"> | Pick<LlmEntry, "content" | "detail">): string {
-  return `${entry.content} ${entry.detail ?? ""}`.trim();
-}
-
-function tokenOverlapRatio(left: string[], right: string[]): number {
-  if (left.length === 0 || right.length === 0) {
-    return 0;
-  }
-
-  const leftSet = new Set(left);
-  const rightSet = new Set(right);
-  let intersection = 0;
-  for (const token of leftSet) {
-    if (rightSet.has(token)) {
-      intersection += 1;
-    }
-  }
-
-  const denominator = Math.min(leftSet.size, rightSet.size);
-  return denominator > 0 ? intersection / denominator : 0;
-}
-
-function dedupeEntriesById(entries: LogEntry[]): LogEntry[] {
-  const seen = new Set<string>();
-  const deduped: LogEntry[] = [];
-
-  for (const entry of entries) {
-    if (seen.has(entry.id)) {
-      continue;
-    }
-
-    seen.add(entry.id);
-    deduped.push(entry);
-  }
-
-  return deduped;
-}
 
 function extractReferencedEventIds(transcript: string): string[] {
   if (!transcript.trim()) {
@@ -605,212 +488,6 @@ function extractReferencedEventIds(transcript: string): string[] {
   }
 
   return ids;
-}
-
-function buildReplacementKeywordQueries(entry: LlmEntry): string[] {
-  const keywords = tokenizeComparableText(entryComparableText(entry));
-  if (entry.subject) {
-    keywords.unshift(...tokenizeComparableText(entry.subject));
-  }
-
-  const deduped: string[] = [];
-  const seen = new Set<string>();
-  for (const token of keywords) {
-    if (seen.has(token)) {
-      continue;
-    }
-    seen.add(token);
-    deduped.push(token);
-    if (deduped.length >= MAX_REPLACEMENT_KEYWORDS) {
-      break;
-    }
-  }
-
-  return deduped;
-}
-
-function isCompatibleReplacement(entry: LlmEntry, candidate: LogEntry): boolean {
-  if (entry.type !== candidate.type) {
-    return false;
-  }
-
-  if (entry.subject && candidate.subject && entry.subject !== candidate.subject) {
-    return false;
-  }
-
-  if (entry.type !== "task") {
-    return true;
-  }
-
-  if (entry.status === "done") {
-    return candidate.status === "open";
-  }
-
-  // Keep open->open transitions only.
-  return candidate.status === "open";
-}
-
-function computeReplacementScore(entry: LlmEntry, candidate: LogEntry): number {
-  if (!isCompatibleReplacement(entry, candidate)) {
-    return 0;
-  }
-
-  const entryText = entryComparableText(entry);
-  const candidateText = entryComparableText(candidate);
-  const normalizedEntryContent = normalizeComparableText(entry.content);
-  const normalizedCandidateContent = normalizeComparableText(candidate.content);
-  const normalizedEntryText = normalizeComparableText(entryText);
-  const normalizedCandidateText = normalizeComparableText(candidateText);
-  const contentOverlap = tokenOverlapRatio(
-    tokenizeComparableText(entry.content),
-    tokenizeComparableText(candidate.content),
-  );
-  const overlap = tokenOverlapRatio(
-    tokenizeComparableText(entryText),
-    tokenizeComparableText(candidateText),
-  );
-
-  let score = overlap * 6 + contentOverlap * 6;
-  if (normalizedEntryContent && normalizedEntryContent === normalizedCandidateContent) {
-    score += 6;
-  }
-
-  if (normalizedEntryText && normalizedEntryText === normalizedCandidateText) {
-    score += 4;
-  }
-
-  if (entry.subject && candidate.subject === entry.subject) {
-    score += 2;
-  }
-
-  if (entry.type === "task" && entry.status === "done" && candidate.type === "task" && candidate.status === "open") {
-    score += 2;
-  }
-
-  return score;
-}
-
-function resolveLatestReplacementId(startId: string, allEntries: LogEntry[]): string {
-  const successorsById = new Map<string, LogEntry[]>();
-  for (const entry of allEntries) {
-    if (!entry.replaces) {
-      continue;
-    }
-
-    const list = successorsById.get(entry.replaces) ?? [];
-    list.push(entry);
-    successorsById.set(entry.replaces, list);
-  }
-
-  let current = startId;
-  const seen = new Set<string>([startId]);
-
-  while (true) {
-    const successors = successorsById.get(current);
-    if (!successors || successors.length === 0) {
-      return current;
-    }
-
-    const next = [...successors].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))[0];
-    if (!next || seen.has(next.id)) {
-      return current;
-    }
-
-    seen.add(next.id);
-    current = next.id;
-  }
-}
-
-async function collectReplacementCandidates(params: {
-  entry: LlmEntry;
-  logPath: string;
-  deps: ExtractionHookDeps;
-}): Promise<LogEntry[]> {
-  const filter = {
-    type: params.entry.type,
-    ...(params.entry.subject ? { subject: params.entry.subject } : {}),
-    includeReplaced: false as const,
-  };
-
-  const [typedCandidates, keywordGroups] = await Promise.all([
-    params.deps.queryLog(params.logPath, filter),
-    Promise.all(
-      buildReplacementKeywordQueries(params.entry).map((keyword) =>
-        params.deps.searchLog(params.logPath, keyword, filter),
-      ),
-    ),
-  ]);
-
-  return dedupeEntriesById([
-    ...typedCandidates,
-    ...keywordGroups.flat(),
-  ]);
-}
-
-async function resolveReplacementForEntry(params: {
-  entry: LlmEntry;
-  transcriptEventIds: string[];
-  logPath: string;
-  deps: ExtractionHookDeps;
-}): Promise<string | undefined> {
-  if (params.entry.replaces || params.entry.type === "handoff") {
-    return params.entry.replaces;
-  }
-
-  const [allEntries, candidates] = await Promise.all([
-    params.deps.queryLog(params.logPath, { includeReplaced: true }),
-    collectReplacementCandidates({
-      entry: params.entry,
-      logPath: params.logPath,
-      deps: params.deps,
-    }),
-  ]);
-
-  if (allEntries.length === 0 || candidates.length === 0) {
-    return undefined;
-  }
-
-  const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  for (const transcriptId of params.transcriptEventIds) {
-    const latestId = resolveLatestReplacementId(transcriptId, allEntries);
-    const matched = candidatesById.get(latestId);
-    if (matched && isCompatibleReplacement(params.entry, matched)) {
-      return matched.id;
-    }
-  }
-
-  let bestCandidate: LogEntry | undefined;
-  let bestScore = 0;
-
-  for (const candidate of candidates) {
-    const score = computeReplacementScore(params.entry, candidate);
-    if (score <= bestScore) {
-      continue;
-    }
-
-    bestScore = score;
-    bestCandidate = candidate;
-  }
-
-  if (!bestCandidate) {
-    return undefined;
-  }
-
-  const requiresStrictSubjectMatch = Boolean(params.entry.subject);
-  const acceptThreshold = params.entry.type === "task" && params.entry.status === "done" ? 7 : 8;
-  if (bestScore < acceptThreshold) {
-    return undefined;
-  }
-
-  if (
-    requiresStrictSubjectMatch &&
-    bestCandidate.subject &&
-    bestCandidate.subject !== params.entry.subject
-  ) {
-    return undefined;
-  }
-
-  return bestCandidate.id;
 }
 
 function readGatewayPort(config: unknown): number | null {
@@ -1003,15 +680,14 @@ async function runExtractionPipeline(params: {
 
   try {
     if (transcriptEventIds.length > 0) {
-      const allEntries = await params.deps.queryLog(params.paths.logPath, { includeReplaced: true });
+      const allEntries = await params.deps.queryLog(params.paths.logPath, {});
       if (allEntries.length > 0) {
         const byId = new Set(allEntries.map((entry) => entry.id));
-        const canonicalIds = [...new Set(
+        const citedIds = [...new Set(
           transcriptEventIds
             .filter((eventId) => byId.has(eventId))
-            .map((eventId) => getLatestVersionId(allEntries, eventId)),
         )];
-        await incrementEventUsage(params.paths.statePath, canonicalIds, "citation");
+        await incrementEventUsage(params.paths.statePath, citedIds, "citation");
       }
     }
 
@@ -1070,24 +746,7 @@ async function runExtractionPipeline(params: {
     }
 
     for (const parsedEntry of parsedEntries) {
-      const resolvedReplaces =
-        parsedEntry.entry.replaces ??
-        (await resolveReplacementForEntry({
-          entry: parsedEntry.entry,
-          transcriptEventIds,
-          logPath: params.paths.logPath,
-          deps: params.deps,
-        }));
-
-      const finalizedInput =
-        resolvedReplaces && !parsedEntry.entry.replaces
-          ? {
-              ...parsedEntry.entry,
-              replaces: resolvedReplaces,
-            }
-          : parsedEntry.entry;
-
-      const entry = finalizeEntry(finalizedInput, { sessionId: params.sessionId });
+      const entry = finalizeEntry(parsedEntry.entry, { sessionId: params.sessionId });
       if (entry.subject) {
         await upsertSubjectFromExtraction(params.paths.subjectsPath, entry.subject, parsedEntry.subjectTypeHint);
       }

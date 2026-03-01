@@ -215,4 +215,46 @@ describe("import adapters", () => {
     expect(conversations[0]?.updatedAt).toBe("2024-02-01T00:03:00.000Z");
     expect(conversations[0]?.messages.map((message) => message.id)).toEqual(["iso-1", "iso-2"]);
   });
+
+  test("grok adapter parses backend export with conversation metadata and responses wrappers", () => {
+    const raw = {
+      conversations: [
+        {
+          conversation: {
+            id: "grok-conv-backend-1",
+            title: "Backend shape",
+            create_time: "2026-02-13T00:18:03.459048Z",
+            modify_time: "2026-02-13T00:18:22.410651Z",
+          },
+          responses: [
+            {
+              response: {
+                _id: "resp-1",
+                sender: "human",
+                message: "What conditions may I see with high prolactin?",
+                create_time: { $date: { $numberLong: "1770941895265" } },
+              },
+            },
+            {
+              response: {
+                _id: "resp-2",
+                sender: "assistant",
+                message: "Hypogonadism and related symptoms are common.",
+                create_time: { $date: { $numberLong: "1770941902411" } },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const conversations = parseGrokConversations(raw);
+    expect(conversations).toHaveLength(1);
+    expect(conversations[0]?.conversationId).toBe("grok-conv-backend-1");
+    expect(conversations[0]?.title).toBe("Backend shape");
+    expect(conversations[0]?.createdAt).toBe("2026-02-13T00:18:03.459Z");
+    expect(conversations[0]?.updatedAt).toBe("2026-02-13T00:18:22.410Z");
+    expect(conversations[0]?.messages.map((message) => message.id)).toEqual(["resp-1", "resp-2"]);
+    expect(conversations[0]?.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+  });
 });

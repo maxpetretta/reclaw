@@ -1,6 +1,5 @@
 import { open } from "node:fs/promises";
 import { runPluginCommandWithTimeout } from "openclaw/plugin-sdk";
-import { buildReplacementMap, filterReplaced } from "./resolve";
 import { readLog, type EntryType, type LogEntry, validateEntry } from "./schema";
 
 export interface LogQueryFilter {
@@ -10,7 +9,6 @@ export interface LogQueryFilter {
   session?: string;
   from?: string;
   to?: string;
-  includeReplaced?: boolean;
 }
 
 function isEnoent(error: unknown): boolean {
@@ -76,7 +74,7 @@ function sortByTimestampDesc(a: LogEntry, b: LogEntry): number {
 }
 
 function getCurrentEntries(allEntries: LogEntry[]): LogEntry[] {
-  return filterReplaced(allEntries).sort(sortByTimestampDesc);
+  return [...allEntries].sort(sortByTimestampDesc);
 }
 
 function normalizeSubjectList(subjects: string[]): Set<string> {
@@ -199,15 +197,9 @@ function applyFilterAndResolution(
   candidateIds: Set<string> | null,
   filter: LogQueryFilter,
 ): LogEntry[] {
-  const replacementMap = buildReplacementMap(allEntries);
-
   return allEntries
     .filter((entry) => {
       if (candidateIds && !candidateIds.has(entry.id)) {
-        return false;
-      }
-
-      if (!filter.includeReplaced && replacementMap.has(entry.id)) {
         return false;
       }
 

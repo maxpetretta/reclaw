@@ -30,6 +30,8 @@ You will receive:
    entry concerns something genuinely new, use a new kebab-case slug — the hook
    will add it to the registry automatically. For new subjects, include
    `subjectType` with one of: `project`, `person`, `system`, `topic`.
+   If the subject is a human being (for example a first-last name slug), set
+   `subjectType` to `person`.
    If unsure, use `topic`. If an existing subject's type should be corrected,
    include `subjectType` on the entry and the hook may update the registry.
    Subject is required for all non-handoff entries. If you truly cannot choose,
@@ -38,18 +40,15 @@ You will receive:
 7. Skip trivial exchanges (greetings, acknowledgments, clarifying questions
    that led nowhere).
 8. Existing entries are provided so you can evolve memory, not duplicate it.
-   If a new fact or decision supersedes an existing entry, include `replaces`
-   with the old entry ID.
-9. If transcript text cites an event id (for example `[<id>]`), use that
-   ID directly for `replaces` when it is the predecessor.
-10. If the transcript does not include a direct ID, use the provided existing entries
-    to find the most relevant predecessor and set `replaces` accordingly.
-    To determine predecessor history, list entries for the same subject in
-    chronological order and pick the most recent matching prior state.
-11. Do not re-extract information that already exists in the log unless it has
+   To reason about history, list entries for the same subject in chronological order.
+9. Do not re-extract information that already exists in the log unless it has
    changed.
-12. If a task is now done, emit a new `task` entry with `status: "done"` and
-    `replaces` pointing to the previous open task entry.
+10. If a task is now done, emit a new `task` entry with `status: "done"` and
+    describe closure details in `detail` when useful.
+11. In historical import mode, apply a stricter filter: keep only durable items
+    likely to help in future sessions. Skip one-off lookups (menus, business
+    addresses/hours, trivia/song identification, generic explainers) unless they
+    reveal a stable user preference, constraint, or recurring pattern.
 
 ## Output format
 
@@ -62,7 +61,7 @@ If only a day is known, use noon for that date.
 {"type":"decision","content":"...","detail":"...","subject":"..."}
 {"type":"fact","content":"...","subject":"..."}
 {"type":"task","content":"...","status":"open","subject":"..."}
-{"type":"task","content":"...","status":"done","subject":"...","replaces":"<open-task-id>"}
+{"type":"task","content":"...","status":"done","subject":"...","detail":"..."}
 {"type":"fact","content":"...","subject":"unknown"}
 {"type":"fact","content":"...","subject":"...","timestamp":"2026-02-12T12:00:00.000Z"}
 {"type":"handoff","content":"...","detail":"..."}

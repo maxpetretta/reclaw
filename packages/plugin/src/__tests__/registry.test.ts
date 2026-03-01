@@ -61,6 +61,16 @@ describe("registry", () => {
     });
   });
 
+  test("ensureSubject infers person type for person-like slugs when no hint is provided", async () => {
+    await ensureSubject(registryPath, "max-petretta");
+
+    const registry = await readRegistry(registryPath);
+    expect(registry["max-petretta"]).toEqual({
+      display: "Max Petretta",
+      type: "person",
+    });
+  });
+
   test("ensureSubject rejects invalid slug format", async () => {
     await expect(ensureSubject(registryPath, "Auth_Migration")).rejects.toThrow("invalid slug");
   });
@@ -85,6 +95,24 @@ describe("registry", () => {
 
     const registry = await readRegistry(registryPath);
     expect(registry["auth-migration"]?.type).toBe("project");
+  });
+
+  test("upsertSubjectFromExtraction infers person type for new subject when hint is missing", async () => {
+    await upsertSubjectFromExtraction(registryPath, "max-petretta");
+
+    const registry = await readRegistry(registryPath);
+    expect(registry["max-petretta"]?.type).toBe("person");
+  });
+
+  test("upsertSubjectFromExtraction can correct existing type using person inference", async () => {
+    await writeRegistry(registryPath, {
+      "max-petretta": { display: "Max Petretta", type: "topic" },
+    });
+
+    await upsertSubjectFromExtraction(registryPath, "max-petretta");
+
+    const registry = await readRegistry(registryPath);
+    expect(registry["max-petretta"]?.type).toBe("person");
   });
 
   test("renameSubject updates registry and log", async () => {

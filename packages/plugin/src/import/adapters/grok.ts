@@ -167,6 +167,23 @@ function readMessageArray(raw: Record<string, unknown>): unknown[] {
     return direct;
   }
 
+  // Grok backend export shape:
+  // {
+  //   conversation: { ...metadata },
+  //   responses: [{ response: { ...message } }, ...]
+  // }
+  if (Array.isArray(raw.responses)) {
+    return raw.responses
+      .map((item) => {
+        if (!isObject(item)) {
+          return item;
+        }
+
+        return isObject(item.response) ? item.response : item;
+      })
+      .filter((item) => isObject(item));
+  }
+
   if (isObject(raw.messagesById)) {
     return Object.values(raw.messagesById);
   }
@@ -218,10 +235,12 @@ function readMessages(raw: Record<string, unknown>, fallbackMs: number): Importe
       createdAt: toIso(
         messageRaw.createdAt ??
           messageRaw.created_at ??
+          messageRaw.create_time ??
           messageRaw.timestamp ??
           messageRaw.time ??
           messageRaw.updatedAt ??
-          messageRaw.updated_at,
+          messageRaw.updated_at ??
+          messageRaw.modify_time,
         fallbackMs,
       ),
     });
@@ -236,29 +255,37 @@ function parseConversation(raw: unknown, index: number): ImportedConversation | 
     return null;
   }
 
+  const conversationMeta = isObject(raw.conversation) ? raw.conversation : raw;
+
   const now = Date.now();
   const messages = readMessages(raw, now);
   const firstMessageAt = messages.length > 0 ? Date.parse(messages[0].createdAt) : now;
   const lastMessageAt = messages.length > 0 ? Date.parse(messages[messages.length - 1].createdAt) : firstMessageAt;
 
   const conversationId =
-    readId(raw._id) ??
-    readString(raw.id) ??
-    readString(raw.conversationId) ??
-    readString(raw.uuid) ??
+    readId(conversationMeta._id) ??
+    readString(conversationMeta.id) ??
+    readString(conversationMeta.conversationId) ??
+    readString(conversationMeta.uuid) ??
     `grok-${index + 1}`;
 
-  const title = readString(raw.title) ?? readString(raw.name) ?? `Grok import ${index + 1}`;
+  const title = readString(conversationMeta.title) ?? readString(conversationMeta.name) ?? `Grok import ${index + 1}`;
   const createdAt = toIso(
-    raw.createdAt ?? raw.created_at ?? raw.createTime ?? raw.startTime ?? firstMessageAt,
+    conversationMeta.createdAt ??
+      conversationMeta.created_at ??
+      conversationMeta.createTime ??
+      conversationMeta.create_time ??
+      conversationMeta.startTime ??
+      firstMessageAt,
     firstMessageAt,
   );
   const updatedAt = toIso(
-    raw.updatedAt ??
-      raw.updated_at ??
-      raw.updateTime ??
-      raw.lastUpdatedAt ??
-      raw.last_message_at ??
+    conversationMeta.updatedAt ??
+      conversationMeta.updated_at ??
+      conversationMeta.updateTime ??
+      conversationMeta.modify_time ??
+      conversationMeta.lastUpdatedAt ??
+      conversationMeta.last_message_at ??
       lastMessageAt,
     lastMessageAt,
   );

@@ -2,7 +2,6 @@ import { join } from "node:path";
 import type { AnyAgentTool, OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { queryLog } from "../log/query";
-import { getLatestVersionId } from "../log/resolve";
 import { findTranscriptFile, readTranscript } from "../lib/transcript";
 import { incrementEventUsage } from "../state";
 
@@ -121,15 +120,14 @@ export function createWrappedMemoryGetTool(
       }
 
       if (ID_PATTERN.test(path)) {
-        const entries = await resolvedDeps.queryLog(logPath, { includeReplaced: true });
+        const entries = await resolvedDeps.queryLog(logPath, {});
         const entry = entries.find((candidate) => candidate.id === path);
 
         if (!entry) {
           return textResult(`Entry not found: ${path}`);
         }
 
-        const canonicalId = getLatestVersionId(entries, path);
-        await resolvedDeps.incrementEventUsage(statePath, [canonicalId], "memory_get");
+        await resolvedDeps.incrementEventUsage(statePath, [path], "memory_get");
 
         return textResult(JSON.stringify(entry, null, 2), { entry });
       }

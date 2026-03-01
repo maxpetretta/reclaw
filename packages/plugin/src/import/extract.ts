@@ -8,8 +8,7 @@ import {
   scheduleSubagentCronJob,
   waitForCronSummary,
 } from "../lib/openclaw-cron";
-import { queryExtractionContext, queryLog, searchLog } from "../log/query";
-import { getLatestVersionId } from "../log/resolve";
+import { queryExtractionContext } from "../log/query";
 import {
   finalizeEntry,
   GENERAL_SUBJECT_SLUG,
@@ -30,6 +29,11 @@ const HISTORICAL_SYSTEM_PREFIX = [
   "Historical import mode:",
   "- The transcript is archived historical data imported from another platform.",
   "- Extract durable memory exactly as written, without assuming current status.",
+  "- Apply a strict durability filter: only keep details likely to matter in future sessions.",
+  "- Prefer long-lived user context: projects, workflows, preferences, health patterns, and unresolved questions.",
+  "- Skip one-off lookup results unless they reveal a durable pattern or preference.",
+  "- Examples to skip: menus, store addresses/hours, trivia/song ID requests, generic explainers, and transient shopping lookups.",
+  "- Do not emit handoff entries in historical import mode.",
   "- You may include an optional `timestamp` field per entry for historical placement.",
   "- If only a date is known, use that date at noon (12:00:00).",
   "- If omitted, timestamp defaults to the conversation's historical updatedAt time.",
@@ -38,70 +42,6 @@ const IMPORT_CRON_SESSION_NAME = "zettelclaw-import-extract";
 const IMPORT_CRON_TIMEOUT_SECONDS = 1_800;
 const IMPORT_CRON_WAIT_TIMEOUT_MS = 1_900_000;
 const EXTRACTION_CONTEXT_MAX_PER_SUBJECT = 50;
-const EVENT_ID_LENGTH = 12;
-const TRANSCRIPT_EVENT_ID_PATTERN = /\[([A-Za-z0-9_-]{12})\]/gu;
-const MAX_REPLACEMENT_KEYWORDS = 6;
-const STOP_WORDS = new Set([
-  "about",
-  "after",
-  "again",
-  "also",
-  "an",
-  "and",
-  "are",
-  "because",
-  "before",
-  "being",
-  "between",
-  "but",
-  "can",
-  "could",
-  "did",
-  "does",
-  "done",
-  "for",
-  "from",
-  "had",
-  "has",
-  "have",
-  "here",
-  "how",
-  "into",
-  "its",
-  "just",
-  "more",
-  "need",
-  "new",
-  "not",
-  "now",
-  "our",
-  "out",
-  "over",
-  "same",
-  "should",
-  "that",
-  "the",
-  "their",
-  "them",
-  "then",
-  "there",
-  "these",
-  "they",
-  "this",
-  "those",
-  "was",
-  "were",
-  "what",
-  "when",
-  "where",
-  "which",
-  "while",
-  "will",
-  "with",
-  "would",
-  "you",
-  "your",
-]);
 
 let extractionPromptCache: string | null = null;
 
@@ -200,6 +140,17 @@ function formatExistingEntries(entries: LogEntry[] | undefined): string {
     .join("\n");
 }
 
+function formatConversationMetadata(conversation: ImportedConversation): string {
+  return [
+    `platform: ${conversation.platform}`,
+    `conversationId: ${conversation.conversationId}`,
+    `title: ${conversation.title}`,
+    `sourcePath: ${conversation.sourcePath ?? "n/a"}`,
+    `createdAt: ${conversation.createdAt}`,
+    `updatedAt: ${conversation.updatedAt}`,
+  ].join("\n");
+}
+
 function formatTranscript(conversation: ImportedConversation): string {
   return conversation.messages
     .map((message) => `${message.role}: ${message.content}`)
@@ -287,10 +238,12 @@ function parseLlmOutput(rawOutput: string): {
   parsedEntries: ParsedLlmEntry[];
   nonEmptyLines: number;
   invalidLineCount: number;
+  processableLines: number;
 } {
   const parsedEntries: ParsedLlmEntry[] = [];
   let nonEmptyLines = 0;
   let invalidLineCount = 0;
+  let processableLines = 0;
 
   for (const line of rawOutput.split("\n")) {
     const trimmed = line.trim();
@@ -304,6 +257,7 @@ function parseLlmOutput(rawOutput: string): {
       parsed = JSON.parse(trimmed);
     } catch {
       invalidLineCount += 1;
+      processableLines += 1;
       continue;
     }
 
@@ -313,8 +267,16 @@ function parseLlmOutput(rawOutput: string): {
     const validated = validateLlmOutput(normalizedCandidate);
     if (!validated.ok) {
       invalidLineCount += 1;
+      processableLines += 1;
       continue;
     }
+
+    // Imports should not create handoff entries; they are session-bound runtime state.
+    if (validated.entry.type === "handoff") {
+      continue;
+    }
+
+    processableLines += 1;
 
     parsedEntries.push({
       entry: validated.entry,
@@ -327,15 +289,20 @@ function parseLlmOutput(rawOutput: string): {
     parsedEntries,
     nonEmptyLines,
     invalidLineCount,
+    processableLines,
   };
 }
 
 function buildExtractionUserPrompt(opts: {
+  conversation: ImportedConversation;
   transcript: string;
   subjects: SubjectRegistry;
   existingEntries: LogEntry[];
 }): string {
   return [
+    "## Conversation Metadata",
+    formatConversationMetadata(opts.conversation),
+    "",
     "## Known subjects",
     formatSubjects(opts.subjects),
     "",
@@ -414,262 +381,6 @@ async function loadExtractionPrompt(): Promise<string> {
   return extractionPromptCache;
 }
 
-function normalizeComparableText(value: string): string {
-  return value
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/gu, " ")
-    .replaceAll(/\s+/gu, " ")
-    .trim();
-}
-
-function tokenizeComparableText(value: string): string[] {
-  return normalizeComparableText(value)
-    .split(" ")
-    .filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
-}
-
-function entryComparableText(
-  entry: Pick<LogEntry, "content" | "detail"> | Pick<Omit<LogEntry, "id" | "timestamp" | "session">, "content" | "detail">,
-): string {
-  return `${entry.content} ${entry.detail ?? ""}`.trim();
-}
-
-function tokenOverlapRatio(left: string[], right: string[]): number {
-  if (left.length === 0 || right.length === 0) {
-    return 0;
-  }
-
-  const leftSet = new Set(left);
-  const rightSet = new Set(right);
-  let intersection = 0;
-  for (const token of leftSet) {
-    if (rightSet.has(token)) {
-      intersection += 1;
-    }
-  }
-
-  const denominator = Math.min(leftSet.size, rightSet.size);
-  return denominator > 0 ? intersection / denominator : 0;
-}
-
-function dedupeEntriesById(entries: LogEntry[]): LogEntry[] {
-  const seen = new Set<string>();
-  const deduped: LogEntry[] = [];
-
-  for (const entry of entries) {
-    if (seen.has(entry.id)) {
-      continue;
-    }
-
-    seen.add(entry.id);
-    deduped.push(entry);
-  }
-
-  return deduped;
-}
-
-function extractReferencedEventIds(transcript: string): string[] {
-  if (!transcript.trim()) {
-    return [];
-  }
-
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  const tryPush = (candidate: string): void => {
-    if (candidate.length !== EVENT_ID_LENGTH || seen.has(candidate)) {
-      return;
-    }
-    seen.add(candidate);
-    ids.push(candidate);
-  };
-
-  const bracketMatches = transcript.matchAll(TRANSCRIPT_EVENT_ID_PATTERN);
-  for (const match of bracketMatches) {
-    if (match[1]) {
-      tryPush(match[1]);
-    }
-  }
-
-  return ids;
-}
-
-function buildReplacementKeywordQueries(entry: Omit<LogEntry, "id" | "timestamp" | "session">): string[] {
-  const keywords = tokenizeComparableText(entryComparableText(entry));
-  if (entry.subject) {
-    keywords.unshift(...tokenizeComparableText(entry.subject));
-  }
-
-  const deduped: string[] = [];
-  const seen = new Set<string>();
-  for (const token of keywords) {
-    if (seen.has(token)) {
-      continue;
-    }
-    seen.add(token);
-    deduped.push(token);
-    if (deduped.length >= MAX_REPLACEMENT_KEYWORDS) {
-      break;
-    }
-  }
-
-  return deduped;
-}
-
-function isCompatibleReplacement(
-  entry: Omit<LogEntry, "id" | "timestamp" | "session">,
-  candidate: LogEntry,
-): boolean {
-  if (entry.type !== candidate.type) {
-    return false;
-  }
-
-  if (entry.subject && candidate.subject && entry.subject !== candidate.subject) {
-    return false;
-  }
-
-  if (entry.type !== "task") {
-    return true;
-  }
-
-  if (entry.status === "done") {
-    return candidate.status === "open";
-  }
-
-  return candidate.status === "open";
-}
-
-function computeReplacementScore(
-  entry: Omit<LogEntry, "id" | "timestamp" | "session">,
-  candidate: LogEntry,
-): number {
-  if (!isCompatibleReplacement(entry, candidate)) {
-    return 0;
-  }
-
-  const entryText = entryComparableText(entry);
-  const candidateText = entryComparableText(candidate);
-  const normalizedEntryContent = normalizeComparableText(entry.content);
-  const normalizedCandidateContent = normalizeComparableText(candidate.content);
-  const normalizedEntryText = normalizeComparableText(entryText);
-  const normalizedCandidateText = normalizeComparableText(candidateText);
-  const contentOverlap = tokenOverlapRatio(
-    tokenizeComparableText(entry.content),
-    tokenizeComparableText(candidate.content),
-  );
-  const overlap = tokenOverlapRatio(
-    tokenizeComparableText(entryText),
-    tokenizeComparableText(candidateText),
-  );
-
-  let score = overlap * 6 + contentOverlap * 6;
-  if (normalizedEntryContent && normalizedEntryContent === normalizedCandidateContent) {
-    score += 6;
-  }
-
-  if (normalizedEntryText && normalizedEntryText === normalizedCandidateText) {
-    score += 4;
-  }
-
-  if (entry.subject && candidate.subject === entry.subject) {
-    score += 2;
-  }
-
-  if (entry.type === "task" && entry.status === "done" && candidate.type === "task" && candidate.status === "open") {
-    score += 2;
-  }
-
-  return score;
-}
-
-async function collectReplacementCandidates(params: {
-  entry: Omit<LogEntry, "id" | "timestamp" | "session">;
-  logPath: string;
-}): Promise<LogEntry[]> {
-  const filter = {
-    type: params.entry.type,
-    ...(params.entry.subject ? { subject: params.entry.subject } : {}),
-    includeReplaced: false as const,
-  };
-
-  const [typedCandidates, keywordGroups] = await Promise.all([
-    queryLog(params.logPath, filter),
-    Promise.all(
-      buildReplacementKeywordQueries(params.entry).map((keyword) =>
-        searchLog(params.logPath, keyword, filter),
-      ),
-    ),
-  ]);
-
-  return dedupeEntriesById([
-    ...typedCandidates,
-    ...keywordGroups.flat(),
-  ]);
-}
-
-async function resolveReplacementForEntry(params: {
-  entry: Omit<LogEntry, "id" | "timestamp" | "session">;
-  transcriptEventIds: string[];
-  logPath: string;
-}): Promise<string | undefined> {
-  if (params.entry.replaces || params.entry.type === "handoff") {
-    return params.entry.replaces;
-  }
-
-  const [allEntries, candidates] = await Promise.all([
-    queryLog(params.logPath, { includeReplaced: true }),
-    collectReplacementCandidates({
-      entry: params.entry,
-      logPath: params.logPath,
-    }),
-  ]);
-
-  if (allEntries.length === 0 || candidates.length === 0) {
-    return undefined;
-  }
-
-  const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  for (const transcriptId of params.transcriptEventIds) {
-    const latestId = getLatestVersionId(allEntries, transcriptId);
-    const matched = candidatesById.get(latestId);
-    if (matched && isCompatibleReplacement(params.entry, matched)) {
-      return matched.id;
-    }
-  }
-
-  let bestCandidate: LogEntry | undefined;
-  let bestScore = 0;
-
-  for (const candidate of candidates) {
-    const score = computeReplacementScore(params.entry, candidate);
-    if (score <= bestScore) {
-      continue;
-    }
-
-    bestScore = score;
-    bestCandidate = candidate;
-  }
-
-  if (!bestCandidate) {
-    return undefined;
-  }
-
-  const requiresStrictSubjectMatch = Boolean(params.entry.subject);
-  const acceptThreshold = params.entry.type === "task" && params.entry.status === "done" ? 7 : 8;
-  if (bestScore < acceptThreshold) {
-    return undefined;
-  }
-
-  if (
-    requiresStrictSubjectMatch &&
-    bestCandidate.subject &&
-    bestCandidate.subject !== params.entry.subject
-  ) {
-    return undefined;
-  }
-
-  return bestCandidate.id;
-}
-
 export async function extractImportedConversation(
   options: ImportExtractionOptions,
   deps: Partial<ImportExtractionDeps> = {},
@@ -689,6 +400,7 @@ export async function extractImportedConversation(
 
   const systemPrompt = `${HISTORICAL_SYSTEM_PREFIX}\n\n${prompt.trim()}`;
   const userPrompt = buildExtractionUserPrompt({
+    conversation: options.conversation,
     transcript,
     subjects,
     existingEntries,
@@ -703,7 +415,7 @@ export async function extractImportedConversation(
   });
 
   let parsed = parseLlmOutput(firstOutput);
-  if (parsed.nonEmptyLines > 0 && parsed.parsedEntries.length === 0) {
+  if (parsed.processableLines > 0 && parsed.parsedEntries.length === 0) {
     const repairedOutput = await runtimeDeps.callModel({
       model: options.model,
       systemPrompt,
@@ -714,32 +426,15 @@ export async function extractImportedConversation(
     parsed = parseLlmOutput(repairedOutput);
   }
 
-  if (parsed.nonEmptyLines > 0 && parsed.parsedEntries.length === 0) {
+  if (parsed.processableLines > 0 && parsed.parsedEntries.length === 0) {
     throw new Error("extraction output did not contain any valid JSONL entries");
   }
 
   const historicalTimestamp = resolveHistoricalTimestamp(options.conversation);
-  const transcriptEventIds = extractReferencedEventIds(transcript);
   const entries: ExtractedImportedEntry[] = [];
 
   for (const parsedEntry of parsed.parsedEntries) {
-    const resolvedReplaces =
-      parsedEntry.entry.replaces ??
-      (await resolveReplacementForEntry({
-        entry: parsedEntry.entry,
-        transcriptEventIds,
-        logPath: options.logPath,
-      }));
-
-    const finalizedInput =
-      resolvedReplaces && !parsedEntry.entry.replaces
-        ? {
-            ...parsedEntry.entry,
-            replaces: resolvedReplaces,
-          }
-        : parsedEntry.entry;
-
-    const finalized = finalizeEntry(finalizedInput, {
+    const finalized = finalizeEntry(parsedEntry.entry, {
       sessionId: options.sessionId,
       timestamp: parsedEntry.timestampHint ?? historicalTimestamp,
     });

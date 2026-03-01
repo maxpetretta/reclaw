@@ -132,7 +132,26 @@ describe("import extraction", () => {
     expect(registry.max?.type).toBe("person");
   });
 
-  test("resolves replaces from transcript-cited event id", async () => {
+  test("infers person subject type for person-like slug when subjectType is omitted", async () => {
+    await extractImportedConversation(
+      {
+        conversation: makeConversation("2024-01-02T12:34:56.000Z"),
+        sessionId: "reclaw:chatgpt:conv-1",
+        subjectsPath,
+        logPath,
+        model: "anthropic/claude-haiku-4-5",
+      },
+      {
+        callModel: async () =>
+          '{"type":"fact","content":"Max uses Termius on his phone","subject":"max-petretta"}',
+      },
+    );
+
+    const registry = await readRegistry(subjectsPath);
+    expect(registry["max-petretta"]?.type).toBe("person");
+  });
+
+  test("ignores transcript-cited event ids for linkage fields", async () => {
     await writeFile(
       logPath,
       `${JSON.stringify({
@@ -167,7 +186,7 @@ describe("import extraction", () => {
     );
 
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.entry.replaces).toBe("abc123def456");
+    expect(entries[0]?.entry.id).toHaveLength(12);
   });
 
   test("retries once when first output is non-empty and invalid", async () => {
@@ -229,5 +248,99 @@ describe("import extraction", () => {
         },
       ),
     ).rejects.toThrow("did not contain any valid JSONL entries");
+  });
+
+  test("passes conversation metadata (including source path) to extraction prompt", async () => {
+    const conversation = makeConversation("2024-01-02T12:34:56.000Z");
+    conversation.platform = "openclaw";
+    conversation.title = "OpenClaw memory: 2026-02-12.md";
+    conversation.sourcePath = "2026-02-12.md";
+
+    let capturedUserPrompt = "";
+    await extractImportedConversation(
+      {
+        conversation,
+        sessionId: "reclaw:openclaw:conv-1",
+        subjectsPath,
+        logPath,
+        model: "anthropic/claude-haiku-4-5",
+      },
+      {
+        callModel: async (params) => {
+          capturedUserPrompt = params.userPrompt;
+          return '{"type":"fact","content":"Imported with metadata","subject":"imports"}';
+        },
+      },
+    );
+
+    expect(capturedUserPrompt).toContain("## Conversation Metadata");
+    expect(capturedUserPrompt).toContain("platform: openclaw");
+    expect(capturedUserPrompt).toContain("title: OpenClaw memory: 2026-02-12.md");
+    expect(capturedUserPrompt).toContain("sourcePath: 2026-02-12.md");
+    expect(capturedUserPrompt).toContain("updatedAt: 2024-01-02T12:34:56.000Z");
+  });
+
+  test("historical import system prompt includes strict durability filter guidance", async () => {
+    let capturedSystemPrompt = "";
+    await extractImportedConversation(
+      {
+        conversation: makeConversation("2024-01-02T12:34:56.000Z"),
+        sessionId: "reclaw:chatgpt:conv-1",
+        subjectsPath,
+        logPath,
+        model: "anthropic/claude-haiku-4-5",
+      },
+      {
+        callModel: async (params) => {
+          capturedSystemPrompt = params.systemPrompt;
+          return "";
+        },
+      },
+    );
+
+    expect(capturedSystemPrompt).toContain("Apply a strict durability filter");
+    expect(capturedSystemPrompt).toContain("Skip one-off lookup results");
+    expect(capturedSystemPrompt).toContain("menus, store addresses/hours");
+  });
+
+  test("drops handoff entries emitted by the extraction model", async () => {
+    const entries = await extractImportedConversation(
+      {
+        conversation: makeConversation("2024-01-02T12:34:56.000Z"),
+        sessionId: "reclaw:chatgpt:conv-1",
+        subjectsPath,
+        logPath,
+        model: "anthropic/claude-haiku-4-5",
+      },
+      {
+        callModel: async () =>
+          [
+            '{"type":"handoff","content":"Import session complete","detail":"Should be ignored"}',
+            '{"type":"fact","content":"Durable imported fact","subject":"imports"}',
+          ].join("\n"),
+      },
+    );
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.entry.type).toBe("fact");
+    expect(entries[0]?.entry.content).toContain("Durable imported fact");
+  });
+
+  test("treats handoff-only output as empty import output", async () => {
+    const entries = await extractImportedConversation(
+      {
+        conversation: makeConversation("2024-01-02T12:34:56.000Z"),
+        sessionId: "reclaw:chatgpt:conv-1",
+        subjectsPath,
+        logPath,
+        model: "anthropic/claude-haiku-4-5",
+      },
+      {
+        callModel: async () =>
+          '{"type":"handoff","content":"Import handoff only","detail":"No durable events"}',
+      },
+    );
+
+    expect(entries).toEqual([]);
   });
 });

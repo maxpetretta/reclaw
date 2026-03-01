@@ -5,7 +5,6 @@ import type { PluginConfig } from "../config";
 import { callGatewayChatCompletion } from "../lib/chat-completions";
 import { resolveGatewayBaseUrl } from "../lib/gateway";
 import { replaceManagedBlock } from "../memory/managed-block";
-import { filterReplaced } from "../log/resolve";
 import { readLog, type LogEntry } from "../log/schema";
 import { readState, type EventUsageState } from "../state";
 
@@ -412,8 +411,7 @@ export async function generateBriefing(
   };
 
   const prompt = await loadPrompt();
-  const allEntries = await readLog(opts.logPath);
-  const entries = filterReplaced(allEntries);
+  const entries = await readLog(opts.logPath);
   const state = await readState(join(opts.config.logDir, "state.json"));
   const nowMs = typeof opts.now === "number" && Number.isFinite(opts.now) ? opts.now : Date.now();
   const buckets = buildBriefingBuckets(entries, opts.config.briefing, nowMs, state.eventUsage);
