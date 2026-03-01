@@ -21,11 +21,11 @@ Legacy memory behaviors are disabled by init:
 ## 2. Design Constraints
 
 1. Log writes are append-only; corrections use `replaces` and never mutate prior entries.
-2. Event identity fields (`id`, `timestamp`, `session`) are hook-injected, not model-authored.
+2. Event identity fields (`id`, `session`) are always system-injected; live extraction `timestamp` is hook-injected, while import timestamps are normalized by the import pipeline.
 3. Extraction and snapshot generation are separate: extraction captures, snapshot generation summarizes.
 4. The hard extraction filter is mandatory: only user-specific information is stored.
 5. Query surfaces must prefer current entries by default (`includeReplaced=false`) and expose full history when requested.
-6. Subject slugs are registry-backed (`kebab-case`) with constrained type enum and `topic` fallback.
+6. Subject slugs are registry-backed (`kebab-case`) with constrained type enum and `topic` fallback; non-handoff entries require `subject` and missing values normalize to `unknown`.
 7. Main-session scope only for extraction (`agent:*:main`, `agent:*`, `dm:*`), with skip prefixes for non-interactive traffic.
 8. Managed-block writes are isolated: snapshot and handoff writers only edit their own marker regions.
 
@@ -43,7 +43,7 @@ Legacy memory behaviors are disabled by init:
 
 `subjects.json` is a registry of known subject slugs. The extraction agent reads it before writing to ensure consistent slugs across sessions.
 
-`state.json` is a record of extraction/import bookkeeping, including session extraction status, failed retries, imported-conversation dedupe metadata, and per-event usage counters used by snapshot generation.
+`state.json` is a record of extraction/import bookkeeping, including session extraction status, failed retries, imported-conversation dedupe metadata, async import job state, and per-event usage counters used by snapshot generation.
 
 ```json
 {
@@ -65,7 +65,8 @@ Legacy memory behaviors are disabled by init:
       "citationCount": 2,
       "lastAccessAt": "2026-03-01T18:22:11.000Z"
     }
-  }
+  },
+  "importJobs": {}
 }
 ```
 
@@ -84,7 +85,7 @@ Legacy memory behaviors are disabled by init:
 
 **Slug format:** Lowercase kebab-case. `auth-migration`, not `Auth_Migration` or `authMigration`.
 
-**Creating subjects:** The extraction agent outputs entries with `subject` values. The extraction hook reads the registry before writing. If the LLM output references a slug not in the registry, the hook adds it to `subjects.json` with `display` (Title Case of slug) and `type` inferred from context (default `topic`). Subjects can also be created manually via CLI:
+**Creating subjects:** The extraction agent outputs entries with `subject` values. For non-handoff entries, `subject` is required; if omitted, the hook fills `unknown`. The extraction hook reads the registry before writing. If the LLM output references a slug not in the registry, the hook adds it to `subjects.json` with `display` (Title Case of slug) and `type` inferred from context (default `topic`). Subjects can also be created manually via CLI:
 
 ```bash
 openclaw zettelclaw subjects add auth-migration
@@ -126,15 +127,17 @@ Corrections use the `replaces` field — a new entry points to the old one it re
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `id` | string | yes | nanoid, 12 characters. **Generated programmatically by the extraction hook, not by the LLM.** |
-| `timestamp` | string | yes | ISO 8601. **Injected by the extraction hook** at extraction time. The LLM does not produce timestamps. |
+| `timestamp` | string | yes | ISO 8601. Live extraction injects current time. Import writes use historical conversation `updatedAt` at append time (import extraction may parse optional timestamp hints, but persisted import entries are normalized by import run). |
 | `type` | string | yes | One of: `decision`, `fact`, `task`, `question`, `handoff`. |
 | `content` | string | yes | The actual information. One sentence to a short paragraph. Plain text. |
 | `session` | string | yes | OpenClaw `sessionId` (maps to `<sessionId>.jsonl` transcript file for provenance). **Injected by the extraction hook** from the event context. |
 | `detail` | string | no | More information when content isn't enough. On a decision: why. On a fact: background. On a handoff: what happened. On a task: constraints. On a question: what prompted it. |
-| `subject` | string | no | Slug from `subjects.json`. The specific thing this entry concerns — a project, person, system, tool. Must match an existing slug or be added to the registry during extraction. |
+| `subject` | string | yes* | Slug from `subjects.json`. Required for `task`/`fact`/`decision`/`question`. `handoff` may omit. Missing non-handoff subjects are normalized to `unknown`. |
 | `replaces` | string | no | ID of entry this replaces. The old entry is skipped by the resolver. |
 
 `source` is intentionally omitted. The extraction agent writes all entries from session transcripts. Even when the human says "remember this," the agent extracts and writes it. The session ID provides provenance — if you need to know where an entry came from, look up the session. The transcript file lives at `~/.openclaw/agents/<agentId>/sessions/<sessionId>.jsonl`.
+
+`subjects` arrays are intentionally omitted. Each entry has a single canonical `subject` slug.
 
 #### Type-specific fields
 
@@ -211,6 +214,9 @@ rg '"type":"decision"' log.jsonl
 
 # Everything about a subject
 rg '"subject":"auth-migration"' log.jsonl
+
+# Subject history in chronological order (for lineage/replaces reasoning)
+rg '"subject":"auth-migration"' log.jsonl | jq -s 'sort_by(.timestamp)[]'
 
 # All open tasks
 rg '"status":"open"' log.jsonl
@@ -308,7 +314,8 @@ The extraction hook maintains a state file at `~/.openclaw/zettelclaw/state.json
       "citationCount": 2,
       "lastAccessAt": "2026-03-01T18:22:11.000Z"
     }
-  }
+  },
+  "importJobs": {}
 }
 ```
 
@@ -359,7 +366,8 @@ You will receive:
    `subjectType` with one of: `project`, `person`, `system`, `topic`.
    If unsure, use `topic`. If an existing subject's type should be corrected,
    include `subjectType` on the entry and the hook may update the registry.
-   Don't force a subject on entries that aren't clearly about a specific thing.
+   Subject is required for all non-handoff entries. If you truly cannot choose,
+   use `unknown`.
 6. Always produce exactly one handoff entry at the end.
 7. Skip trivial exchanges (greetings, acknowledgments, clarifying questions
    that led nowhere).
@@ -370,6 +378,8 @@ You will receive:
    ID directly for `replaces` when it is the predecessor.
 10. If the transcript does not include a direct ID, use the provided existing entries
     to find the most relevant predecessor and set `replaces` accordingly.
+    To determine predecessor history, list entries for the same subject in
+    chronological order and pick the most recent matching prior state.
 11. Do not re-extract information that already exists in the log unless it has
    changed.
 12. If a task is now done, emit a new `task` entry with `status: "done"` and
@@ -378,14 +388,20 @@ You will receive:
 ## Output format
 
 One JSON object per line. No markdown fences, no commentary.
-**Do not include `id`, `timestamp`, or `session` fields** — these are injected
-programmatically by the extraction hook after your output.
+Do not include `id` or `session` fields — these are injected programmatically.
+For standard live extraction, do not include `timestamp`.
+For historical import mode, you may include an optional `timestamp` field.
+If only a day is known, use noon for that date.
 
 {"type":"decision","content":"...","detail":"...","subject":"..."}
 {"type":"fact","content":"...","subject":"..."}
 {"type":"task","content":"...","status":"open","subject":"..."}
 {"type":"task","content":"...","status":"done","subject":"...","replaces":"<open-task-id>"}
+{"type":"fact","content":"...","subject":"unknown"}
+{"type":"fact","content":"...","subject":"...","timestamp":"2026-02-12T12:00:00.000Z"}
 {"type":"handoff","content":"...","detail":"..."}
+
+When introducing a new subject slug, add `"subjectType":"project|person|system|topic"` on that entry.
 ```
 
 ### 4.2.1 Post-processing by extraction hook
@@ -393,16 +409,14 @@ programmatically by the extraction hook after your output.
 The extraction hook receives the LLM's JSONL output and for each line:
 
 1. Parses the JSON object.
-2. Validates `type` is one of the five allowed types.
-3. Generates a 12-character nanoid for `id`.
-4. Sets `timestamp` to the current ISO 8601 time.
-5. Sets `session` to the OpenClaw `sessionId` from the hook event context.
-6. If `subject` is present:
-   - If missing from `subjects.json`, adds it with `display` (Title Case) and `type` defaulting to `topic`.
-   - If it already exists and the entry includes a valid `subjectType`, updates the existing registry type.
-7. Resolves `replaces` when omitted by the model:
+2. Reads optional `subjectType` hint (`subjectType`/`subject_type`) and strips it from the candidate payload.
+3. For non-handoff entries, if `subject` is missing/blank, sets `subject: "unknown"`.
+4. Validates schema (`type`, required fields, task status, allowed keys).
+5. Resolves `replaces` when omitted by the model:
    - First checks transcript references in strict `[<12-char-id>]` form.
    - Otherwise runs targeted log candidate search (type/subject-compatible + keyword-focused) and links only when confidence is high.
+6. Finalizes the entry (injects `id`, current `timestamp`, and `session` from hook context).
+7. Upserts `subject` in `subjects.json` (auto-create with `topic` fallback; valid `subjectType` can update existing type).
 8. Appends the complete entry to `log.jsonl`.
 
 If model output is non-empty but produces zero valid JSONL entries after validation, extraction is marked failed and retried per retry policy (instead of being marked extracted).
@@ -411,7 +425,22 @@ Before step 1, the hook prepares extraction context and feeds it to the model:
 - Detects transcript-mentioned subjects by matching known slugs from `subjects.json`.
 - Reads `log.jsonl`, resolves replacements (`filterReplaced`), and selects current entries for those subjects.
 - Adds all open tasks and unresolved questions regardless of subject.
-- Sends these as `## Existing Entries` so the model can reference IDs in `replaces`.
+- Sends these as `## Existing Entries` (sorted oldest-to-newest by timestamp) so the model can reference IDs in `replaces` and reason about subject lineage chronologically.
+
+### 4.2.2 Historical import extraction mode
+
+The import pipeline reuses the extraction prompt with an additional historical-mode system prefix:
+- transcript is archived historical data
+- optional per-entry `timestamp` is allowed
+- date-only timestamps are normalized to noon (`YYYY-MM-DDT12:00:00.000Z`)
+- omitted timestamps default to the conversation `updatedAt`
+
+Import extraction uses the same subject fallback (`unknown` for missing non-handoff subjects), `subjectType` hint handling, and `replaces` resolution strategy as live extraction (citation-first, then targeted candidate search).
+
+At import write time, the runner enforces historical import invariants:
+- `session` is normalized to `reclaw:<platform>:<conversationId>`
+- persisted entry `timestamp` is normalized to the conversation `updatedAt`
+- subject slugs are trimmed before registry upsert/appending
 
 ### 4.3 Transcript access
 
@@ -676,7 +705,8 @@ The pre-compaction memory flush (`agents.defaults.compaction.memoryFlush`) is di
 | CLI: log | Plugin-registered command | Pretty-print recent log entries |
 | CLI: search | Plugin-registered command | Search log with filters (type, subject, date range, `--all` for replaced) |
 | CLI: trace | Plugin-registered command | Trace replacement chains, with irregularity flags (broken links, branching, cycles) |
-| CLI: import | Plugin-registered command | Import historical conversations (chatgpt/claude/grok/openclaw), dedupe by state, optional transcript generation, optional source backup/cleanup |
+| CLI: import | Plugin-registered command | Queue async historical import workers by default (chatgpt/claude/grok/openclaw), with state-based dedupe, chronological processing, extraction context + `replaces` linking, subject type upsert, optional transcript generation, and optional source backup/cleanup |
+| CLI: import status/resume | Plugin-registered command | Inspect async import jobs and re-queue eligible jobs from `state.json.importJobs` |
 | CLI: subjects | Plugin-registered command | `add`, `rename`, `list` — manage subject registry (`add` defaults type to `topic`) |
 | CLI: briefing generate | Plugin-registered command | Run snapshot generation immediately and rewrite MEMORY.md generated block (`snapshot generate` alias available) |
 
@@ -876,6 +906,8 @@ By replacing `memory-core`, zettelclaw eliminates:
 
 8c. **Usage counters**: Read an entry via `memory_get` by ID and cite `[<id>]` in a later transcript. Verify `state.json.eventUsage` increments (`memoryGetCount`, `citationCount`) and that usage is attributed to the latest replacement target when the cited/read ID has been replaced.
 
+8d. **Async import jobs**: Start `openclaw zettelclaw import ...` (non-dry-run). Verify a queued job appears in `state.json.importJobs`, trackable via `openclaw zettelclaw import status <jobId>`, and recoverable with `openclaw zettelclaw import resume <jobId>` when needed.
+
 9. **End-to-end continuity**: Work across 3 sessions in one day. Verify each session starts with the previous session's handoff. Start a session the next morning after the nightly cron. Verify MEMORY.md snapshot reflects all three sessions' activity.
 
 10. **Replacement**: Tell the agent a previous fact was wrong and reference the old entry as `[<id>]` in transcript text. Verify the correction enters the log with `replaces` pointing to the original entry (or best matched predecessor when no citation is present). Verify the next snapshot reflects the corrected version. Verify replaced entries are hidden in default search results.
@@ -886,9 +918,9 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 
 | # | Question | Resolution |
 |---|---|---|
-| 1 | nanoid/timestamp generation | LLM outputs entries without `id`, `timestamp`, `session`. Hook injects all three programmatically. |
+| 1 | nanoid/timestamp generation | Live extraction LLM outputs entries without `id`, `timestamp`, `session`; hook injects all three. Import extraction may emit optional `timestamp`, but import writes normalize persisted timestamps to conversation `updatedAt`. |
 | 2 | Subject management | CLI commands `subjects add` and `subjects rename` (rename seds the log). Extraction hook upserts subjects (auto-create + valid type updates). |
-| 3 | Timestamp source | Injected by hook at extraction time. Not LLM-generated. |
+| 3 | Timestamp source | Live extraction timestamps are hook-injected at extraction time. Import pipeline persists historical timestamps normalized to each conversation `updatedAt`. |
 | 4 | Extraction triggers | Plugin hook API provides `session_end`, `before_reset`, `before_compaction`, `after_compaction`, `session_start` — richer than internal hooks. Primary: `session_end` (all session ends). Secondary: `before_reset` (provides `messages[]` inline). Sweep: `gateway_start`. Scope: main sessions only (skip subagents, cron, hooks). |
 | 5 | Transcript access | `before_reset` uses `messages[]` first, then `sessionFile`, then `(agentId, sessionId)` transcript lookup fallback. `session_end` resolves by `sessionId`. `.reset.*` variants are supported. |
 | 6 | Snapshot generation | LLM-powered summarization for the generated MEMORY.md block. |
@@ -901,12 +933,14 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 | 13 | Extraction model | Sonnet (configurable via `extraction.model`). |
 | 14 | Scope filtering | Only main sessions extracted. Skip `cron:`, `sub:`, `hook:` session key prefixes. |
 | 15 | Error handling | Retry extraction once on failure. Mark as permanently failed after second failure. `gateway_start` sweep also retries. |
-| 16 | Migration/import | Includes CLI import tooling (`openclaw zettelclaw import`) for chatgpt/claude/grok/openclaw sources, with state-based dedupe and optional source backup/cleanup for openclaw migration. |
+| 16 | Migration/import | Includes CLI import tooling (`openclaw zettelclaw import`) for chatgpt/claude/grok/openclaw sources, queued async by default via isolated cron workers, with state-based dedupe, chronological processing (oldest to newest), import extraction context (`## Existing Entries` with IDs), deterministic `replaces` fallback linking, subject type upsert from `subjectType` hints, malformed-output repair retry, `import status/resume` job management, and optional source backup/cleanup for openclaw migration. |
 | 17 | Subject type enum | Constrained to `project \| person \| system \| topic`. Default `topic`. Validated on creation with fallback. |
 | 18 | Snapshot pre-filtering | Four buckets (active entries, open items, stale subjects, durable entries) pre-filtered in code before LLM call. `decisionWindow` config removed — decisions are covered by `activeWindow`. LLM handles presentation only. |
-| 19 | Extraction context | Existing log entries (subject-relevant + open items) fed to extraction LLM so it can reference IDs in `replaces` and avoid duplicates. Capped at 50 entries per subject. |
+| 19 | Extraction context | Existing log entries (subject-relevant + open items) fed to extraction LLM so it can reference IDs in `replaces` and avoid duplicates. Capped at 50 entries per subject and rendered chronologically (oldest to newest). |
 | 20 | `replaces` reliability | Deterministic linker resolves missing `replaces` using strict transcript citations (`[<12-char-id>]`) first, then targeted log candidate search + compatibility/confidence checks. |
 | 21 | Long-term recall signals | `state.json.eventUsage` tracks `memoryGetCount` and `citationCount` per event. Usage is attributed to latest replacement target, and nightly snapshot includes top durable entries outside recency window using score `2*citationCount + memoryGetCount`. |
+| 22 | Subject requirement | `subject` is required for non-handoff entries. Missing non-handoff subjects are normalized to `unknown` before validation/write. |
+| 23 | Transcript ID style | Event references in transcripts use bracketed IDs (`[<12-char-id>]`), which extraction treats as high-confidence predecessor links for `replaces`. |
 
 ## Appendix B: Build Order
 
@@ -923,7 +957,7 @@ Recommended implementation sequence. Each phase is independently testable.
 ### Phase 2: Extraction hooks
 - `hooks/extraction.ts` — `session_end`, `before_reset`, `gateway_start` handlers
 - `prompts/extraction.md` — extraction prompt (from spec section 4.2)
-- Post-processing pipeline (parse LLM output → validate → inject id/timestamp/session → upsert subject registry (add/update type) → resolve `replaces` (citation/search) → append to log)
+- Post-processing pipeline (parse LLM output → normalize missing non-handoff subject to `unknown` → validate → resolve `replaces` (citation/search) → inject id/timestamp/session → upsert subject registry (add/update type) → append to log)
 - Dedup via state.json
 - Scope filtering (main sessions only)
 - Error handling (retry once, mark failed)
@@ -947,7 +981,7 @@ Recommended implementation sequence. Each phase is independently testable.
 - **Test:** Run cron manually, verify MEMORY.md generated block reflects snapshot state
 
 ### Phase 6: CLI + init
-- CLI commands: `init`, `uninstall`, `verify`, `log`, `search`, `trace`, `import`, `subjects add/rename/list`, `briefing generate` (`snapshot generate` alias)
+- CLI commands: `init`, `uninstall`, `verify`, `log`, `search`, `trace`, `import`, `import status`, `import resume`, `subjects add/rename/list`, `briefing generate` (`snapshot generate` alias)
 - `init` flow: create log dir, set memory slot, disable flush, register cron, add markers
 - SKILL.md — agent instructions for the memory system
 - **Test:** Full `openclaw plugins install zettelclaw && openclaw zettelclaw init` flow
