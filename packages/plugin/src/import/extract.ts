@@ -32,7 +32,7 @@ const HISTORICAL_SYSTEM_PREFIX = [
   "- Apply a strict durability filter: only keep details likely to matter in future sessions.",
   "- Prefer long-lived user context: projects, workflows, preferences, health patterns, and unresolved questions.",
   "- Skip one-off lookup results unless they reveal a durable pattern or preference.",
-  "- Examples to skip: menus, store addresses/hours, trivia/song ID requests, generic explainers, and transient shopping lookups.",
+  "- Examples to skip: menus, store addresses/hours, trivia/song ID requests, generic explainers, transient shopping lookups, and codebase architecture details (database schemas, contract patterns, dependency lists) discoverable from project source code.",
   "- Do not emit handoff entries in historical import mode.",
   "- You may include an optional `timestamp` field per entry for historical placement.",
   "- If only a date is known, use that date at noon (12:00:00).",

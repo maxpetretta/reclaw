@@ -121,6 +121,7 @@ describe("state", () => {
 
   test("incrementEventUsage tracks counters and last access", async () => {
     await incrementEventUsage(statePath, ["abc123def456"], "memory_get");
+    await incrementEventUsage(statePath, ["abc123def456"], "memory_search");
     await incrementEventUsage(statePath, ["abc123def456"], "citation");
     await incrementEventUsage(statePath, ["abc123def456", "abc123def456"], "citation");
 
@@ -129,6 +130,7 @@ describe("state", () => {
 
     expect(usage).toBeDefined();
     expect(usage?.memoryGetCount).toBe(1);
+    expect(usage?.memorySearchCount).toBe(1);
     expect(usage?.citationCount).toBe(2);
     expect(typeof usage?.lastAccessAt).toBe("string");
   });

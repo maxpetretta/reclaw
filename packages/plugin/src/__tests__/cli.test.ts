@@ -529,6 +529,20 @@ describe("cli init helpers", () => {
     expect(resolved).toBe(resolvePath(join(homedir(), "Desktop/extracts-mini/grok")));
   });
 
+  test("parseInteractiveImportJobs accepts integers from 1 to 10", () => {
+    expect(__cliTestExports.parseInteractiveImportJobs("1")).toBe(1);
+    expect(__cliTestExports.parseInteractiveImportJobs("10")).toBe(10);
+    expect(__cliTestExports.parseInteractiveImportJobs(3)).toBe(3);
+  });
+
+  test("parseInteractiveImportJobs rejects invalid or out-of-range values", () => {
+    expect(__cliTestExports.parseInteractiveImportJobs("0")).toBeUndefined();
+    expect(__cliTestExports.parseInteractiveImportJobs("11")).toBeUndefined();
+    expect(__cliTestExports.parseInteractiveImportJobs("-1")).toBeUndefined();
+    expect(__cliTestExports.parseInteractiveImportJobs("abc")).toBeUndefined();
+    expect(__cliTestExports.parseInteractiveImportJobs("2.5")).toBeUndefined();
+  });
+
   test("resolveImportPathForPlatform accepts grok directory input and resolves JSON export", async () => {
     const grokDir = join(workspaceDir, "grok-export");
     await mkdir(grokDir, { recursive: true });

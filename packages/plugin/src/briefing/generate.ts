@@ -146,7 +146,7 @@ function computeDurableScore(entry: LogEntry, usage: EventUsageState | undefined
     return 0;
   }
 
-  return usage.citationCount * 2 + usage.memoryGetCount;
+  return usage.citationCount * 2 + usage.memoryGetCount + usage.memorySearchCount * 0.25;
 }
 
 function buildDurableEntries(

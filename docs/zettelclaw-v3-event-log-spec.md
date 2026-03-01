@@ -62,6 +62,7 @@ Legacy memory behaviors are disabled by init:
   "eventUsage": {
     "abc123def456": {
       "memoryGetCount": 4,
+      "memorySearchCount": 9,
       "citationCount": 2,
       "lastAccessAt": "2026-03-01T18:22:11.000Z"
     }
@@ -251,7 +252,7 @@ The snapshot generator applies natural decay through its time windows:
 - Open items: open tasks and unanswered questions (no time limit)
 - Stale subjects: old entries about subjects referenced in recent sessions
 - Durable entries: older `decision`/`fact` entries with positive usage score from `state.json.eventUsage`
-  (`score = 2*citationCount + memoryGetCount`, top 10)
+  (`score = 2*citationCount + memoryGetCount + 0.25*memorySearchCount`, top 10)
 
 If an entry isn't recent, isn't pending, isn't durable, and isn't being referenced — it doesn't show up in the snapshot. It's still in the log, still findable by search. That's decay without deletion.
 
@@ -303,6 +304,7 @@ The extraction hook maintains a state file at `~/.openclaw/zettelclaw/state.json
   "eventUsage": {
     "abc123def456": {
       "memoryGetCount": 4,
+      "memorySearchCount": 9,
       "citationCount": 2,
       "lastAccessAt": "2026-03-01T18:22:11.000Z"
     }
@@ -522,7 +524,7 @@ The nightly cron job pre-filters log entries into four buckets, then sends the u
 1. **Active entries**: All entries within `activeWindow` days (default 14). This naturally includes recent decisions.
 2. **Open items**: All `type: "task"` with `status: "open"` + all `type: "question"`. No time limit.
 3. **Stale candidates**: Entries whose subject appears in the active window but whose most recent entry is older than `staleThreshold` days (default 30).
-4. **Durable entries**: Older `decision`/`fact` entries with positive usage score from `state.json.eventUsage`, scored as `2*citationCount + memoryGetCount`, capped to top 10.
+4. **Durable entries**: Older `decision`/`fact` entries with positive usage score from `state.json.eventUsage`, scored as `2*citationCount + memoryGetCount + 0.25*memorySearchCount`, capped to top 10.
 
 These sets are unioned and deduped by ID. Only the resulting entries are sent to the LLM.
 
@@ -812,7 +814,7 @@ Extends the builtin schema with optional structured filters:
 4. If `query` is provided and builtin `memory_search` is available, also run builtin semantic search over indexed markdown content (e.g., `MEMORY.md`).
 5. Merge and dedupe lines from all sources. Log-backed lines are rendered with IDs inline (e.g., `[id=abc123def456] ...`) so they can be cited in transcript references.
 
-`memory_search` does not increment `eventUsage` counters; only exact-ID reads and transcript citations do.
+`memory_search` increments `eventUsage.memorySearchCount` for log-backed result IDs (structured + keyword matches), a weaker signal than explicit ID fetches.
 
 **Indexing:** The builtin indexer only indexes Markdown files — it will not index `log.jsonl`. The search wrapper handles this split:
 - **MEMORY.md semantic search** — delegated to the builtin (hybrid BM25+vector, MMR, temporal decay, all inherited).
@@ -884,7 +886,7 @@ By replacing `memory-core`, zettelclaw eliminates:
 
 8b. **CLI trace**: Run `openclaw zettelclaw trace` (and `openclaw zettelclaw trace <id>`). Verify chronological subject sequences render correctly.
 
-8c. **Usage counters**: Read an entry via `memory_get` by ID and cite `[<id>]` in a later transcript. Verify `state.json.eventUsage` increments (`memoryGetCount`, `citationCount`) for the referenced IDs.
+8c. **Usage counters**: Read an entry via `memory_get` by ID, run a `memory_search` that returns log-backed IDs, and cite `[<id>]` in a later transcript. Verify `state.json.eventUsage` increments (`memoryGetCount`, `memorySearchCount`, `citationCount`) for referenced IDs.
 
 8d. **Async import jobs**: Start `openclaw zettelclaw import ...` (non-dry-run). Verify a queued job appears in `state.json.importJobs`, trackable via `openclaw zettelclaw import status <jobId>`, and recoverable with `openclaw zettelclaw import resume <jobId>` when needed.
 
@@ -918,7 +920,7 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 | 18 | Snapshot pre-filtering | Four buckets (active entries, open items, stale subjects, durable entries) pre-filtered in code before LLM call. `decisionWindow` config removed — decisions are covered by `activeWindow`. LLM handles presentation only. |
 | 19 | Extraction context | Existing log entries (subject-relevant + open items) fed to extraction LLM to avoid duplicates and reason about chronology. Capped at 50 entries per subject and rendered chronologically (oldest to newest). |
 | 20 | Chronological lineage | Subject history is reconstructed by sorting entries by timestamp; no explicit replacement-link field. |
-| 21 | Long-term recall signals | `state.json.eventUsage` tracks `memoryGetCount` and `citationCount` per event, and nightly snapshot includes top durable entries outside recency window using score `2*citationCount + memoryGetCount`. |
+| 21 | Long-term recall signals | `state.json.eventUsage` tracks `memoryGetCount`, `memorySearchCount`, and `citationCount` per event, and nightly snapshot includes top durable entries outside recency window using score `2*citationCount + memoryGetCount + 0.25*memorySearchCount`. |
 | 22 | Subject requirement | `subject` is required for non-handoff entries. Missing non-handoff subjects are normalized to `unknown` before validation/write. |
 | 23 | Transcript ID style | Event references in transcripts use bracketed IDs (`[<12-char-id>]`) for provenance and usage tracking. |
 

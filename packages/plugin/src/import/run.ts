@@ -17,7 +17,7 @@ import type { ImportPlatform, ImportedConversation } from "./types";
 
 export const DEFAULT_IMPORT_MIN_MESSAGES = 4;
 export const DEFAULT_IMPORT_JOBS = 3;
-export const DEFAULT_IMPORT_MODEL = "anthropic/claude-haiku-4-5";
+export const DEFAULT_IMPORT_MODEL = "anthropic/claude-sonnet-4-6";
 
 export interface ReclawImportOptions {
   platform: ImportPlatform;

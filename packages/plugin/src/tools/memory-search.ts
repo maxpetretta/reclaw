@@ -3,6 +3,7 @@ import type { AnyAgentTool, OpenClawPluginApi, OpenClawPluginToolContext } from 
 import type { PluginConfig } from "../config";
 import { queryLog, searchLog, type LogQueryFilter } from "../log/query";
 import type { EntryType, LogEntry } from "../log/schema";
+import { incrementEventUsage } from "../state";
 
 interface SearchParams {
   query?: string;
@@ -16,6 +17,7 @@ interface SearchParams {
 interface MemorySearchDeps {
   queryLog: typeof queryLog;
   searchLog: typeof searchLog;
+  incrementEventUsage: typeof incrementEventUsage;
 }
 
 const ENTRY_TYPE_SET = new Set<EntryType>(["task", "fact", "decision", "question", "handoff"]);
@@ -24,6 +26,7 @@ const STATUS_SET = new Set(["open", "done"]);
 const DEFAULT_DEPS: MemorySearchDeps = {
   queryLog,
   searchLog,
+  incrementEventUsage,
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -224,6 +227,7 @@ export function createWrappedMemorySearchTool(
       : null;
 
   const logPath = join(config.logDir, "log.jsonl");
+  const statePath = join(config.logDir, "state.json");
 
   return {
     name: "memory_search",
@@ -265,6 +269,13 @@ export function createWrappedMemorySearchTool(
       ]);
 
       const logEntries = dedupeEntries([...structuredEntries, ...keywordEntries]);
+      if (logEntries.length > 0) {
+        await resolvedDeps.incrementEventUsage(
+          statePath,
+          logEntries.map((entry) => entry.id),
+          "memory_search",
+        );
+      }
 
       const logLines = logEntries.map(formatLogEntry);
       const builtinText = extractTextFromToolResult(builtinResult);

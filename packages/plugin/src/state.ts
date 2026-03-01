@@ -22,11 +22,12 @@ export interface ImportedConversationState {
 
 export interface EventUsageState {
   memoryGetCount: number;
+  memorySearchCount: number;
   citationCount: number;
   lastAccessAt: string;
 }
 
-export type EventUsageKind = "memory_get" | "citation";
+export type EventUsageKind = "memory_get" | "memory_search" | "citation";
 
 export type ImportJobStatus = "queued" | "running" | "completed" | "failed";
 
@@ -332,10 +333,17 @@ function normalizeState(raw: unknown): ZettelclawState {
       continue;
     }
 
+    const memorySearchCountRaw = usageValue.memorySearchCount;
+    const memorySearchCount =
+      memorySearchCountRaw === undefined ? 0 : memorySearchCountRaw;
+
     if (
       typeof usageValue.memoryGetCount !== "number" ||
       usageValue.memoryGetCount < 0 ||
       !Number.isFinite(usageValue.memoryGetCount) ||
+      typeof memorySearchCount !== "number" ||
+      memorySearchCount < 0 ||
+      !Number.isFinite(memorySearchCount) ||
       typeof usageValue.citationCount !== "number" ||
       usageValue.citationCount < 0 ||
       !Number.isFinite(usageValue.citationCount) ||
@@ -347,6 +355,7 @@ function normalizeState(raw: unknown): ZettelclawState {
 
     eventUsage[entryId] = {
       memoryGetCount: usageValue.memoryGetCount,
+      memorySearchCount,
       citationCount: usageValue.citationCount,
       lastAccessAt: usageValue.lastAccessAt,
     };
@@ -521,12 +530,15 @@ export async function incrementEventUsage(
   for (const eventId of normalizedIds) {
     const existing = state.eventUsage[eventId] ?? {
       memoryGetCount: 0,
+      memorySearchCount: 0,
       citationCount: 0,
       lastAccessAt: now,
     };
 
     if (kind === "memory_get") {
       existing.memoryGetCount += 1;
+    } else if (kind === "memory_search") {
+      existing.memorySearchCount += 1;
     } else {
       existing.citationCount += 1;
     }

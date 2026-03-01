@@ -265,6 +265,7 @@ describe("briefing generation", () => {
       eventUsage: {
         [durableId]: {
           memoryGetCount: 3,
+          memorySearchCount: 0,
           citationCount: 2,
           lastAccessAt: "2026-02-27T00:00:00.000Z",
         },
@@ -291,6 +292,65 @@ describe("briefing generation", () => {
     expect(capturedUserInput).toContain("## Durable Entries");
     expect(capturedUserInput).toContain(`- ${durableId}`);
     expect(capturedUserInput).toContain("Critical historical migration decision");
+  });
+
+  test("includes durable entries when only memory_search usage is positive", async () => {
+    const now = Date.parse("2026-02-28T00:00:00.000Z");
+    const durableId = "dura00000002";
+    const entries = [
+      {
+        id: "active000002",
+        timestamp: "2026-02-27T12:00:00.000Z",
+        type: "fact",
+        content: "Active auth rollout",
+        subject: "auth-migration",
+        session: "session-1",
+      },
+      {
+        id: durableId,
+        timestamp: "2025-10-01T09:00:00.000Z",
+        type: "fact",
+        content: "Historically important fact from search recall",
+        subject: "auth-migration",
+        session: "session-old",
+      },
+    ];
+
+    await writeFile(logPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+    await writeState(join(tempDir, "state.json"), {
+      extractedSessions: {},
+      failedSessions: {},
+      importedConversations: {},
+      eventUsage: {
+        [durableId]: {
+          memoryGetCount: 0,
+          memorySearchCount: 1,
+          citationCount: 0,
+          lastAccessAt: "2026-02-27T00:00:00.000Z",
+        },
+      },
+      importJobs: {},
+    });
+
+    let capturedUserInput = "";
+    await generateBriefing(
+      {
+        logPath,
+        memoryMdPath: memoryPath,
+        config: createConfig(tempDir),
+        now,
+      },
+      {
+        callBriefingModel: async ({ userInput }) => {
+          capturedUserInput = userInput;
+          return "## Durable Memory\n- Historically important fact from search recall";
+        },
+      },
+    );
+
+    expect(capturedUserInput).toContain("## Durable Entries");
+    expect(capturedUserInput).toContain(`- ${durableId}`);
+    expect(capturedUserInput).toContain("Historically important fact from search recall");
   });
 
   test("briefing generation preserves handoff markers and content", async () => {

@@ -495,6 +495,8 @@ const IMPORT_WORKER_NAME_PREFIX = "zettelclaw-import-worker-";
 const IMPORT_WORKER_TIMEOUT_SECONDS = 60 * 60;
 const IMPORT_WORKER_EXEC_TIMEOUT_SECONDS = 2 * 60 * 60;
 const IMPORT_WORKER_SCHEDULE_DELAY_MS = 2_000;
+const INTERACTIVE_IMPORT_JOBS_MIN = 1;
+const INTERACTIVE_IMPORT_JOBS_MAX = 10;
 
 interface QueueImportJobResult {
   job: ImportJobState;
@@ -560,6 +562,29 @@ function readPositiveIntOption(value: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function parseInteractiveImportJobs(value: unknown): number | undefined {
+  let parsed: number | undefined;
+
+  if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value)) {
+    parsed = value;
+  } else if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^\d+$/u.test(trimmed)) {
+      return undefined;
+    }
+
+    parsed = Number.parseInt(trimmed, 10);
+  } else {
+    return undefined;
+  }
+
+  if (parsed < INTERACTIVE_IMPORT_JOBS_MIN || parsed > INTERACTIVE_IMPORT_JOBS_MAX) {
+    return undefined;
+  }
+
+  return parsed;
 }
 
 function sanitizeImportOptionsForJob(raw: Record<string, unknown>): ImportJobOptionsState {
@@ -2579,11 +2604,33 @@ function registerZettelclawCliCommands(
             importOptions.model = DEFAULT_IMPORT_MODEL;
           }
 
+          const defaultInteractiveJobs = parseInteractiveImportJobs(importOptions.jobs) ?? INTERACTIVE_IMPORT_JOBS_MIN;
+          const selectedJobsRaw = unwrapPromptValue(
+            await clackText({
+              message: `How many parallel import jobs should run? (${INTERACTIVE_IMPORT_JOBS_MIN}-${INTERACTIVE_IMPORT_JOBS_MAX})`,
+              initialValue: String(defaultInteractiveJobs),
+              placeholder: String(INTERACTIVE_IMPORT_JOBS_MIN),
+              validate(value) {
+                return parseInteractiveImportJobs(value) === undefined
+                  ? `Enter an integer from ${INTERACTIVE_IMPORT_JOBS_MIN} to ${INTERACTIVE_IMPORT_JOBS_MAX}.`
+                  : undefined;
+              },
+            }),
+          );
+          const selectedJobs = parseInteractiveImportJobs(selectedJobsRaw);
+          if (selectedJobs === undefined) {
+            throw new Error(
+              `parallel jobs must be an integer between ${INTERACTIVE_IMPORT_JOBS_MIN} and ${INTERACTIVE_IMPORT_JOBS_MAX}`,
+            );
+          }
+          importOptions.jobs = selectedJobs;
+
           const paths = resolvePaths(config, workspaceDir);
 
           clackLog.message(`Source: ${platformLabel(selection.platform)}`);
           clackLog.message(`Path: ${selection.filePath}`);
           clackLog.message(`Model: ${normalizeModelOption(importOptions.model) ?? DEFAULT_IMPORT_MODEL}`);
+          clackLog.message(`Parallel jobs: ${importOptions.jobs}`);
           clackLog.message(`State file: ${paths.statePath}`);
 
           if (selection.platform === "openclaw") {
@@ -2933,4 +2980,5 @@ export const __cliTestExports = {
   buildTraceReport,
   resolveImportPathForPlatform,
   normalizeCliInputPath,
+  parseInteractiveImportJobs,
 };

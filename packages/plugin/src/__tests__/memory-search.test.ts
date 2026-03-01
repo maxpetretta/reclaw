@@ -98,6 +98,31 @@ describe("memory-search", () => {
     expect(text).toContain("Queue retries for webhooks");
   });
 
+  test("increments usage for log-backed search results", async () => {
+    const usageCalls: Array<{ ids: string[]; kind: string }> = [];
+    const api = {
+      runtime: {
+        tools: {
+          createMemorySearchTool: () => null,
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const tool = createWrappedMemorySearchTool(api, createContext(), createConfig(), {
+      queryLog: async () => [createEntry({ id: "aaa111bbb222", subject: "auth-migration" })],
+      searchLog: async () => [createEntry({ id: "aaa111bbb222", subject: "auth-migration" })],
+      incrementEventUsage: async (_statePath, ids, kind) => {
+        usageCalls.push({ ids, kind });
+      },
+    });
+
+    await tool.execute("call-usage", { query: "queue retries", subject: "auth-migration" });
+
+    expect(usageCalls).toEqual([
+      { ids: ["aaa111bbb222"], kind: "memory_search" },
+    ]);
+  });
+
   test("returns no results gracefully when structured log query is empty", async () => {
     const api = {
       runtime: {
