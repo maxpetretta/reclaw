@@ -30,7 +30,7 @@ AGENTS replacement targets (be explicit):
 - Keep existing manual content unless it conflicts with Zettelclaw mode.
 - If a previous `<!-- BEGIN ZETTELCLAW MEMORY NOTICE --> ... <!-- END ZETTELCLAW MEMORY NOTICE -->` block exists, replace it in place (do not duplicate).
 - Remove any lines that say to write/read `memory/YYYY-MM-DD.md` from MEMORY.md.
-- Preserve the generated briefing markers and their managed block exactly:
+- Preserve the generated memory snapshot markers and their managed block exactly:
   - `<!-- BEGIN GENERATED BRIEFING -->`
   - `<!-- END GENERATED BRIEFING -->`
 

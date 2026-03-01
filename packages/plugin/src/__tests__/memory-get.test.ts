@@ -67,6 +67,7 @@ function createEntry(partial: Partial<LogEntry> = {}): LogEntry {
 
 describe("memory-get", () => {
   test("12-char id path returns matching log entry JSON", async () => {
+    const usageCalls: string[][] = [];
     const api = {
       runtime: {
         tools: {
@@ -79,6 +80,9 @@ describe("memory-get", () => {
       queryLog: async () => [createEntry()],
       findTranscriptFile: async () => null,
       readTranscript: async () => [],
+      incrementEventUsage: async (_statePath, ids) => {
+        usageCalls.push(ids);
+      },
     });
 
     const result = await tool.execute("call-1", { path: "abc123def456" });
@@ -86,6 +90,40 @@ describe("memory-get", () => {
 
     expect(text).toContain('"id": "abc123def456"');
     expect(text).toContain('"type": "decision"');
+    expect(usageCalls).toEqual([["abc123def456"]]);
+  });
+
+  test("usage increment resolves to latest replacement id", async () => {
+    const usageCalls: string[][] = [];
+    const api = {
+      runtime: {
+        tools: {
+          createMemoryGetTool: () => null,
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const tool = createWrappedMemoryGetTool(api, createContext(), createConfig(), {
+      queryLog: async () => [
+        createEntry({ id: "old000000001" }),
+        createEntry({
+          id: "new000000001",
+          replaces: "old000000001",
+          timestamp: "2026-02-22T00:00:00.000Z",
+        }),
+      ],
+      findTranscriptFile: async () => null,
+      readTranscript: async () => [],
+      incrementEventUsage: async (_statePath, ids) => {
+        usageCalls.push(ids);
+      },
+    });
+
+    const result = await tool.execute("call-1b", { path: "old000000001" });
+    const text = readResultText(result);
+
+    expect(text).toContain('"id": "old000000001"');
+    expect(usageCalls).toEqual([["new000000001"]]);
   });
 
   test("session: path returns formatted transcript text", async () => {
@@ -107,6 +145,7 @@ describe("memory-get", () => {
           timestamp: "2026-02-20T00:01:00.000Z",
         },
       ],
+      incrementEventUsage: async () => {},
     });
 
     const result = await tool.execute("call-2", { path: "session:session-2" });
@@ -138,6 +177,7 @@ describe("memory-get", () => {
       queryLog: async () => [],
       findTranscriptFile: async () => null,
       readTranscript: async () => [],
+      incrementEventUsage: async () => {},
     });
 
     const result = await tool.execute("call-3", { path: "MEMORY.md" });
@@ -160,6 +200,7 @@ describe("memory-get", () => {
       queryLog: async () => [],
       findTranscriptFile: async () => null,
       readTranscript: async () => [],
+      incrementEventUsage: async () => {},
     });
 
     const result = await tool.execute("call-4", { path: "zzz999yyy888" });

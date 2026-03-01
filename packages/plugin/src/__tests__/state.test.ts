@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  incrementEventUsage,
   isExtracted,
   markExtracted,
   markFailed,
@@ -30,6 +31,7 @@ describe("state", () => {
       extractedSessions: {},
       failedSessions: {},
       importedConversations: {},
+      eventUsage: {},
     });
   });
 
@@ -56,6 +58,7 @@ describe("state", () => {
           entries: 1,
         },
       },
+      eventUsage: {},
     });
 
     const state = await readState(statePath);
@@ -100,6 +103,7 @@ describe("state", () => {
           title: "Old",
         },
       },
+      eventUsage: {},
     });
 
     await pruneState(statePath);
@@ -110,5 +114,19 @@ describe("state", () => {
     expect(state.extractedSessions.recent).toBeDefined();
     expect(state.failedSessions.recent).toBeDefined();
     expect(state.importedConversations["chatgpt:old"]).toBeDefined();
+  });
+
+  test("incrementEventUsage tracks counters and last access", async () => {
+    await incrementEventUsage(statePath, ["abc123def456"], "memory_get");
+    await incrementEventUsage(statePath, ["abc123def456"], "citation");
+    await incrementEventUsage(statePath, ["abc123def456", "abc123def456"], "citation");
+
+    const state = await readState(statePath);
+    const usage = state.eventUsage["abc123def456"];
+
+    expect(usage).toBeDefined();
+    expect(usage?.memoryGetCount).toBe(1);
+    expect(usage?.citationCount).toBe(2);
+    expect(typeof usage?.lastAccessAt).toBe("string");
   });
 });

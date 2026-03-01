@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { queryExtractionContext, queryLog, searchLog } from "../log/query";
+import { getLatestVersionId } from "../log/resolve";
 import {
   appendEntry,
   finalizeEntry,
@@ -21,6 +22,7 @@ import {
 } from "../lib/transcript";
 import {
   isExtracted,
+  incrementEventUsage,
   markExtracted,
   markFailed,
   pruneState,
@@ -970,6 +972,7 @@ async function runExtractionPipeline(params: {
   }
 
   const transcript = params.deps.formatTranscript(params.messages);
+  const transcriptEventIds = extractReferencedEventIds(transcript);
   if (!transcript.trim()) {
     await markExtracted(params.paths.statePath, params.sessionId, 0);
     await pruneState(params.paths.statePath);
@@ -977,6 +980,19 @@ async function runExtractionPipeline(params: {
   }
 
   try {
+    if (transcriptEventIds.length > 0) {
+      const allEntries = await params.deps.queryLog(params.paths.logPath, { includeReplaced: true });
+      if (allEntries.length > 0) {
+        const byId = new Set(allEntries.map((entry) => entry.id));
+        const canonicalIds = [...new Set(
+          transcriptEventIds
+            .filter((eventId) => byId.has(eventId))
+            .map((eventId) => getLatestVersionId(allEntries, eventId)),
+        )];
+        await incrementEventUsage(params.paths.statePath, canonicalIds, "citation");
+      }
+    }
+
     const subjects = await readRegistry(params.paths.subjectsPath);
     const transcriptSubjects = findMentionedSubjects(transcript, subjects);
     const existingEntries = await queryExtractionContext(params.paths.logPath, transcriptSubjects, {
@@ -997,7 +1013,6 @@ async function runExtractionPipeline(params: {
     const appendedEntries: Array<ReturnType<typeof finalizeEntry>> = [];
     const parsedEntries: ParsedLlmEntry[] = [];
     const lines = rawOutput.split("\n");
-    const transcriptEventIds = extractReferencedEventIds(transcript);
 
     for (const line of lines) {
       const trimmed = line.trim();

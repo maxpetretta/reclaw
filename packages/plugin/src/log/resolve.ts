@@ -55,3 +55,8 @@ export function getLatestVersion(entries: LogEntry[], id: string): LogEntry | un
   const latestId = replacementMap.get(id) ?? id;
   return byId.get(latestId);
 }
+
+export function getLatestVersionId(entries: LogEntry[], id: string): string {
+  const replacementMap = buildReplacementMap(entries);
+  return replacementMap.get(id) ?? id;
+}

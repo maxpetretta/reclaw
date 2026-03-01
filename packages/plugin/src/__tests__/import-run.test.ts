@@ -76,6 +76,7 @@ describe("import run", () => {
           title: "Already imported",
         },
       },
+      eventUsage: {},
     });
 
     const conversations = [
@@ -221,6 +222,7 @@ describe("import run", () => {
           entries: 1,
         },
       },
+      eventUsage: {},
     });
 
     const summary = await runReclawImport(

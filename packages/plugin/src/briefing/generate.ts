@@ -7,6 +7,7 @@ import { resolveGatewayBaseUrl } from "../lib/gateway";
 import { replaceManagedBlock } from "../memory/managed-block";
 import { filterReplaced } from "../log/resolve";
 import { readLog, type LogEntry } from "../log/schema";
+import { readState, type EventUsageState } from "../state";
 
 export const BRIEFING_BEGIN_MARKER = "<!-- BEGIN GENERATED BRIEFING -->";
 export const BRIEFING_END_MARKER = "<!-- END GENERATED BRIEFING -->";
@@ -31,7 +32,15 @@ interface BriefingBuckets {
   activeEntries: LogEntry[];
   openItems: LogEntry[];
   staleSubjects: LogEntry[];
+  durableEntries: LogEntry[];
   selectedEntries: LogEntry[];
+}
+
+interface SubjectActivity {
+  subject: string;
+  entries: number;
+  latestTimestamp: string;
+  typeCounts: Partial<Record<LogEntry["type"], number>>;
 }
 
 let promptCache: string | null = null;
@@ -78,6 +87,11 @@ function formatEntry(entry: LogEntry): string {
 
 function formatEntryWithId(entry: LogEntry): string {
   return `- id=${entry.id} | ${formatEntry(entry).slice(2)}`;
+}
+
+function toTimestampValue(timestamp: string): number {
+  const value = Date.parse(timestamp);
+  return Number.isFinite(value) ? value : 0;
 }
 
 function toTimestampMs(timestamp: string): number | null {
@@ -128,10 +142,46 @@ function getMostRecentBySubject(entries: LogEntry[]): Map<string, LogEntry> {
   return latest;
 }
 
+function computeDurableScore(entry: LogEntry, usage: EventUsageState | undefined): number {
+  if (!usage) {
+    return 0;
+  }
+
+  return usage.citationCount * 2 + usage.memoryGetCount;
+}
+
+function buildDurableEntries(
+  entries: LogEntry[],
+  activeEntries: LogEntry[],
+  eventUsage: Record<string, EventUsageState>,
+  limit = 10,
+): LogEntry[] {
+  const activeIds = new Set(activeEntries.map((entry) => entry.id));
+
+  return entries
+    .filter((entry) => !activeIds.has(entry.id))
+    .filter((entry) => entry.type === "decision" || entry.type === "fact")
+    .map((entry) => ({
+      entry,
+      score: computeDurableScore(entry, eventUsage[entry.id]),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => {
+      if (left.score !== right.score) {
+        return right.score - left.score;
+      }
+
+      return toTimestampValue(right.entry.timestamp) - toTimestampValue(left.entry.timestamp);
+    })
+    .slice(0, Math.max(1, limit))
+    .map((candidate) => candidate.entry);
+}
+
 function buildBriefingBuckets(
   entries: LogEntry[],
   config: PluginConfig["briefing"],
   nowMs: number,
+  eventUsage: Record<string, EventUsageState>,
 ): BriefingBuckets {
   const activeEntries = entries.filter((entry) => isWithinDays(entry, nowMs, config.activeWindow));
   const openItems = entries.filter(isOpenItem);
@@ -161,6 +211,7 @@ function buildBriefingBuckets(
   }
 
   const staleSubjects = entries.filter((entry) => staleSubjectIds.has(entry.id));
+  const durableEntries = buildDurableEntries(entries, activeEntries, eventUsage);
 
   const selectedIds = new Set<string>();
   for (const entry of activeEntries) {
@@ -172,6 +223,9 @@ function buildBriefingBuckets(
   for (const entry of staleSubjects) {
     selectedIds.add(entry.id);
   }
+  for (const entry of durableEntries) {
+    selectedIds.add(entry.id);
+  }
 
   const selectedEntries = entries.filter((entry) => selectedIds.has(entry.id));
 
@@ -179,8 +233,108 @@ function buildBriefingBuckets(
     activeEntries,
     openItems,
     staleSubjects,
+    durableEntries,
     selectedEntries,
   };
+}
+
+function buildSubjectActivity(entries: LogEntry[], limit = 12): SubjectActivity[] {
+  const bySubject = new Map<string, SubjectActivity>();
+
+  for (const entry of entries) {
+    if (!entry.subject) {
+      continue;
+    }
+
+    const existing = bySubject.get(entry.subject);
+    if (!existing) {
+      bySubject.set(entry.subject, {
+        subject: entry.subject,
+        entries: 1,
+        latestTimestamp: entry.timestamp,
+        typeCounts: {
+          [entry.type]: 1,
+        },
+      });
+      continue;
+    }
+
+    existing.entries += 1;
+    if (toTimestampValue(entry.timestamp) >= toTimestampValue(existing.latestTimestamp)) {
+      existing.latestTimestamp = entry.timestamp;
+    }
+    existing.typeCounts[entry.type] = (existing.typeCounts[entry.type] ?? 0) + 1;
+  }
+
+  return [...bySubject.values()]
+    .sort((left, right) => {
+      if (left.entries !== right.entries) {
+        return right.entries - left.entries;
+      }
+
+      const rightTs = toTimestampValue(right.latestTimestamp);
+      const leftTs = toTimestampValue(left.latestTimestamp);
+      if (rightTs !== leftTs) {
+        return rightTs - leftTs;
+      }
+
+      return left.subject.localeCompare(right.subject);
+    })
+    .slice(0, Math.max(1, limit));
+}
+
+function formatTypeCounts(typeCounts: Partial<Record<LogEntry["type"], number>>): string {
+  const ordered: LogEntry["type"][] = ["task", "decision", "fact", "question", "handoff"];
+  const parts: string[] = [];
+
+  for (const type of ordered) {
+    const count = typeCounts[type] ?? 0;
+    if (count > 0) {
+      parts.push(`${type}:${count}`);
+    }
+  }
+
+  return parts.join(", ");
+}
+
+function formatSubjectActivity(activity: SubjectActivity[]): string {
+  if (activity.length === 0) {
+    return "- n/a";
+  }
+
+  return activity
+    .map((entry) => {
+      const types = formatTypeCounts(entry.typeCounts);
+      return `- subject=${entry.subject} | entries=${entry.entries} | latest=${entry.latestTimestamp} | types=${types}`;
+    })
+    .join("\n");
+}
+
+function countByType(entries: LogEntry[]): Partial<Record<LogEntry["type"], number>> {
+  const counts: Partial<Record<LogEntry["type"], number>> = {};
+  for (const entry of entries) {
+    counts[entry.type] = (counts[entry.type] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function formatSignalSummary(params: {
+  activeEntries: LogEntry[];
+  openItems: LogEntry[];
+  durableEntries: LogEntry[];
+  selectedEntries: LogEntry[];
+}): string {
+  const activeCounts = countByType(params.activeEntries);
+  const openCounts = countByType(params.openItems);
+  const durableCounts = countByType(params.durableEntries);
+  const selectedCounts = countByType(params.selectedEntries);
+
+  return [
+    `- active_entries=${params.activeEntries.length} | active_types=${formatTypeCounts(activeCounts) || "n/a"}`,
+    `- open_items=${params.openItems.length} | open_types=${formatTypeCounts(openCounts) || "n/a"}`,
+    `- durable_entries=${params.durableEntries.length} | durable_types=${formatTypeCounts(durableCounts) || "n/a"}`,
+    `- selected_entries=${params.selectedEntries.length} | selected_types=${formatTypeCounts(selectedCounts) || "n/a"}`,
+  ].join("\n");
 }
 
 function formatBucketIds(entries: LogEntry[]): string {
@@ -260,8 +414,11 @@ export async function generateBriefing(
   const prompt = await loadPrompt();
   const allEntries = await readLog(opts.logPath);
   const entries = filterReplaced(allEntries);
+  const state = await readState(join(opts.config.logDir, "state.json"));
   const nowMs = typeof opts.now === "number" && Number.isFinite(opts.now) ? opts.now : Date.now();
-  const buckets = buildBriefingBuckets(entries, opts.config.briefing, nowMs);
+  const buckets = buildBriefingBuckets(entries, opts.config.briefing, nowMs, state.eventUsage);
+  const activeSubjectActivity = buildSubjectActivity(buckets.activeEntries);
+  const overallSubjectActivity = buildSubjectActivity(entries);
   const memoryContent = await resolvedDeps.readMemoryFile(opts.memoryMdPath);
   const currentGenerated = extractGeneratedBlock(memoryContent);
 
@@ -278,10 +435,27 @@ export async function generateBriefing(
     "## Stale Subjects",
     formatBucketIds(buckets.staleSubjects),
     "",
+    "## Durable Entries",
+    formatBucketIds(buckets.durableEntries),
+    "",
     "## Included Entries (Deduped Union)",
     buckets.selectedEntries.length > 0
       ? buckets.selectedEntries.map(formatEntryWithId).join("\n")
       : "- n/a",
+    "",
+    "## Subject Activity (Active Window)",
+    formatSubjectActivity(activeSubjectActivity),
+    "",
+    "## Subject Activity (All Current Entries)",
+    formatSubjectActivity(overallSubjectActivity),
+    "",
+    "## Signal Summary",
+    formatSignalSummary({
+      activeEntries: buckets.activeEntries,
+      openItems: buckets.openItems,
+      durableEntries: buckets.durableEntries,
+      selectedEntries: buckets.selectedEntries,
+    }),
     "",
     `Constraints: activeWindow=${opts.config.briefing.activeWindow}, staleThreshold=${opts.config.briefing.staleThreshold}, maxLines=${opts.config.briefing.maxLines}`,
   ].join("\n");

@@ -9,6 +9,7 @@ import {
   generateBriefing,
 } from "../briefing/generate";
 import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/handoff";
+import { writeState } from "../state";
 
 function createConfig(logDir: string): PluginConfig {
   return {
@@ -222,6 +223,7 @@ describe("briefing generation", () => {
     expect(capturedUserInput).toContain("## Active Entries");
     expect(capturedUserInput).toContain("## Open Items");
     expect(capturedUserInput).toContain("## Stale Subjects");
+    expect(capturedUserInput).toContain("## Durable Entries");
     expect(capturedUserInput).toContain("## Included Entries (Deduped Union)");
 
     expect(capturedUserInput).toContain("Active auth rollout");
@@ -231,6 +233,63 @@ describe("briefing generation", () => {
 
     expect(capturedUserInput).not.toContain("Legacy decision should be excluded");
     expect(capturedUserInput).not.toContain("Closed task should be excluded");
+  });
+
+  test("includes durable entries outside active window when usage score is positive", async () => {
+    const now = Date.parse("2026-02-28T00:00:00.000Z");
+    const durableId = "dura00000001";
+    const entries = [
+      {
+        id: "active000001",
+        timestamp: "2026-02-27T12:00:00.000Z",
+        type: "fact",
+        content: "Active auth rollout",
+        subject: "auth-migration",
+        session: "session-1",
+      },
+      {
+        id: durableId,
+        timestamp: "2025-10-01T09:00:00.000Z",
+        type: "decision",
+        content: "Critical historical migration decision",
+        subject: "auth-migration",
+        session: "session-old",
+      },
+    ];
+
+    await writeFile(logPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+    await writeState(join(tempDir, "state.json"), {
+      extractedSessions: {},
+      failedSessions: {},
+      importedConversations: {},
+      eventUsage: {
+        [durableId]: {
+          memoryGetCount: 3,
+          citationCount: 2,
+          lastAccessAt: "2026-02-27T00:00:00.000Z",
+        },
+      },
+    });
+
+    let capturedUserInput = "";
+    await generateBriefing(
+      {
+        logPath,
+        memoryMdPath: memoryPath,
+        config: createConfig(tempDir),
+        now,
+      },
+      {
+        callBriefingModel: async ({ userInput }) => {
+          capturedUserInput = userInput;
+          return "## Durable Memory\n- Critical historical migration decision";
+        },
+      },
+    );
+
+    expect(capturedUserInput).toContain("## Durable Entries");
+    expect(capturedUserInput).toContain(`- ${durableId}`);
+    expect(capturedUserInput).toContain("Critical historical migration decision");
   });
 
   test("briefing generation preserves handoff markers and content", async () => {

@@ -264,6 +264,54 @@ describe("extraction hooks", () => {
     expect(doneTask?.replaces).toBe("opentask0001");
   });
 
+  test("citation usage is recorded against latest replacement id", async () => {
+    await seedLogEntry(logDir, {
+      id: "old000000001",
+      timestamp: "2026-02-11T00:00:00.000Z",
+      type: "decision",
+      content: "Old decision",
+      subject: "auth-migration",
+      session: "seed-1",
+    });
+    await seedLogEntry(logDir, {
+      id: "new000000001",
+      timestamp: "2026-02-12T00:00:00.000Z",
+      type: "decision",
+      content: "New decision",
+      subject: "auth-migration",
+      session: "seed-2",
+      replaces: "old000000001",
+    });
+
+    const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-cite-usage.jsonl");
+    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-cite-usage","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"Based on [old000000001], proceed with rollout."}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"Proceeding."}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () =>
+        '{"type":"fact","content":"Rollout proceeding","subject":"auth-migration"}',
+    });
+
+    await handlers.session_end?.(
+      { sessionId: "session-cite-usage", messageCount: 5 },
+      { agentId: "agent-1", sessionId: "session-cite-usage" },
+    );
+
+    const state = await readState(join(logDir, "state.json"));
+    expect(state.eventUsage["old000000001"]).toBeUndefined();
+    expect(state.eventUsage["new000000001"]?.citationCount).toBe(1);
+  });
+
   test("searches log to resolve replaces when transcript has no direct id", async () => {
     await seedLogEntry(logDir, {
       id: "dec000000001",

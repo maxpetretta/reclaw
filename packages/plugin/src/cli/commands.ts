@@ -576,6 +576,7 @@ export async function ensureImportStoreFiles(paths: InitPaths, statePath: string
       extractedSessions: {},
       failedSessions: {},
       importedConversations: {},
+      eventUsage: {},
     });
   }
 }
@@ -1455,6 +1456,7 @@ export async function ensureLogStoreFiles(paths: InitPaths): Promise<void> {
       extractedSessions: {},
       failedSessions: {},
       importedConversations: {},
+      eventUsage: {},
     });
   }
 }
@@ -1658,7 +1660,7 @@ function buildBriefingCronJob(config: PluginConfig, existing?: Record<string, un
     ...existing,
     id: existingId,
     name: BRIEFING_CRON_NAME,
-    description: "Nightly Zettelclaw MEMORY.md briefing refresh",
+    description: "Nightly Zettelclaw MEMORY.md memory snapshot refresh",
     enabled: true,
     createdAtMs,
     updatedAtMs: now,
@@ -1801,7 +1803,8 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
       const hasExpectedKeys =
         isObject(parsed.extractedSessions) &&
         isObject(parsed.failedSessions) &&
-        isObject(parsed.importedConversations);
+        isObject(parsed.importedConversations) &&
+        isObject(parsed.eventUsage);
       addCheck("state.json", hasExpectedKeys, hasExpectedKeys ? "ok" : "missing expected state keys");
     }
   } catch (error) {
@@ -1885,7 +1888,7 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     } else {
       const issues: string[] = [];
       if (!hasBriefingMarkers) {
-        issues.push("missing generated briefing markers");
+        issues.push("missing generated memory snapshot markers");
       }
       if (!hasHandoffMarkers) {
         issues.push("missing last handoff markers");
@@ -1977,12 +1980,12 @@ function registerZettelclawCliCommands(
 
   zettelclaw
     .command("uninstall")
-    .description("Reverse init config and remove generated briefing block")
+    .description("Reverse init config and remove generated memory snapshot block")
     .action(async () => {
       const paths = await runUninstall(config, workspaceDir);
       console.log("Zettelclaw uninstalled.");
       console.log(`Config reverted: ${paths.openClawConfigPath}`);
-      console.log(`Generated briefing block removed: ${paths.memoryMdPath}`);
+      console.log(`Generated memory snapshot block removed: ${paths.memoryMdPath}`);
       console.log(`Log data preserved in: ${paths.logDir}`);
     });
 
@@ -2306,31 +2309,38 @@ function registerZettelclawCliCommands(
       console.log(`Renamed subject: ${oldSlug.trim()} -> ${newSlug.trim()}`);
     });
 
-  const briefing = zettelclaw.command("briefing").description("Briefing generation helpers");
+  const runSnapshotGenerate = async (): Promise<void> => {
+    const paths = resolvePaths(config, workspaceDir);
+    const apiToken =
+      isObject(api.config) &&
+      isObject(api.config.gateway) &&
+      isObject(api.config.gateway.auth) &&
+      typeof api.config.gateway.auth.token === "string" &&
+      api.config.gateway.auth.token.trim().length > 0
+        ? api.config.gateway.auth.token
+        : undefined;
 
+    await generateBriefing({
+      logPath: paths.logPath,
+      memoryMdPath: paths.memoryMdPath,
+      config,
+      apiToken,
+    });
+
+    console.log(`Memory snapshot updated: ${paths.memoryMdPath}`);
+  };
+
+  const briefing = zettelclaw.command("briefing").description("Memory snapshot generation helpers");
   briefing
     .command("generate")
-    .description("Generate and write MEMORY.md briefing block")
-    .action(async () => {
-      const paths = resolvePaths(config, workspaceDir);
-      const apiToken =
-        isObject(api.config) &&
-        isObject(api.config.gateway) &&
-        isObject(api.config.gateway.auth) &&
-        typeof api.config.gateway.auth.token === "string" &&
-        api.config.gateway.auth.token.trim().length > 0
-          ? api.config.gateway.auth.token
-          : undefined;
+    .description("Generate and write MEMORY.md memory snapshot block")
+    .action(runSnapshotGenerate);
 
-      await generateBriefing({
-        logPath: paths.logPath,
-        memoryMdPath: paths.memoryMdPath,
-        config,
-        apiToken,
-      });
-
-      console.log(`Briefing updated: ${paths.memoryMdPath}`);
-    });
+  const snapshot = zettelclaw.command("snapshot").description("Memory snapshot generation helpers");
+  snapshot
+    .command("generate")
+    .description("Generate and write MEMORY.md memory snapshot block")
+    .action(runSnapshotGenerate);
 }
 
 export function registerZettelclawCli(

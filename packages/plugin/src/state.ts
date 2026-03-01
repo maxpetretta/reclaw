@@ -20,10 +20,19 @@ export interface ImportedConversationState {
   title?: string;
 }
 
+export interface EventUsageState {
+  memoryGetCount: number;
+  citationCount: number;
+  lastAccessAt: string;
+}
+
+export type EventUsageKind = "memory_get" | "citation";
+
 export interface ZettelclawState {
   extractedSessions: Record<string, ExtractedSession>;
   failedSessions: Record<string, FailedSession>;
   importedConversations: Record<string, ImportedConversationState>;
+  eventUsage: Record<string, EventUsageState>;
 }
 
 function createEmptyState(): ZettelclawState {
@@ -31,6 +40,7 @@ function createEmptyState(): ZettelclawState {
     extractedSessions: {},
     failedSessions: {},
     importedConversations: {},
+    eventUsage: {},
   };
 }
 
@@ -78,10 +88,12 @@ function normalizeState(raw: unknown): ZettelclawState {
   const extractedSessions: Record<string, ExtractedSession> = {};
   const failedSessions: Record<string, FailedSession> = {};
   const importedConversations: Record<string, ImportedConversationState> = {};
+  const eventUsage: Record<string, EventUsageState> = {};
 
   const extractedRaw = isObject(raw.extractedSessions) ? raw.extractedSessions : {};
   const failedRaw = isObject(raw.failedSessions) ? raw.failedSessions : {};
   const importedRaw = isObject(raw.importedConversations) ? raw.importedConversations : {};
+  const eventUsageRaw = isObject(raw.eventUsage) ? raw.eventUsage : {};
 
   for (const [sessionId, sessionValue] of Object.entries(extractedRaw)) {
     if (!isObject(sessionValue)) {
@@ -154,10 +166,36 @@ function normalizeState(raw: unknown): ZettelclawState {
     };
   }
 
+  for (const [entryId, usageValue] of Object.entries(eventUsageRaw)) {
+    if (!isObject(usageValue)) {
+      continue;
+    }
+
+    if (
+      typeof usageValue.memoryGetCount !== "number" ||
+      usageValue.memoryGetCount < 0 ||
+      !Number.isFinite(usageValue.memoryGetCount) ||
+      typeof usageValue.citationCount !== "number" ||
+      usageValue.citationCount < 0 ||
+      !Number.isFinite(usageValue.citationCount) ||
+      typeof usageValue.lastAccessAt !== "string" ||
+      !Number.isFinite(Date.parse(usageValue.lastAccessAt))
+    ) {
+      continue;
+    }
+
+    eventUsage[entryId] = {
+      memoryGetCount: usageValue.memoryGetCount,
+      citationCount: usageValue.citationCount,
+      lastAccessAt: usageValue.lastAccessAt,
+    };
+  }
+
   return {
     extractedSessions,
     failedSessions,
     importedConversations,
+    eventUsage,
   };
 }
 
@@ -221,6 +259,47 @@ export function isImportedConversation(state: ZettelclawState, conversationKey: 
 
 export function shouldRetry(state: ZettelclawState, sessionId: string): boolean {
   return (state.failedSessions[sessionId]?.retries ?? 0) < 2;
+}
+
+export async function incrementEventUsage(
+  path: string,
+  eventIds: string[],
+  kind: EventUsageKind,
+): Promise<void> {
+  if (!Array.isArray(eventIds) || eventIds.length === 0) {
+    return;
+  }
+
+  const normalizedIds = [...new Set(
+    eventIds
+      .map((eventId) => eventId.trim())
+      .filter((eventId) => eventId.length > 0),
+  )];
+  if (normalizedIds.length === 0) {
+    return;
+  }
+
+  const state = await readState(path);
+  const now = new Date().toISOString();
+
+  for (const eventId of normalizedIds) {
+    const existing = state.eventUsage[eventId] ?? {
+      memoryGetCount: 0,
+      citationCount: 0,
+      lastAccessAt: now,
+    };
+
+    if (kind === "memory_get") {
+      existing.memoryGetCount += 1;
+    } else {
+      existing.citationCount += 1;
+    }
+
+    existing.lastAccessAt = now;
+    state.eventUsage[eventId] = existing;
+  }
+
+  await writeState(path, state);
 }
 
 export async function pruneState(path: string, maxAgeDays = 30): Promise<void> {
