@@ -257,6 +257,28 @@ function parseConversation(raw: unknown, index: number): ImportedConversation | 
   };
 }
 
+function looksLikeChatGptConversation(raw: unknown): boolean {
+  if (!isObject(raw)) {
+    return false;
+  }
+
+  if (isObject(raw.mapping)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function isLikelyChatGptExport(raw: unknown): boolean {
+  const conversations = readConversationList(raw);
+  if (conversations.length === 0) {
+    return false;
+  }
+
+  const sample = conversations.slice(0, 5);
+  return sample.some((conversation) => looksLikeChatGptConversation(conversation));
+}
+
 
 export function parseChatGptConversations(raw: unknown): ImportedConversation[] {
   const conversations: ImportedConversation[] = [];

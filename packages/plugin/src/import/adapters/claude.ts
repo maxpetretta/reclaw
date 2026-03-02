@@ -111,6 +111,42 @@ function parseConversation(raw: unknown, index: number): ImportedConversation | 
   };
 }
 
+function looksLikeClaudeConversation(raw: unknown): boolean {
+  if (!isObject(raw)) {
+    return false;
+  }
+
+  if (Array.isArray(raw.chat_messages) || Array.isArray(raw.entries)) {
+    return true;
+  }
+
+  if (Array.isArray(raw.messages)) {
+    return raw.messages.some((message) => {
+      if (!isObject(message)) {
+        return false;
+      }
+
+      return (
+        typeof message.sender === "string" ||
+        typeof message.uuid === "string" ||
+        typeof message.message_uuid === "string"
+      );
+    });
+  }
+
+  return false;
+}
+
+export function isLikelyClaudeExport(raw: unknown): boolean {
+  const conversations = readConversationList(raw);
+  if (conversations.length === 0) {
+    return false;
+  }
+
+  const sample = conversations.slice(0, 5);
+  return sample.some((conversation) => looksLikeClaudeConversation(conversation));
+}
+
 export function parseClaudeConversations(raw: unknown): ImportedConversation[] {
   const conversations: ImportedConversation[] = [];
 

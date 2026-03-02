@@ -1,9 +1,9 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { parseChatGptConversations } from "../import/adapters/chatgpt";
-import { parseClaudeConversations } from "../import/adapters/claude";
-import { parseGrokConversations } from "../import/adapters/grok";
+import { isLikelyChatGptExport, parseChatGptConversations } from "../import/adapters/chatgpt";
+import { isLikelyClaudeExport, parseClaudeConversations } from "../import/adapters/claude";
+import { isLikelyGrokExport, parseGrokConversations } from "../import/adapters/grok";
 import type { ImportPlatform } from "../import/types";
 import { isDailyMemoryFile, normalizeCliInputPath } from "../lib/path";
 import { resolveOpenClawHome } from "../lib/runtime-env";
@@ -161,10 +161,30 @@ interface ImportJsonCandidateScore {
   score: number;
 }
 
-const IMPORT_JSON_PLATFORMS = ["chatgpt", "claude", "grok"] as const;
+type ImportJsonPlatform = Exclude<ImportPlatform, "openclaw">;
+
+const IMPORT_JSON_PLATFORMS = ["chatgpt", "claude", "grok"] as const satisfies readonly ImportJsonPlatform[];
+const IMPORT_JSON_PROBES: Record<ImportJsonPlatform, (raw: unknown) => boolean> = {
+  chatgpt: isLikelyChatGptExport,
+  claude: isLikelyClaudeExport,
+  grok: isLikelyGrokExport,
+};
+
+function isLikelyImportJsonPlatform(platform: ImportJsonPlatform, raw: unknown): boolean {
+  return IMPORT_JSON_PROBES[platform](raw);
+}
+
+function selectLikelyImportJsonPlatforms(raw: unknown): ImportJsonPlatform[] {
+  const likely = IMPORT_JSON_PLATFORMS.filter((platform) => isLikelyImportJsonPlatform(platform, raw));
+  if (likely.length > 0) {
+    return likely;
+  }
+
+  return [...IMPORT_JSON_PLATFORMS];
+}
 
 function scoreImportJsonCandidate(
-  platform: Exclude<ImportPlatform, "openclaw">,
+  platform: ImportJsonPlatform,
   filePath: string,
   parsed: unknown,
 ): ImportJsonCandidateScore | null {
@@ -180,17 +200,17 @@ function scoreImportJsonCandidate(
 }
 
 function scoreBestImportJsonPlatform(filePath: string, parsed: unknown): {
-  platform: Exclude<ImportPlatform, "openclaw">;
+  platform: ImportJsonPlatform;
   extractableConversations: number;
   score: number;
 } | null {
   let bestCandidate: {
-    platform: Exclude<ImportPlatform, "openclaw">;
+    platform: ImportJsonPlatform;
     extractableConversations: number;
     score: number;
   } | null = null;
 
-  for (const platform of IMPORT_JSON_PLATFORMS) {
+  for (const platform of selectLikelyImportJsonPlatforms(parsed)) {
     const scored = scoreImportJsonCandidate(platform, filePath, parsed);
     if (!scored) {
       continue;
@@ -303,7 +323,7 @@ function sortDetections(detections: ImportDetection[]): ImportDetection[] {
 
 async function resolveImportJsonPathFromDirectory(
   directory: string,
-  platform: Exclude<ImportPlatform, "openclaw">,
+  platform: ImportJsonPlatform,
 ): Promise<string | null> {
   const candidates = await listJsonCandidates(directory, 6, 500);
   if (candidates.length === 0) {
@@ -311,6 +331,34 @@ async function resolveImportJsonPathFromDirectory(
   }
 
   let bestParsedCandidate: { path: string; score: number } | null = null;
+  for (const candidatePath of [...candidates].sort((left, right) => left.localeCompare(right))) {
+    const parsed = await readJsonFile(candidatePath);
+    if (parsed === null) {
+      continue;
+    }
+
+    if (!isLikelyImportJsonPlatform(platform, parsed)) {
+      continue;
+    }
+
+    const candidateScore = scoreImportJsonCandidate(platform, candidatePath, parsed);
+    if (!candidateScore) {
+      continue;
+    }
+
+    if (!bestParsedCandidate || candidateScore.score > bestParsedCandidate.score) {
+      bestParsedCandidate = {
+        path: candidatePath,
+        score: candidateScore.score,
+      };
+    }
+  }
+
+  if (bestParsedCandidate) {
+    return bestParsedCandidate.path;
+  }
+
+  // Fallback: support exports that probes did not recognize yet.
   for (const candidatePath of [...candidates].sort((left, right) => left.localeCompare(right))) {
     const parsed = await readJsonFile(candidatePath);
     if (parsed === null) {
@@ -334,7 +382,7 @@ async function resolveImportJsonPathFromDirectory(
     return bestParsedCandidate.path;
   }
 
-  return candidates.length === 1 ? (candidates[0] ?? null) : null;
+  return candidates.length === 1 ? candidates[0] ?? null : null;
 }
 
 export async function resolveImportPathForPlatform(platform: ImportPlatform, rawPath: string): Promise<string> {
@@ -355,7 +403,7 @@ export async function resolveImportPathForPlatform(platform: ImportPlatform, raw
   if (detectedType === "dir") {
     const resolvedJson = await resolveImportJsonPathFromDirectory(
       normalizedPath,
-      platform as Exclude<ImportPlatform, "openclaw">,
+      platform as ImportJsonPlatform,
     );
     if (!resolvedJson) {
       throw new Error(`No ${platform} JSON export found under directory: ${normalizedPath}`);

@@ -226,6 +226,41 @@ function parseConversation(raw: unknown, index: number): ImportedConversation | 
   };
 }
 
+function looksLikeGrokConversation(raw: unknown): boolean {
+  if (!isObject(raw)) {
+    return false;
+  }
+
+  if (Array.isArray(raw.responses) && isObject(raw.conversation)) {
+    return true;
+  }
+
+  if (isObject(raw.messagesById)) {
+    return true;
+  }
+
+  if (isObject(raw._id)) {
+    return true;
+  }
+
+  if (isObject(raw.conversation)) {
+    const conversation = raw.conversation;
+    return isObject(conversation._id) || typeof conversation.id === "string";
+  }
+
+  return false;
+}
+
+export function isLikelyGrokExport(raw: unknown): boolean {
+  const conversations = readConversationList(raw);
+  if (conversations.length === 0) {
+    return false;
+  }
+
+  const sample = conversations.slice(0, 5);
+  return sample.some((conversation) => looksLikeGrokConversation(conversation));
+}
+
 export function parseGrokConversations(raw: unknown): ImportedConversation[] {
   const conversations: ImportedConversation[] = [];
 
