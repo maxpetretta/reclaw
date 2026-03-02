@@ -73,6 +73,11 @@ interface CandidateConversation {
   conversation: ImportedConversation;
 }
 
+interface PreparedImportedEntry {
+  subjectTypeHint?: string;
+  entry: LogEntry;
+}
+
 interface ImportLogger {
   info: (message: string) => void;
   warn: (message: string) => void;
@@ -269,6 +274,165 @@ function createImportedStateRecord(sessionId: string, conversation: ImportedConv
   };
 }
 
+function createImportSummary(
+  options: ReclawImportOptions,
+  parsedCount: number,
+  dedupedInInput: number,
+): ReclawImportSummary {
+  return {
+    platform: options.platform,
+    parsed: parsedCount,
+    dedupedInInput,
+    selected: 0,
+    skippedByDate: 0,
+    skippedByMinMessages: 0,
+    skippedAlreadyImported: 0,
+    imported: 0,
+    failed: 0,
+    entriesWritten: 0,
+    subjectsCreated: 0,
+    transcriptsWritten: 0,
+    dryRun: options.dryRun === true,
+  };
+}
+
+function createProgressEmitter(
+  onProgress: ReclawImportOptions["onProgress"],
+): (summary: ReclawImportSummary) => Promise<void> {
+  return async (summary) => {
+    if (!onProgress) {
+      return;
+    }
+
+    await onProgress({
+      total: summary.selected,
+      completed: summary.imported + summary.failed,
+      imported: summary.imported,
+      failed: summary.failed,
+      entriesWritten: summary.entriesWritten,
+      subjectsCreated: summary.subjectsCreated,
+    });
+  };
+}
+
+function createStopGuard(
+  shouldStop: ReclawImportOptions["shouldStop"],
+): () => Promise<void> {
+  return async () => {
+    if (!shouldStop) {
+      return;
+    }
+
+    if (await shouldStop()) {
+      throw new Error(IMPORT_STOP_REQUESTED_ERROR);
+    }
+  };
+}
+
+async function selectCandidateConversations(params: {
+  options: ReclawImportOptions;
+  conversations: ImportedConversation[];
+  workingState: ZettelclawState;
+  minMessages: number;
+  afterMs?: number;
+  beforeMs?: number;
+  summary: ReclawImportSummary;
+  logger: ImportLogger;
+  ensureNotStopped: () => Promise<void>;
+}): Promise<CandidateConversation[]> {
+  const {
+    options,
+    conversations,
+    workingState,
+    minMessages,
+    afterMs,
+    beforeMs,
+    summary,
+    logger,
+    ensureNotStopped,
+  } = params;
+
+  const selected: CandidateConversation[] = [];
+
+  for (const conversation of conversations) {
+    await ensureNotStopped();
+    const key = createConversationKey(options.platform, conversation.conversationId);
+    const updatedAtMs = Date.parse(conversation.updatedAt);
+
+    if (afterMs !== undefined && Number.isFinite(updatedAtMs) && updatedAtMs < afterMs) {
+      summary.skippedByDate += 1;
+      if (options.verbose) {
+        logger.info(`skip (date<after) ${key}`);
+      }
+      continue;
+    }
+
+    if (beforeMs !== undefined && Number.isFinite(updatedAtMs) && updatedAtMs > beforeMs) {
+      summary.skippedByDate += 1;
+      if (options.verbose) {
+        logger.info(`skip (date>before) ${key}`);
+      }
+      continue;
+    }
+
+    if (countExtractableMessages(conversation) < minMessages) {
+      summary.skippedByMinMessages += 1;
+      if (options.verbose) {
+        logger.info(`skip (min-messages) ${key}`);
+      }
+      continue;
+    }
+
+    if (!options.force && workingState.importedConversations[key]) {
+      summary.skippedAlreadyImported += 1;
+      if (options.verbose) {
+        logger.info(`skip (already-imported) ${key}`);
+      }
+      continue;
+    }
+
+    selected.push({
+      key,
+      conversation,
+    });
+  }
+
+  selected.sort((left, right) => {
+    const leftTimestamp = parseConversationTimestamp(left.conversation.updatedAt);
+    const rightTimestamp = parseConversationTimestamp(right.conversation.updatedAt);
+    if (leftTimestamp !== rightTimestamp) {
+      return leftTimestamp - rightTimestamp;
+    }
+
+    return left.key.localeCompare(right.key);
+  });
+
+  return selected;
+}
+
+function prepareImportedEntriesForConversation(
+  extractedEntries: Array<LogEntry | ExtractedImportedEntry>,
+  sessionId: string,
+  historicalTimestamp: string,
+): PreparedImportedEntry[] {
+  const normalizedExtracted = extractedEntries.map((entry) => normalizeExtractedImportEntry(entry));
+  return normalizedExtracted.map((parsedEntry) => {
+    const { subject, timestamp, ...rest } = parsedEntry.entry;
+    const normalizedSubject = typeof subject === "string" ? subject.trim() : "";
+
+    return {
+      subjectTypeHint: parsedEntry.subjectTypeHint,
+      entry: {
+        ...rest,
+        ...(normalizedSubject ? { subject: normalizedSubject } : {}),
+        // Preserve import invariants even if extraction dependencies drift.
+        session: sessionId,
+        timestamp: normalizeImportedEntryTimestamp(timestamp, historicalTimestamp),
+      },
+    };
+  });
+}
+
 async function runWithConcurrency<T>(
   items: T[],
   maxJobs: number,
@@ -326,31 +490,8 @@ export async function runReclawImport(
   const dryRun = options.dryRun === true;
   const afterMs = parseBoundary(options.after, "--after");
   const beforeMs = parseBoundary(options.before, "--before");
-  const shouldStop = options.shouldStop;
-  const onProgress = options.onProgress;
-  const emitProgress = async (summary: ReclawImportSummary): Promise<void> => {
-    if (!onProgress) {
-      return;
-    }
-
-    await onProgress({
-      total: summary.selected,
-      completed: summary.imported + summary.failed,
-      imported: summary.imported,
-      failed: summary.failed,
-      entriesWritten: summary.entriesWritten,
-      subjectsCreated: summary.subjectsCreated,
-    });
-  };
-  const ensureNotStopped = async (): Promise<void> => {
-    if (!shouldStop) {
-      return;
-    }
-
-    if (await shouldStop()) {
-      throw new Error(IMPORT_STOP_REQUESTED_ERROR);
-    }
-  };
+  const emitProgress = createProgressEmitter(options.onProgress);
+  const ensureNotStopped = createStopGuard(options.shouldStop);
 
   const rawImport = await runtimeDeps.readImportFile({
     platform: options.platform,
@@ -361,76 +502,17 @@ export async function runReclawImport(
   const parsedRaw = runtimeDeps.parseConversations(options.platform, rawImport);
   const deduped = dedupeInputConversations(options.platform, parsedRaw);
   const workingState = await readState(options.statePath);
-
-  const summary: ReclawImportSummary = {
-    platform: options.platform,
-    parsed: parsedRaw.length,
-    dedupedInInput: deduped.duplicates,
-    selected: 0,
-    skippedByDate: 0,
-    skippedByMinMessages: 0,
-    skippedAlreadyImported: 0,
-    imported: 0,
-    failed: 0,
-    entriesWritten: 0,
-    subjectsCreated: 0,
-    transcriptsWritten: 0,
-    dryRun,
-  };
-
-  const selected: CandidateConversation[] = [];
-
-  for (const conversation of deduped.conversations) {
-    await ensureNotStopped();
-    const key = createConversationKey(options.platform, conversation.conversationId);
-    const updatedAtMs = Date.parse(conversation.updatedAt);
-
-    if (afterMs !== undefined && Number.isFinite(updatedAtMs) && updatedAtMs < afterMs) {
-      summary.skippedByDate += 1;
-      if (options.verbose) {
-        logger.info(`skip (date<after) ${key}`);
-      }
-      continue;
-    }
-
-    if (beforeMs !== undefined && Number.isFinite(updatedAtMs) && updatedAtMs > beforeMs) {
-      summary.skippedByDate += 1;
-      if (options.verbose) {
-        logger.info(`skip (date>before) ${key}`);
-      }
-      continue;
-    }
-
-    if (countExtractableMessages(conversation) < minMessages) {
-      summary.skippedByMinMessages += 1;
-      if (options.verbose) {
-        logger.info(`skip (min-messages) ${key}`);
-      }
-      continue;
-    }
-
-    if (!options.force && workingState.importedConversations[key]) {
-      summary.skippedAlreadyImported += 1;
-      if (options.verbose) {
-        logger.info(`skip (already-imported) ${key}`);
-      }
-      continue;
-    }
-
-    selected.push({
-      key,
-      conversation,
-    });
-  }
-
-  selected.sort((left, right) => {
-    const leftTimestamp = parseConversationTimestamp(left.conversation.updatedAt);
-    const rightTimestamp = parseConversationTimestamp(right.conversation.updatedAt);
-    if (leftTimestamp !== rightTimestamp) {
-      return leftTimestamp - rightTimestamp;
-    }
-
-    return left.key.localeCompare(right.key);
+  const summary = createImportSummary(options, parsedRaw.length, deduped.duplicates);
+  const selected = await selectCandidateConversations({
+    options,
+    conversations: deduped.conversations,
+    workingState,
+    minMessages,
+    afterMs,
+    beforeMs,
+    summary,
+    logger,
+    ensureNotStopped,
   });
 
   summary.selected = selected.length;
@@ -477,45 +559,34 @@ export async function runReclawImport(
           apiBaseUrl: options.apiBaseUrl,
           apiToken: options.apiToken,
         });
-        const normalizedExtracted = extractedEntries.map((entry) => normalizeExtractedImportEntry(entry));
-        const entries = normalizedExtracted.map((parsedEntry) => {
-          const { subject, timestamp, ...rest } = parsedEntry.entry;
-          const normalizedSubject = typeof subject === "string" ? subject.trim() : "";
-
-          return {
-            subjectTypeHint: parsedEntry.subjectTypeHint,
-            ...rest,
-            ...(normalizedSubject ? { subject: normalizedSubject } : {}),
-            // Preserve import invariants even if extraction dependencies drift.
-            session: sessionId,
-            timestamp: normalizeImportedEntryTimestamp(timestamp, historicalTimestamp),
-          };
-        });
+        const preparedEntries = prepareImportedEntriesForConversation(
+          extractedEntries,
+          sessionId,
+          historicalTimestamp,
+        );
 
         let createdSubjectsForConversation = 0;
         await withCommitLock(async () => {
           await ensureNotStopped();
-          for (const entry of entries) {
-            if (!entry.subject) {
+          for (const preparedEntry of preparedEntries) {
+            if (!preparedEntry.entry.subject) {
               continue;
             }
 
-            if (!knownSubjects.has(entry.subject)) {
-              knownSubjects.add(entry.subject);
+            if (!knownSubjects.has(preparedEntry.entry.subject)) {
+              knownSubjects.add(preparedEntry.entry.subject);
               createdSubjectsForConversation += 1;
             }
 
             await upsertSubjectFromExtraction(
               options.subjectsPath,
-              entry.subject,
-              entry.subjectTypeHint,
+              preparedEntry.entry.subject,
+              preparedEntry.subjectTypeHint,
             );
           }
 
-          for (const entry of entries) {
-            const { subjectTypeHint, ...logEntry } = entry;
-            void subjectTypeHint;
-            await appendEntry(options.logPath, logEntry);
+          for (const preparedEntry of preparedEntries) {
+            await appendEntry(options.logPath, preparedEntry.entry);
           }
 
           if (transcripts) {
@@ -528,20 +599,20 @@ export async function runReclawImport(
             summary.transcriptsWritten += 1;
           }
 
-          summary.entriesWritten += entries.length;
+          summary.entriesWritten += preparedEntries.length;
           summary.subjectsCreated += createdSubjectsForConversation;
           summary.imported += 1;
           workingState.importedConversations[candidate.key] = createImportedStateRecord(
             sessionId,
             candidate.conversation,
-            entries.length,
+            preparedEntries.length,
           );
           stateDirty = true;
         });
 
         completed += 1;
         logger.info(
-          `[${completed}/${summary.selected}] imported ${candidate.key} (entries=${entries.length}, subjectsCreated=${createdSubjectsForConversation})`,
+          `[${completed}/${summary.selected}] imported ${candidate.key} (entries=${preparedEntries.length}, subjectsCreated=${createdSubjectsForConversation})`,
         );
         await emitProgress(summary);
       } catch (error) {
