@@ -20,8 +20,8 @@
     "web:dev": "bun run --cwd packages/website dev",
     "web:build": "bun run --cwd packages/website build",
     "web:preview": "bun run --cwd packages/website preview",
-    "lint": "bun run --cwd packages/cli lint && bun run --cwd packages/skill lint && bun run --cwd packages/website lint",
-    "fix": "bun run --cwd packages/cli fix && bun run --cwd packages/skill fix && bun run --cwd packages/website fix"
+    "lint": "bun run --cwd packages/cli lint && bun run --cwd packages/website lint",
+    "fix": "bun run --cwd packages/cli fix && bun run --cwd packages/website fix"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.3",

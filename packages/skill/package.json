@@ -1,28 +1,15 @@
 {
   "name": "@zettelclaw/skill",
-  "version": "2026.2.23",
-  "description": "Zettelclaw skill package for OpenClaw and ClawHub",
+  "version": "3.0.0",
+  "description": "Zettelclaw memory system skill for OpenClaw — agent instructions for the append-only event log",
   "private": false,
   "type": "module",
   "files": [
-    "SKILL.md",
-    "hooks",
-    "templates"
+    "zettelclaw"
   ],
   "clawhub": {
     "skill": {
-      "entry": "SKILL.md",
-      "hooksDir": "hooks",
-      "templatesDir": "templates"
+      "entry": "zettelclaw/SKILL.md"
     }
-  },
-  "scripts": {
-    "lint": "biome check . && tsgo --noEmit",
-    "lint:biome": "biome check .",
-    "lint:typecheck": "tsgo --noEmit",
-    "fix": "biome check --write ."
-  },
-  "devDependencies": {
-    "@types/bun": "1.2.5"
   }
 }
