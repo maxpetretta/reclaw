@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { intro as clackIntro, log as clackLog, outro as clackOutro, spinner as clackSpinner } from "@clack/prompts";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { generateBriefing } from "../briefing/generate";
 import type { PluginConfig } from "../config";
@@ -85,28 +86,35 @@ export function registerBriefingCommands(
     workspaceDir?: string;
   },
 ): void {
+  const BANNER = "🦞 Reclaw - Reclaim your AI conversations";
+
   const runSnapshotGenerateAction = async (): Promise<void> => {
+    clackIntro(BANNER);
+    const spin = clackSpinner();
+    spin.start("Generating memory snapshot...");
     const memoryMdPath = await runSnapshotGenerate({
       config: params.config,
       api: params.api,
       workspaceDir: params.workspaceDir,
     });
-
-    console.log(`Memory snapshot updated: ${memoryMdPath}`);
+    spin.stop(`Memory snapshot updated: ${memoryMdPath}`);
+    clackOutro("MEMORY.md snapshot block rewritten.");
   };
 
   const runHandoffRefresh = async (): Promise<void> => {
+    clackIntro(BANNER);
     const result = await runSessionHandoffRefresh({
       config: params.config,
       workspaceDir: params.workspaceDir,
     });
 
     if (result.updated) {
-      console.log(`Session handoff refreshed: ${result.memoryMdPath}`);
+      clackLog.step("Session handoff refreshed");
+      clackOutro("MEMORY.md handoff block updated.");
       return;
     }
 
-    console.log(`No handoff entries found in log: ${result.memoryMdPath} unchanged`);
+    clackOutro("No handoff entries found. MEMORY.md unchanged.");
   };
 
   const snapshot = reclaw.command("snapshot").description("Memory snapshot generation helpers");
