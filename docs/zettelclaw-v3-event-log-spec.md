@@ -1,7 +1,7 @@
 # Zettelclaw V3: Event Log Architecture
 
 Status: Implementation contract
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 Scope: `packages/plugin` (OpenClaw memory slot plugin)
 
 ## 1. System Contract
@@ -75,8 +75,8 @@ Legacy memory behaviors are disabled by init:
 
 | Type | For | Examples |
 |---|---|---|
-| `person` | People | max, contacts |
-| `project` | Things being built | zettelclaw, safeshell, bracky |
+| `person` | People | alice-chen, contacts |
+| `project` | Things being built | zettelclaw, my-saas-app, home-automation |
 | `system` | Infrastructure, services, tools | openclaw, telegram, tts |
 | `topic` | Recurring themes that aren't a project, person, or system | ai-wearables, crypto |
 
@@ -86,14 +86,14 @@ Legacy memory behaviors are disabled by init:
 
 **Slug format:** Lowercase kebab-case. `auth-migration`, not `Auth_Migration` or `authMigration`.
 
-**Creating subjects:** The extraction agent outputs entries with `subject` values. For non-handoff entries, `subject` is required; if omitted, the hook fills `unknown`. The extraction hook reads the registry before writing. If the LLM output references a slug not in the registry, the hook adds it to `subjects.json` with `display` (Title Case of slug) and `type` inferred from context (default `topic`). Subjects can also be created manually via CLI:
+**Creating subjects:** The extraction agent outputs entries with `subject` values. For non-handoff entries, `subject` is required; if omitted, the hook fills `unknown`. The extraction hook reads the registry before writing. If the LLM output references a slug not in the registry, the hook adds it to `subjects.json` with `display` (Title Case of slug) and `type` from the entry's `subjectType` hint (default `topic`). Subjects can also be created manually via CLI:
 
 ```bash
 openclaw zettelclaw subjects add auth-migration
-openclaw zettelclaw subjects add max --type person
+openclaw zettelclaw subjects add alice-chen --type person
 ```
 
-Default subject type is `topic` when type is inferred/invalid. The extraction hook also allows **type correction** for existing subjects: if an entry references an existing slug with a valid `subjectType`, the registry type is updated.
+Default subject type is `topic` when no `subjectType` hint is provided or when the hint is invalid. The extraction hook also allows **type correction** for existing subjects: if an entry references an existing slug with a valid `subjectType`, the registry type is updated.
 
 **Renaming subjects:** CLI command renames in both the registry and the log:
 
@@ -220,7 +220,7 @@ rg '"type":"question"' log.jsonl
 # Entries from a specific session
 rg '"session":"abc12345"' log.jsonl
 
-# Last handoff
+# Zettelclaw session handoff
 rg '"type":"handoff"' log.jsonl | tail -1
 
 # Full-text search
@@ -476,14 +476,12 @@ MEMORY.md has two sections with different authors:
 ## Goals
 - Ship auth migration by end of month
 - Keep the monorepo build under 30s
-- Zettelclaw V3 spec and implementation
 
 ## Preferences
-- Bun for all JS/TS, never yarn/pnpm
-- Never auto-commit
+- TypeScript strict mode everywhere
 - Prefer simple solutions over configurable ones
 
-<!-- BEGIN GENERATED BRIEFING -->
+<!-- BEGIN ZETTELCLAW MEMORY SNAPSHOT -->
 ## Snapshot
 - Auth migration is active with retry logic in place; delivery hardening and backfill remain.
 - Zettelclaw memory system work is focused on chain quality and snapshot relevance.
@@ -509,11 +507,11 @@ MEMORY.md has two sections with different authors:
 
 ## Recent Decisions
 - 2026-02-20: Queue-based retries with exponential backoff for webhooks
-- 2026-02-18: Bun over yarn — 3-4x faster, one-way door
+- 2026-02-18: Switched to queue-based job processing for import pipeline
 
 ## Stale Threads
-- whisper-stt — last entry 2026-01-08, referenced in recent session
-<!-- END GENERATED BRIEFING -->
+- legacy-api — last entry 2026-01-08, referenced in recent session
+<!-- END ZETTELCLAW MEMORY SNAPSHOT -->
 ```
 
 ### 5.2 Generation
@@ -561,7 +559,7 @@ The log is authoritative. The generated snapshot is a cache. When they disagree,
 When the agent needs information beyond what MEMORY.md and the handoff provide, it uses the zettelclaw-provided memory tools:
 
 1. **MEMORY.md** — auto-loaded by OpenClaw session bootstrap. Already in context.
-2. **Last handoff** — written into MEMORY.md between managed markers on each successful extraction when a handoff entry is produced.
+2. **Zettelclaw session handoff** — written into MEMORY.md between managed markers on each successful extraction when a handoff entry is produced.
 3. **`memory_search`** — zettelclaw's wrapped tool. Two search paths:
    - **Log search** (structured filters + ripgrep): precise lookups by type, subject, status. Keyword search over content/detail fields.
    - **MEMORY.md search** (builtin semantic): delegated to OpenClaw's builtin for hybrid BM25+vector search over the manual section.
@@ -576,13 +574,13 @@ When the main agent references a prior event in conversation, it should cite the
 ### 6.1 Handoff persistence in MEMORY.md
 
 When extraction appends new entries to `log.jsonl`, it checks the newly appended entries for a handoff.
-If found, zettelclaw rewrites the `<!-- BEGIN LAST HANDOFF -->` / `<!-- END LAST HANDOFF -->`
+If found, zettelclaw rewrites the `<!-- BEGIN ZETTELCLAW SESSION HANDOFF -->` / `<!-- END ZETTELCLAW SESSION HANDOFF -->`
 managed block in MEMORY.md with the latest handoff content.
 
 The generated handoff block looks like:
 
 ```
-## Last Session Handoff
+## Zettelclaw Session Handoff
 Session: abc12345 (2026-02-20T15:30:00Z)
 Auth migration — retry logic implementation, backfill script not started
 Detail: Exponential backoff working in staging. Still need backfill script for 47 failed jobs, then canary deploy. Load testing not done yet.
@@ -594,8 +592,8 @@ handoff between them.
 ### 6.2 Implementation note
 
 MEMORY.md now has two generated sections:
-- **Nightly snapshot block** (`BEGIN/END GENERATED BRIEFING`) written by the cron snapshot job.
-- **Last handoff block** (`BEGIN/END LAST HANDOFF`) written by extraction when a new handoff is appended.
+- **Nightly snapshot block** (`BEGIN/END ZETTELCLAW MEMORY SNAPSHOT`) written by the cron snapshot job.
+- **Zettelclaw session handoff block** (`BEGIN/END ZETTELCLAW SESSION HANDOFF`) written by extraction when a new handoff is appended.
 
 Each writer only edits its own marker block, so the two generated sections do not overwrite each other.
 
@@ -626,22 +624,78 @@ zettelclaw/
     post-init-system-event.md     # System-event template used by init guidance notification
   src/
     plugin.ts                     # Plugin entry — registers hooks, tools, CLI commands
+    config.ts                     # Plugin config schema and validation
+    extraction/
+      prompt.ts                   # Build extraction prompt (system + user) with existing entries
+      shared.ts                   # JSONL parsing, subject detection, aux field stripping
     hooks/
-      extraction.ts               # session_end / before_reset / gateway_start — extract from transcripts
+      extraction.ts               # session_end / before_reset / gateway_start — route events to pipeline
+      pipeline.ts                 # Core extraction pipeline — LLM call, parse, write entries
+      session-discovery.ts        # gateway_start sweep — find un-extracted/failed sessions
+      transcript-utils.ts         # Locate and read transcript files by session/agent ID
     memory/
-      handoff.ts                  # Format and write LAST HANDOFF block in MEMORY.md
+      handoff.ts                  # Format and write ZETTELCLAW SESSION HANDOFF block in MEMORY.md
       managed-block.ts            # Shared utility for marker-delimited block replacement
+      markers.ts                  # All managed-block marker constants (briefing, handoff, guidance, notice)
     tools/
       memory-search.ts            # Wraps builtin memory_search — adds structured filters + log search rendering
       memory-get.ts               # Wraps builtin memory_get — adds entry-by-ID and transcript lookups
+      shared.ts                   # Shared tool result formatting (textResult)
     briefing/
       generate.ts                 # Read log, run snapshot prompt, rewrite MEMORY.md block
     log/
-      schema.ts                   # Entry types, validation, nanoid generation
-      query.ts                    # Structured log queries (type/subject/status filters)
+      schema.ts                   # Entry types, validation, nanoid generation, type/status parsers
+      query.ts                    # Structured log queries (type/subject/status filters) + ripgrep search
     subjects/
       registry.ts                 # Read/write subjects.json, auto-create, rename/merge
-    state.ts                      # Dedup state (extractedSessions, failedSessions)
+    state.ts                      # Dedup state (extractedSessions, failedSessions, eventUsage, importJobs)
+    state-normalize.ts            # State file normalization and validation helpers
+    store/
+      files.ts                    # File I/O helpers for state/registry persistence
+    import/
+      adapters/
+        chatgpt.ts                # ChatGPT JSON export → ImportedConversation[]
+        claude.ts                 # Claude JSON export → ImportedConversation[]
+        grok.ts                   # Grok JSON export → ImportedConversation[]
+        openclaw.ts               # OpenClaw transcript migration → ImportedConversation[]
+        shared.ts                 # Shared adapter utils (readString, parseTimestampMs, normalizeRole)
+      extract.ts                  # Import extraction — LLM call with historical-mode prefix
+      extract-policy.ts           # Retry and quality policy for import extraction
+      extract-quality.ts          # Extraction output quality checks
+      extract-timestamp.ts        # Historical timestamp resolution and normalization
+      run.ts                      # Import runner — orchestrate conversation→entries pipeline
+      sessions.ts                 # Session ID generation for imported conversations
+      types.ts                    # Shared import type definitions
+    lib/
+      chat-completions.ts         # OpenAI-compatible chat completions HTTP client
+      cron-jobs-store.ts          # Read/write ~/.openclaw/cron/jobs.json
+      gateway.ts                  # API base URL resolution
+      guards.ts                   # Shared type guards (isObject, isEnoent, isNonEmptyString, escapeRegex, normalizeError)
+      llm.ts                      # High-level LLM call wrappers (extractFromTranscript)
+      openclaw-cron.ts            # Cron job registration helpers
+      path.ts                     # Path resolution utilities
+      runtime-env.ts              # Runtime environment detection
+      text.ts                     # Shared text processing (normalizeWhitespace, extractTextContent)
+      transcript.ts               # Transcript parsing and formatting
+    cli/
+      commands.ts                 # CLI command registration entry point
+      command-like.ts             # Commander-compatible interface for CLI commands
+      parse.ts                    # CLI option parsing helpers
+      paths.ts                    # CLI path resolution from config
+      openclaw-config.ts          # OpenClaw config read/write for init/uninstall
+      register-setup-commands.ts  # init, uninstall, verify commands
+      register-log-commands.ts    # log, search, trace commands
+      register-subject-commands.ts # subjects add/rename/list commands
+      register-briefing-commands.ts # snapshot + handoff refresh commands
+      register-import-commands.ts # import, import status/resume commands
+      import-detect.ts            # Auto-detect import source platform
+      import-file-ops.ts          # Import file read/backup/cleanup
+      import-job-cron.ts          # Async import job cron worker registration
+      import-job-format.ts        # Import job status formatting
+      import-job-options.ts       # Import job option parsing
+      import-job-store.ts         # Import job state persistence
+      import-ops.ts               # Import execution logic
+      import-ui.ts                # Import CLI user feedback
   skills/
     zettelclaw/
       SKILL.md                    # Teaches the agent about the memory system
@@ -676,10 +730,9 @@ The pre-compaction memory flush (`agents.defaults.compaction.memoryFlush`) is di
 | **Memory slot** | `kind: "memory"` in manifest | Replaces `memory-core` as the active memory plugin |
 | **`memory_search` tool** | Wraps `api.runtime.tools.createMemorySearchTool()` | Builtin semantic/keyword search + structured log filters + ID-forward log result rendering |
 | **`memory_get` tool** | Wraps `api.runtime.tools.createMemoryGetTool()` | Builtin file reads + log entry-by-ID + transcript lookups by session ID |
-| Extraction hook | Plugin hook: `session_end` | Primary trigger — fires on any session end (daily/idle/explicit reset) |
-| Extraction hook | Plugin hook: `before_reset` | Secondary — provides `messages[]` inline on `/new`/`/reset` |
-| Extraction hook | Plugin hook: `gateway_start` | Sweep for un-extracted and failed sessions |
-| Handoff writer | Extraction post-processing | Rewrites MEMORY.md `LAST HANDOFF` managed block when new handoff is appended |
+| Extraction hooks | Plugin hooks: `session_end`, `before_reset` | Primary (`session_end`) and secondary (`before_reset`) triggers route through `hooks/pipeline.ts` |
+| Startup sweep | Plugin hook: `gateway_start` | Sweep for un-extracted and failed sessions via `hooks/session-discovery.ts` |
+| Handoff writer | Extraction post-processing | Rewrites MEMORY.md `ZETTELCLAW SESSION HANDOFF` managed block when new handoff is appended |
 | Nightly cron | `cron/jobs.json` job upsert during init | Rewrite MEMORY.md generated snapshot block (LLM-powered) |
 | Skill | `skills/zettelclaw/SKILL.md` | Agent instructions for the memory system |
 | CLI: init | Plugin-registered command | Create log directory, set memory slot, disable flush, register cron, add generated snapshot + handoff markers to MEMORY.md |
@@ -691,7 +744,8 @@ The pre-compaction memory flush (`agents.defaults.compaction.memoryFlush`) is di
 | CLI: import | Plugin-registered command | Queue async historical import workers by default (chatgpt/claude/grok/openclaw), with state-based dedupe, chronological processing, extraction context, subject type upsert, optional transcript generation, and optional source backup/cleanup |
 | CLI: import status/resume | Plugin-registered command | Inspect async import jobs and re-queue eligible jobs from `state.json.importJobs` |
 | CLI: subjects | Plugin-registered command | `add`, `rename`, `list` — manage subject registry (`add` defaults type to `topic`) |
-| CLI: briefing generate | Plugin-registered command | Run snapshot generation immediately and rewrite MEMORY.md generated block (`snapshot generate` alias available) |
+| CLI: snapshot generate | Plugin-registered command | Run snapshot generation immediately and rewrite MEMORY.md generated block |
+| CLI: handoff refresh | Plugin-registered command | Force-refresh the MEMORY.md `ZETTELCLAW SESSION HANDOFF` managed block from the latest handoff event in `log.jsonl` |
 
 ### 8.3 Installation
 
@@ -707,8 +761,8 @@ openclaw zettelclaw init
 4. Disables the `session-memory` bundled hook if enabled
 5. Registers the nightly cron job for snapshot generation
 6. Adds generated snapshot markers and handoff markers to MEMORY.md:
-   - `<!-- BEGIN GENERATED BRIEFING -->` / `<!-- END GENERATED BRIEFING -->`
-   - `<!-- BEGIN LAST HANDOFF -->` / `<!-- END LAST HANDOFF -->`
+   - `<!-- BEGIN ZETTELCLAW MEMORY SNAPSHOT -->` / `<!-- END ZETTELCLAW MEMORY SNAPSHOT -->`
+   - `<!-- BEGIN ZETTELCLAW SESSION HANDOFF -->` / `<!-- END ZETTELCLAW SESSION HANDOFF -->`
 7. Fires a post-init system event that instructs the main session to update managed Zettelclaw guidance blocks in `AGENTS.md` and `MEMORY.md`
 
 Note: step 7 is guidance-only; CLI `init` does not directly rewrite `AGENTS.md` or inject the Zettelclaw notice block in `MEMORY.md`.
@@ -735,7 +789,7 @@ In `openclaw.json` under `plugins.entries.zettelclaw`:
 
     "cron": {
       "schedule": "0 3 * * *",
-      "timezone": "America/Detroit"
+      "timezone": "America/New_York"
     }
   }
 }
@@ -748,12 +802,12 @@ Search/embedding configuration is inherited from the user's existing `agents.def
 ### 8.5 Nightly cron job
 
 Registered/updated during `init` by writing `~/.openclaw/cron/jobs.json`:
-- Job name: `zettelclaw-briefing`
+- Job name: `zettelclaw-memory-snapshot`
 - Schedule: `config.cron.schedule` (default `0 3 * * *`)
 - Timezone: `config.cron.timezone` (defaults to local timezone if unset)
 - Session target: `isolated`
 - Wake mode: `now`
-- Payload: `Run: openclaw zettelclaw briefing generate`
+- Payload: `Run: openclaw zettelclaw snapshot generate`
 - Delivery: none
 
 `init` also removes legacy job names `zettelclaw-reset` and `zettelclaw-nightly` if present.
@@ -876,9 +930,9 @@ By replacing `memory-core`, zettelclaw eliminates:
 
 5. **Subject auto-creation**: Verify new subjects from extraction are added to `subjects.json`. Verify `openclaw zettelclaw subjects add` and `openclaw zettelclaw subjects rename` work correctly (rename updates both registry and log).
 
-6. **Handoff persistence**: End a session that emits a handoff. Verify MEMORY.md `LAST HANDOFF` block is updated. Start a new session and confirm the handoff appears via MEMORY.md auto-load.
+6. **Handoff persistence**: End a session that emits a handoff. Verify MEMORY.md `ZETTELCLAW SESSION HANDOFF` block is updated. Start a new session and confirm the handoff appears via MEMORY.md auto-load.
 
-7. **Nightly snapshot**: Run `openclaw cron run <zettelclaw-briefing>`. Verify MEMORY.md's generated block is updated. Verify manual content outside the markers is preserved. Verify the snapshot reflects current interests, active projects/systems, conversation focus, active tasks, open questions, and durable memory from the log.
+7. **Nightly snapshot**: Run `openclaw cron run <zettelclaw-memory-snapshot>`. Verify MEMORY.md's generated block is updated. Verify manual content outside the markers is preserved. Verify the snapshot reflects current interests, active projects/systems, conversation focus, active tasks, open questions, and durable memory from the log.
 
 8. **Memory tools**: Verify `memory_search` returns structured log entries with type/subject/status filters and includes event IDs in log-backed result lines. Verify keyword search over log entries works via ripgrep ("webhook" finds the retry decision). Verify semantic search over MEMORY.md works via the builtin. Verify `memory_get` reads entries by ID, MEMORY.md by path, and transcripts by `session:` prefix. Verify `memory-core` is disabled (slot occupied by zettelclaw).
 
@@ -911,12 +965,12 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 | 9 | Session ID format | OpenClaw's `sessionId` from hook event context. Maps to `<sessionId>.jsonl` transcript. |
 | 10 | Duplicate handoffs | `state.json` tracks `extractedSessions` map (set of sessionIds). Same session = skip. Failed sessions tracked with retry count (max 1 retry). Map pruned after 30d. |
 | 11 | JSONL indexing | Builtin indexer is markdown-only. Log search handled by wrapper (structured filters + ripgrep). Semantic search covers MEMORY.md only for v1. |
-| 12 | Handoff persistence | Extraction rewrites MEMORY.md `LAST HANDOFF` block when new handoff entries are appended. `before_prompt_build` hook eliminated — MEMORY.md auto-load handles injection. |
+| 12 | Handoff persistence | Extraction rewrites MEMORY.md `ZETTELCLAW SESSION HANDOFF` block when new handoff entries are appended. `before_prompt_build` hook eliminated — MEMORY.md auto-load handles injection. |
 | 13 | Extraction model | Sonnet (configurable via `extraction.model`). |
 | 14 | Scope filtering | Only main sessions extracted. Skip `cron:`, `sub:`, `hook:` session key prefixes. |
 | 15 | Error handling | Retry extraction once on failure. Mark as permanently failed after second failure. `gateway_start` sweep also retries. |
 | 16 | Migration/import | Includes CLI import tooling (`openclaw zettelclaw import`) for chatgpt/claude/grok/openclaw sources, queued async by default via isolated cron workers, with state-based dedupe, chronological processing (oldest to newest), import extraction context (`## Existing Entries` with IDs), subject type upsert from `subjectType` hints, malformed-output repair retry, `import status/resume` job management, and optional source backup/cleanup for openclaw migration. |
-| 17 | Subject type enum | Constrained to `project \| person \| system \| topic`. Default `topic`. Validated on creation with fallback. |
+| 17 | Subject type enum | Constrained to `project \| person \| system \| topic`. Default `topic`. Subject type comes exclusively from explicit `subjectType` hints in extraction output; no programmatic slug-based inference. Validated on creation with fallback. |
 | 18 | Snapshot pre-filtering | Four buckets (active entries, open items, stale subjects, durable entries) pre-filtered in code before LLM call. `decisionWindow` config removed — decisions are covered by `activeWindow`. LLM handles presentation only. |
 | 19 | Extraction context | Existing log entries (subject-relevant + open items) fed to extraction LLM to avoid duplicates and reason about chronology. Capped at 50 entries per subject and rendered chronologically (oldest to newest). |
 | 20 | Chronological lineage | Subject history is reconstructed by sorting entries by timestamp; no explicit replacement-link field. |
@@ -929,14 +983,21 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 Recommended implementation sequence. Each phase is independently testable.
 
 ### Phase 1: Core log + schema
-- `log/schema.ts` — entry types, validation, nanoid generation
+- `log/schema.ts` — entry types, validation, nanoid generation, type/status parsers
 - `log/query.ts` — structured filters (type/subject/status) + ripgrep wrapper
 - `subjects/registry.ts` — read/write subjects.json, auto-create
-- `state.ts` — extractedSessions/failedSessions tracking
+- `state.ts` + `state-normalize.ts` — extractedSessions/failedSessions tracking and normalization
+- `lib/guards.ts` — shared type guards (isObject, isEnoent, isNonEmptyString, escapeRegex, normalizeError)
+- `lib/text.ts` — shared text processing (normalizeWhitespace, extractTextContent)
 - **Test:** Write entries manually to `log.jsonl`, query by filters/subject/date, verify chronological ordering
 
 ### Phase 2: Extraction hooks
-- `hooks/extraction.ts` — `session_end`, `before_reset`, `gateway_start` handlers
+- `hooks/extraction.ts` — `session_end`, `before_reset`, `gateway_start` event routing
+- `hooks/pipeline.ts` — core extraction pipeline (LLM call → parse → write)
+- `hooks/session-discovery.ts` — `gateway_start` sweep for un-extracted sessions
+- `hooks/transcript-utils.ts` — transcript file location and reading
+- `extraction/prompt.ts` — build extraction prompt with existing entries context
+- `extraction/shared.ts` — JSONL parsing, subject detection, aux field stripping
 - `prompts/extraction.md` — extraction prompt (from spec section 4.2)
 - Post-processing pipeline (parse LLM output → normalize missing non-handoff subject to `unknown` → validate → inject id/timestamp/session → upsert subject registry (add/update type) → append to log)
 - Dedup via state.json
@@ -952,7 +1013,9 @@ Recommended implementation sequence. Each phase is independently testable.
 - **Test:** Install plugin, verify `memory_search` with type/subject filters works, verify `memory_get` by entry ID works, verify `memory-core` is disabled
 
 ### Phase 4: Handoff persistence
-- Extraction post-processing writes `LAST HANDOFF` markers in MEMORY.md
+- `memory/handoff.ts` — format and write ZETTELCLAW SESSION HANDOFF managed block in MEMORY.md
+- `memory/markers.ts` — canonical marker constants (briefing, handoff, guidance, notice)
+- Extraction post-processing writes `ZETTELCLAW SESSION HANDOFF` markers in MEMORY.md
 - **Test:** End a session with a handoff, verify MEMORY.md handoff block updates and is loaded in the next session
 
 ### Phase 5: Memory snapshot generation
@@ -962,7 +1025,13 @@ Recommended implementation sequence. Each phase is independently testable.
 - **Test:** Run cron manually, verify MEMORY.md generated block reflects snapshot state
 
 ### Phase 6: CLI + init
-- CLI commands: `init`, `uninstall`, `verify`, `log`, `search`, `trace`, `import`, `import status`, `import resume`, `subjects add/rename/list`, `briefing generate` (`snapshot generate` alias)
+- `cli/commands.ts` — CLI entry point and command tree registration
+- `cli/register-setup-commands.ts` — init, uninstall, verify
+- `cli/register-log-commands.ts` — log, search, trace
+- `cli/register-subject-commands.ts` — subjects add/rename/list
+- `cli/register-briefing-commands.ts` — snapshot generate + handoff refresh commands
+- `cli/register-import-commands.ts` — import, import status/resume (delegates to `cli/import-*.ts` modules)
+- `memory/markers.ts` — canonical marker constants shared by CLI init, briefing, handoff, and tests
 - `init` flow: create log dir, set memory slot, disable flush, register cron, add markers
 - SKILL.md — agent instructions for the memory system
 - **Test:** Full `openclaw plugins install zettelclaw && openclaw zettelclaw init` flow
@@ -973,11 +1042,20 @@ This appendix is intentionally minimal. The current source of truth is the plugi
 
 Primary files:
 - `src/plugin.ts` (registration)
-- `src/hooks/extraction.ts` (extraction)
+- `src/hooks/extraction.ts` (event routing)
+- `src/hooks/pipeline.ts` (core extraction pipeline)
+- `src/hooks/session-discovery.ts` (startup sweep)
+- `src/extraction/shared.ts` (JSONL parsing, subject detection)
+- `src/extraction/prompt.ts` (extraction prompt construction)
 - `src/tools/memory-search.ts`
 - `src/tools/memory-get.ts`
-- `src/cli/commands.ts`
+- `src/cli/commands.ts` (CLI entry point)
+- `src/cli/register-*.ts` (command registration by domain)
 - `src/briefing/generate.ts`
 - `src/log/{schema,query}.ts`
+- `src/lib/guards.ts` (shared type guards)
+- `src/lib/text.ts` (shared text processing)
+- `src/memory/markers.ts` (managed-block marker constants)
+- `src/import/adapters/shared.ts` (shared adapter utilities)
 
 External API assumptions should be validated against the installed OpenClaw plugin SDK types when upgrading OpenClaw.
