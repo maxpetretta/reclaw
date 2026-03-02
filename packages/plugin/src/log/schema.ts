@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
+import { isNonEmptyString, isObject } from "../lib/guards";
 
 export const ENTRY_TYPES = ["task", "fact", "decision", "question", "handoff"] as const;
 export const VALID_SUBJECT_TYPES = ["project", "person", "system", "topic"] as const;
@@ -62,13 +63,6 @@ const COMMON_REQUIRED_FIELDS = ["content", "type"] as const;
 const COMMON_OPTIONAL_FIELDS = ["detail"] as const;
 const VALID_STATUS = new Set(["open", "done"]);
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
-}
 
 function isIsoTimestamp(value: string): boolean {
   return Number.isFinite(Date.parse(value)) && value.includes("T");

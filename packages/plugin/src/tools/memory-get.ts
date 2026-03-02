@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { AnyAgentTool, OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
+import { isObject } from "../lib/guards";
 import { queryLog } from "../log/query";
 import { findTranscriptFile, readTranscript } from "../lib/transcript";
 import { incrementEventUsage } from "../state";
@@ -27,9 +28,6 @@ const DEFAULT_DEPS: MemoryGetDeps = {
   incrementEventUsage,
 };
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function textResult(text: string, details?: unknown): { content: Array<{ type: string; text: string }>; details?: unknown } {
   return {

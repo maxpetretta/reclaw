@@ -1,3 +1,5 @@
+import { isObject } from "./lib/guards";
+
 export interface PluginConfig {
   logDir: string;
   extraction: {
@@ -34,9 +36,6 @@ const DEFAULT_CONFIG: PluginConfig = {
   },
 };
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function readString(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value : fallback;

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { AnyAgentTool, OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
+import { isObject } from "../lib/guards";
 import { queryLog, searchLog, type LogQueryFilter } from "../log/query";
 import type { EntryType, LogEntry } from "../log/schema";
 import { incrementEventUsage } from "../state";
@@ -29,9 +30,6 @@ const DEFAULT_DEPS: MemorySearchDeps = {
   incrementEventUsage,
 };
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function normalizeQuery(value: unknown): string | undefined {
   if (typeof value !== "string") {

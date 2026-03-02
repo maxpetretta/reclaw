@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isObject } from "../lib/guards";
 import type { ImportedConversation } from "./types";
 
 const OPENCLAW_SESSION_VERSION = 3;
@@ -31,9 +32,6 @@ export interface WriteImportedSessionResult {
   sessionKey: string;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function resolveOpenClawHome(openClawHome?: string): string {
   if (openClawHome && openClawHome.trim()) {
