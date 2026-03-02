@@ -1,76 +1,114 @@
-# Reclaw 🦞
+# Reclaw
 
-> Your agent's second brain, built together.
+> Reclaim your AI conversations.
 
-A PKM system for humans and AI agents to co-build a shared knowledge base, powered by Obsidian and OpenClaw.
+A durable memory system for [OpenClaw](https://openclaw.com). Reclaw replaces the default `memory-core` plugin with an append-only event log, structured extraction, and a nightly memory snapshot — so your agent remembers what matters across sessions.
 
-## Quick Start
-
-```bash
-npx reclaw init
-```
-
-The wizard asks for a vault path and sync method, then configures everything: templates, plugins, and OpenClaw integration (if detected).
-
-For a non-interactive setup:
+## Install
 
 ```bash
-npx reclaw init --yes --vault ~/my-vault
+openclaw plugins install reclaw
+openclaw reclaw init
 ```
 
-If you have existing OpenClaw workspace memory files, migrate them once after init:
+`init` creates the log directory, sets the memory slot, registers the nightly snapshot cron, and adds managed blocks to `MEMORY.md`.
+
+## How It Works
+
+```
+Session ends  →  Extraction hook reads transcript
+                      ↓
+              LLM extracts structured entries (facts, decisions, tasks, questions, handoff)
+                      ↓
+              Entries appended to log.jsonl, subjects upserted in subjects.json
+                      ↓
+              Handoff block updated in MEMORY.md
+                      ↓
+Nightly cron  →  Snapshot generator rewrites MEMORY.md generated block
+```
+
+All content passes a hard filter: only user-specific knowledge enters the log. General knowledge that any LLM could produce without user context is excluded.
+
+### Entry types
+
+| Type | Purpose |
+|---|---|
+| `fact` | Something learned or observed about the user or their work |
+| `decision` | A choice that was made, with reasoning |
+| `task` | Something to do (`open` or `done`) |
+| `question` | An open loop that needs an answer |
+| `handoff` | Session boundary state — what's active and unresolved |
+
+### Memory tools
+
+Reclaw wraps OpenClaw's builtin `memory_search` and `memory_get` with structured log awareness:
+
+- **`memory_search`** — keyword + structured filters (type, subject, status) over the log, plus semantic search over `MEMORY.md`
+- **`memory_get`** — read entries by ID, `MEMORY.md` by path, or transcripts by session ID
+
+### Subjects
+
+Every non-handoff entry is tagged with a subject slug (`kebab-case`). Subjects are tracked in `subjects.json` with a type enum: `project`, `person`, `system`, `topic` (default).
 
 ```bash
-npx reclaw migrate
+openclaw reclaw subjects list
+openclaw reclaw subjects add auth-migration
+openclaw reclaw subjects add alice-chen --type person
+openclaw reclaw subjects rename old-slug new-slug
 ```
 
-## What It Does
+## Import
 
-- Creates an Obsidian vault with 5 note templates (journal, evergreen, project, research, contact)
-- Configures community plugins (Templater, Linter, Obsidian Git)
-- Auto-detects OpenClaw and wires up `02 Agent/` symlinks, workspace injection, and cron jobs
-- Seeds starter content: an evergreen note, an inbox note, today's journal, and the OpenClaw logo
-
-## Memory Flow
-
-```
-Hook (/new, /reset)  →  Journal (raw capture, no links)
-                            ↓
-Supervised session   →  Typed notes in 01 Notes/ (human + agent)
-                            ↓
-Nightly maintenance  →  Update existing notes, synthesize to 00 Inbox/, enforce two-way links
-```
-
-All content passes a hard filter: only user-specific knowledge enters the vault. General knowledge that any LLM could produce without user context is excluded.
-
-## Vault Structure
-
-```
-00 Inbox/        — quick captures, agent synthesis drafts (triage these)
-01 Notes/        — typed notes: evergreen, project, research, contact
-02 Agent/        — OpenClaw symlinks (when integration is enabled)
-03 Journal/      — YYYY-MM-DD.md daily journals
-04 Templates/    — Templater note templates
-05 Attachments/  — images, PDFs, non-markdown
-```
-
-## CLI Commands
+Import conversation history from other platforms:
 
 ```bash
-npx reclaw init         # Initialize vault + OpenClaw integration
-npx reclaw migrate      # Migrate existing workspace memory into the vault
-npx reclaw verify       # Programmatically verify setup
-npx reclaw uninstall    # Remove OpenClaw integration
+openclaw reclaw import chatgpt ~/Downloads/conversations.json
+openclaw reclaw import claude ~/Downloads/claude-export.json
+openclaw reclaw import grok ~/Downloads/grok-export.json
+openclaw reclaw import openclaw   # migrate existing OpenClaw transcripts
 ```
 
-## Web Clipper
+Imports run as async background jobs. Check status or resume with:
 
-The vault includes an Obsidian Web Clipper template at `04 Templates/clipper-inbox.json` for capturing pages into `00 Inbox/`.
+```bash
+openclaw reclaw import status <jobId>
+openclaw reclaw import resume <jobId>
+```
 
-## Links
+## CLI Reference
 
-- [reclaw.com](https://reclaw.com) (coming soon)
-- [GitHub](https://github.com/maxpetretta/reclaw)
+```bash
+openclaw reclaw init              # set up log directory, memory slot, cron, markers
+openclaw reclaw verify            # validate setup (files, config, markers, cron)
+openclaw reclaw uninstall         # revert config changes (log data preserved)
+
+openclaw reclaw log               # print recent log entries
+openclaw reclaw search            # search with filters (--type, --subject, --status)
+openclaw reclaw trace             # trace chronological subject history
+
+openclaw reclaw subjects list     # list all subjects
+openclaw reclaw subjects add      # add a subject
+openclaw reclaw subjects rename   # rename a subject (updates registry + log)
+
+openclaw reclaw snapshot generate # run snapshot generation now
+openclaw reclaw handoff refresh   # refresh handoff block from latest log entry
+
+openclaw reclaw import            # import conversation history
+openclaw reclaw import status     # check import job status
+openclaw reclaw import resume     # resume an import job
+```
+
+## Packages
+
+| Package | Description |
+|---|---|
+| [`reclaw`](packages/plugin) | OpenClaw memory slot plugin (npm) |
+| [`@reclaw/skill`](packages/skill) | Agent skill instructions (ClawHub) |
+| [`@reclaw/website`](packages/website) | Landing page — [reclaw.com](https://reclaw.com) |
+
+## Architecture
+
+See [docs/SPECIFICATION.md](docs/SPECIFICATION.md) for the full event log architecture spec.
 
 ## License
 

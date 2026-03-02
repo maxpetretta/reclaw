@@ -3,40 +3,46 @@ import "@fontsource-variable/inter/standard.css"
 import "@fontsource-variable/inter/standard-italic.css"
 import "@/styles/global.css"
 
-const title = "Reclaw | Your AI agent's second brain"
-const description = "A shared knowledge base for you and your AI agent — built on Obsidian, powered by OpenClaw."
+const title = "Reclaw | Durable memory for OpenClaw"
+const description =
+  "An append-only event log that captures structured knowledge from every session. Facts, decisions, tasks — extracted automatically, searchable instantly."
 
 const features = [
   {
-    label: "[[Evergreen Notes]]",
-    title: "Evergreen notes",
+    icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
+    title: "Event log",
     description:
-      "Capture one idea per note so knowledge remains reusable, composable, and easy for agents to reason over.",
+      "Append-only structured entries — facts, decisions, tasks, questions, and session handoffs. Never mutated, always queryable.",
   },
   {
-    label: "[[Journal Extraction]]",
-    title: "Journal extraction",
-    description: "Promote raw daily reflections into lasting notes without losing provenance.",
+    icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5v3a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5z"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M12 22v-5"/><path d="M9 22h6"/></svg>`,
+    title: "Smart extraction",
+    description:
+      "An LLM reads each transcript and extracts only user-specific knowledge. General information any model could produce is filtered out.",
   },
   {
-    label: "[[Vault Search]]",
-    title: "Vault search",
-    description: "Find and surface linked context quickly across your entire graph of notes.",
+    icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>`,
+    title: "Memory snapshot",
+    description:
+      "A nightly cron rewrites the generated section of MEMORY.md with current interests, active work, open loops, and durable knowledge.",
   },
   {
-    label: "[[OpenClaw Integration]]",
-    title: "OpenClaw integration",
-    description: "Built to work directly with OpenClaw workflows and agent-native collaboration.",
+    icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`,
+    title: "Structured search",
+    description:
+      "Filter by type, subject, or status. Keyword search via ripgrep. Semantic search over MEMORY.md via the builtin indexer.",
   },
   {
-    label: "[[Obsidian Native]]",
-    title: "Obsidian-native",
-    description: "No lock-in: plain markdown files in your Obsidian vault with your existing plugin ecosystem.",
+    icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44H2.5A2.5 2.5 0 0 1 0 17.5v-13A2.5 2.5 0 0 1 2.5 2z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44h4.54A2.5 2.5 0 0 0 24 17.5v-13A2.5 2.5 0 0 0 21.5 2z"/></svg>`,
+    title: "Subject registry",
+    description:
+      "Organize entries by project, person, system, or topic. Auto-created from extraction, manageable via CLI.",
   },
   {
-    label: "[[Open Source]]",
-    title: "Open source",
-    description: "Inspect, extend, and adapt the system to your own workflows and team knowledge conventions.",
+    icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+    title: "Import history",
+    description:
+      "Bring in conversations from ChatGPT, Claude, and Grok. Async background jobs with dedup and resume support.",
   },
 ]
 
@@ -106,6 +112,23 @@ const edges: Array<[number, number]> = [
   [20, 22],
   [15, 22],
 ]
+
+const decayRows = [
+  { label: "today", fade: 1, color: "brand", dotOpacity: "", barStops: "from-brand/35 via-brand/15 to-brand/05" },
+  {
+    label: "3 days",
+    fade: 0.85,
+    color: "brand/80",
+    dotOpacity: "",
+    barStops: "from-brand/25 via-brand/10 to-transparent",
+  },
+  { label: "2 weeks", fade: 0.7, color: "brand/60", dotOpacity: "", barStops: "from-brand/18 to-transparent" },
+  { label: "1 month", fade: 0.5, color: "brand/40", dotOpacity: "", barStops: "from-brand/12 to-transparent" },
+  { label: "3 months", fade: 0.35, color: "brand/25", dotOpacity: "", barStops: "from-brand/08 to-transparent" },
+  { label: "6 months", fade: 0.2, color: "brand/12", dotOpacity: "", barStops: "from-brand/04 to-transparent" },
+  { label: "1 year", fade: 0.1, color: "brand/06", dotOpacity: "", barStops: "from-brand/02 to-transparent" },
+  { label: "gone", fade: 0.04, color: "brand/03", dotOpacity: "", barStops: "from-brand/01 to-transparent" },
+]
 ---
 
 <!doctype html>
@@ -120,6 +143,7 @@ const edges: Array<[number, number]> = [
   </head>
 
   <body class="bg-background text-foreground antialiased">
+    <!-- ════════════════════════════════════════════ HEADER -->
     <header class="sticky top-0 z-50 backdrop-blur-xl bg-background/80 border-b border-border">
       <div class="max-w-5xl mx-auto px-5 h-14 flex items-center justify-between">
         <a href="#top" class="flex items-center gap-2 text-foreground font-semibold text-sm">
@@ -140,7 +164,8 @@ const edges: Array<[number, number]> = [
       </div>
     </header>
 
-    <section class="hero-section relative overflow-hidden md:mx-5 lg:mx-auto md:max-w-5xl md:mt-6 md:rounded-2xl md:border md:border-border reveal">
+    <!-- ════════════════════════════════════════════ HERO -->
+    <section id="top" class="hero-section relative overflow-hidden md:mx-5 lg:mx-auto md:max-w-5xl md:mt-6 md:rounded-2xl md:border md:border-border reveal">
       <div class="hero-graph" aria-hidden="true">
         <svg viewBox="0 0 1200 620" preserveAspectRatio="xMidYMid slice" role="presentation" focusable="false">
           <defs>
@@ -161,17 +186,11 @@ const edges: Array<[number, number]> = [
             {edges.map(([a, b], index) => {
               const sourceNode = nodes[a]
               const targetNode = nodes[b]
-
-              if (!(sourceNode && targetNode)) {
-                return null
-              }
-
+              if (!(sourceNode && targetNode)) return null
               return (
                 <line
-                  x1={sourceNode.cx}
-                  y1={sourceNode.cy}
-                  x2={targetNode.cx}
-                  y2={targetNode.cy}
+                  x1={sourceNode.cx} y1={sourceNode.cy}
+                  x2={targetNode.cx} y2={targetNode.cy}
                   style={`--edge-d: ${(index * 0.4) % 3}s`}
                 />
               )
@@ -181,9 +200,7 @@ const edges: Array<[number, number]> = [
           <g class="graph-halos">
             {nodes.map((node) => (
               <circle
-                cx={node.cx}
-                cy={node.cy}
-                r={node.r * 4}
+                cx={node.cx} cy={node.cy} r={node.r * 4}
                 fill={node.color === "coral" ? "url(#glow-coral)" : "url(#glow-violet)"}
                 style={`--d: ${node.d}s`}
                 class="halo"
@@ -202,45 +219,74 @@ const edges: Array<[number, number]> = [
       <div class="hero-scanlines" aria-hidden="true"></div>
 
       <div class="relative z-10 px-6 pt-24 pb-16 md:px-10 md:pt-48 md:pb-24">
-        <p class="font-mono text-[8px] sm:text-xs tracking-[0.2em] uppercase text-brand mb-5 inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand-soft px-3.5 py-1.5 backdrop-blur-sm">
+        <p class="hero-kicker font-mono text-[8px] sm:text-xs tracking-[0.2em] uppercase text-brand mb-5 inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand-soft px-3.5 py-1.5 backdrop-blur-sm">
           <span aria-hidden="true">🦞</span>
-          Shared memory for humans + agents
+          Durable memory for OpenClaw
         </p>
 
-        <h1 class="hero-heading font-extrabold tracking-tighter leading-none text-foreground">
-          <span class="whitespace-nowrap">Conversations fade.</span><br />
-          <span class="hero-accent whitespace-nowrap">Knowledge compounds.</span>
+        <h1 class="hero-title hero-heading font-extrabold tracking-tighter leading-none text-foreground">
+          <span class="whitespace-nowrap">Reclaim your</span><br />
+          <span class="hero-accent whitespace-nowrap">AI conversations.</span>
         </h1>
 
-        <p class="mt-8 text-lg md:text-xl text-[#C8CDDF] max-w-xl leading-relaxed">
-          Reclaw sets up an Obsidian vault designed for dual authorship &mdash; you and your AI agent co-building a knowledge base with evergreen notes that compound over time.
+        <p class="hero-sub mt-8 text-lg md:text-xl text-[#C8CDDF] max-w-xl leading-relaxed">
+          An append-only event log that captures structured knowledge from every session &mdash; facts, decisions, tasks, questions &mdash; extracted automatically, searchable instantly.
         </p>
 
-        <div class="mt-10 flex flex-wrap gap-3">
-          <a
-            href="https://github.com/maxpetretta/reclaw"
-            class="inline-flex items-center px-5 py-2.5 bg-brand text-white font-semibold text-sm rounded-lg hover:brightness-110 transition-all hover:-translate-y-0.5 active:translate-y-0 shadow-lg shadow-brand/30"
-          >
-            View on GitHub
-          </a>
+        <div class="hero-actions mt-10 flex flex-wrap gap-3">
           <a
             href="#start"
-            class="inline-flex items-center px-5 py-2.5 border border-border text-foreground font-semibold text-sm rounded-lg hover:bg-card transition-all hover:-translate-y-0.5 active:translate-y-0 backdrop-blur-sm"
+            class="inline-flex items-center px-5 py-2.5 bg-brand text-white font-semibold text-sm rounded-lg hover:brightness-110 transition-all hover:-translate-y-0.5 active:translate-y-0 shadow-lg shadow-brand/30"
           >
             Get started
+          </a>
+          <a
+            href="https://github.com/maxpetretta/reclaw"
+            class="inline-flex items-center px-5 py-2.5 border border-border text-foreground font-semibold text-sm rounded-lg hover:bg-card transition-all hover:-translate-y-0.5 active:translate-y-0 backdrop-blur-sm"
+          >
+            View on GitHub
           </a>
         </div>
       </div>
 
       <aside class="hero-marginalia" aria-hidden="true">
-        <span class="font-mono text-xs text-violet-400 tracking-wide">cf. Luhmann, 1992</span>
+        <span class="font-mono text-xs text-violet-400 tracking-wide">append-only</span>
         <span class="text-sm italic text-muted-foreground leading-relaxed border-l-2 border-violet-500/30 pl-2.5"
-          >"One cannot think without writing"</span
+          >"The log is authoritative. The snapshot is a cache."</span
         >
       </aside>
     </section>
 
-    <main id="top" class="max-w-5xl mx-auto px-5">
+    <main class="max-w-5xl mx-auto px-5">
+      <!-- ════════════════════════════════════════════ PROBLEM -->
+      <section class="py-20 sm:py-24">
+        <div class="reveal max-w-2xl mx-auto text-center">
+          <h2 class="text-2xl sm:text-4xl font-bold tracking-tight leading-snug">
+            Conversations fade.<br />
+            <span class="text-muted-foreground">Knowledge should compound.</span>
+          </h2>
+          <p class="mt-6 text-muted-foreground text-base sm:text-lg leading-relaxed max-w-lg mx-auto">
+            Every session produces decisions, context, and open loops. Without durable memory, your agent starts from zero each time.
+          </p>
+        </div>
+
+        <div class="reveal mt-14 max-w-2xl mx-auto space-y-2.5">
+          {decayRows.map((row, i) => (
+            <div class="decay-row" style={`--fade: ${row.fade}; --pulse-delay: ${i * 0.3}s;`}>
+              <div class={`decay-dot bg-${row.color} ${i < 7 ? 'decay-pulse' : ''}`}></div>
+              <div
+                class={`decay-bar flex-1 h-3 rounded-full bg-gradient-to-r ${row.barStops}`}
+                style={`--pulse-delay: ${i * 0.3}s;`}
+              ></div>
+              <span class={`text-xs tabular-nums w-20 text-right ${i === 0 ? 'text-brand/70' : i < 4 ? 'text-brand/50' : 'text-muted-foreground/' + Math.max(5, Math.round(row.fade * 50))}`}>
+                {row.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <!-- ════════════════════════════════════════════ DEMO -->
       <section class="py-20" id="demo">
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal">See it in action</p>
         <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-10 reveal">
@@ -251,16 +297,14 @@ const edges: Array<[number, number]> = [
           <div class="rounded-xl border border-border bg-card p-5">
             <div class="flex items-center gap-2 text-xs text-muted-foreground font-mono mb-4">
               <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
-              Conversation
+              Session transcript
             </div>
             <div class="space-y-3">
               <div class="rounded-lg bg-muted px-4 py-3 text-sm text-foreground/90 leading-relaxed">
-                I've been reading about how React's virtual DOM works. Can you help me connect this to the performance notes in my vault?
+                We decided to use queue-based retries for webhook delivery instead of synchronous. The cascading failures were too risky.
               </div>
               <div class="rounded-lg bg-brand-soft border border-brand/20 px-4 py-3 text-sm text-foreground/90 leading-relaxed">
-                Based on your notes in
-                <span class="font-mono text-xs text-violet-400">[[Frontend Frameworks]]</span>,
-                React's virtual DOM trades memory for speed &mdash; it keeps a lightweight copy of the real DOM to batch and minimize expensive updates&hellip;
+                Good call. I'll note that decision. The backfill script for the 47 failed jobs from last week is still pending &mdash; want me to track that as an open task?
               </div>
             </div>
           </div>
@@ -275,93 +319,98 @@ const edges: Array<[number, number]> = [
           <div class="rounded-xl border border-border bg-card p-5">
             <div class="flex items-center gap-2 text-xs text-muted-foreground font-mono mb-4">
               <span class="w-2 h-2 rounded-full bg-brand shrink-0"></span>
-              Journal capture + nightly maintenance
+              Extracted to log.jsonl
             </div>
-            <div class="space-y-3">
-              <div class="note-card note-card-brand">
-                <p class="font-mono text-xs text-muted-foreground mb-1.5">2026-02-19.md (03 Journal)</p>
-                <p class="text-sm text-foreground/90 leading-relaxed">
-                  Session capture appends bullets to `Log` and `Todo` sections and logs provenance in `## Sessions`.
-                </p>
-                <div class="flex flex-wrap gap-2 mt-2">
-                  <span class="font-mono text-xs text-violet-400">SESSION-71f3a9 — 09:14</span>
-                  <span class="font-mono text-xs text-violet-400">SESSION-c2d8e1 — 14:42</span>
-                </div>
+            <div class="space-y-2.5 font-mono text-[11px] sm:text-xs leading-relaxed">
+              <div class="log-entry log-entry-decision">
+                <span class="log-type text-violet-400">decision</span>
+                <span class="text-foreground/80">Queue-based retries for webhook delivery</span>
+                <span class="text-muted-foreground/50">auth-migration</span>
               </div>
-              <div class="note-card note-card-violet">
-                <p class="font-mono text-xs text-muted-foreground mb-1.5">Frontend Frameworks.md (01 Notes)</p>
-                <p class="text-sm text-foreground/90 leading-relaxed">
-                  Nightly maintenance updates existing notes and adds reciprocal links back to journal sessions for provenance.
-                </p>
-                <div class="flex flex-wrap gap-2 mt-2">
-                  <span class="font-mono text-xs text-violet-400">[[2026-02-19]]</span>
-                  <span class="font-mono text-xs text-violet-400">[[DOM Reconciliation]]</span>
-                </div>
+              <div class="log-entry log-entry-task">
+                <span class="log-type text-brand">task:open</span>
+                <span class="text-foreground/80">Backfill script for 47 failed webhook jobs</span>
+                <span class="text-muted-foreground/50">auth-migration</span>
+              </div>
+              <div class="log-entry log-entry-handoff">
+                <span class="log-type text-emerald-400">handoff</span>
+                <span class="text-foreground/80">Retry logic done, backfill + canary pending</span>
+                <span class="text-muted-foreground/50">&nbsp;</span>
               </div>
             </div>
           </div>
         </div>
       </section>
 
+      <!-- ════════════════════════════════════════════ HOW IT WORKS -->
       <section class="py-20" id="how">
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal">How it works</p>
-        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-4 reveal">Three steps to a living vault</h2>
+        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-4 reveal">Three steps to <span class="hero-accent">total recall</span></h2>
         <p class="text-muted-foreground leading-relaxed max-w-2xl mb-4 reveal">
-          Reclaw applies Zettelkasten principles &mdash; evergreen notes, emergent structure, and links over folders. It creates a new Obsidian vault as your agent's dedicated memory, replacing ephemeral chat history with durable, compounding knowledge.
+          Reclaw replaces OpenClaw's default <code class="font-mono text-xs bg-violet-500/15 text-violet-400 px-1.5 py-0.5 rounded">memory-core</code> with an append-only event log. Sessions produce structured entries. A nightly snapshot keeps MEMORY.md current.
         </p>
         <div class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground mb-12 reveal">
-          <span>conversation</span>
+          <span>session ends</span>
           <span class="text-brand font-bold">&rarr;</span>
-          <span>journal capture</span>
+          <span>extraction hook</span>
           <span class="text-brand font-bold">&rarr;</span>
-          <span>nightly maintenance into linked notes</span>
+          <span>structured entries in log.jsonl</span>
+          <span class="text-brand font-bold">&rarr;</span>
+          <span>nightly snapshot to MEMORY.md</span>
         </div>
 
         <div class="grid md:grid-cols-3 gap-8">
-          <article class="reveal">
-            <div class="flex items-baseline gap-3 mb-3">
-              <span class="font-mono text-xs text-muted-foreground/40 select-none">01</span>
-              <span class="text-xl">🛠️</span>
+          <article class="reveal step-card">
+            <div class="step-number">1</div>
+            <div class="step-icon">
+              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5"/>
+                <line x1="12" y1="19" x2="20" y2="19"/>
+              </svg>
             </div>
-            <h3 class="font-bold text-foreground mb-1.5">Init</h3>
-            <p class="text-sm text-muted-foreground leading-relaxed">
-              Run init to create a new vault structured for human + agent collaboration. If your OpenClaw workspace already has `memory/` files, run migrate once to convert them into vault notes and journal entries.
+            <h3 class="text-lg font-bold mt-5">Install</h3>
+            <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
+              Install the plugin and run init. Reclaw creates the log directory, sets the memory slot, registers the nightly cron, and adds managed blocks to MEMORY.md.
             </p>
-            <span class="font-mono text-xs text-violet-400 mt-3 inline-block">[[Init]]</span>
           </article>
-          <article class="reveal">
-            <div class="flex items-baseline gap-3 mb-3">
-              <span class="font-mono text-xs text-muted-foreground/40 select-none">02</span>
-              <span class="text-xl">💬</span>
+          <article class="reveal step-card">
+            <div class="step-number">2</div>
+            <div class="step-icon">
+              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
             </div>
-            <h3 class="font-bold text-foreground mb-1.5">Converse</h3>
-            <p class="text-sm text-muted-foreground leading-relaxed">
-              Use OpenClaw with the vault as shared context so ideas stay connected to durable notes.
+            <h3 class="text-lg font-bold mt-5">Converse</h3>
+            <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
+              Use OpenClaw normally. When a session ends, the extraction hook reads the transcript and an LLM extracts structured entries &mdash; applying a hard filter for user-specific knowledge only.
             </p>
-            <span class="font-mono text-xs text-violet-400 mt-3 inline-block">[[Conversation]]</span>
           </article>
-          <article class="reveal">
-            <div class="flex items-baseline gap-3 mb-3">
-              <span class="font-mono text-xs text-muted-foreground/40 select-none">03</span>
-              <span class="text-xl">🧠</span>
+          <article class="reveal step-card">
+            <div class="step-number">3</div>
+            <div class="step-icon">
+              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a5 5 0 0 1 5 5v3a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5z"/>
+                <path d="M2 12h2"/><path d="M20 12h2"/>
+                <path d="M12 22v-5"/><path d="M9 22h6"/>
+              </svg>
             </div>
-            <h3 class="font-bold text-foreground mb-1.5">Extract</h3>
-            <p class="text-sm text-muted-foreground leading-relaxed">
-              On <code class="font-mono text-xs bg-violet-500/15 text-violet-400 px-1.5 py-0.5 rounded">/new</code> or <code class="font-mono text-xs bg-violet-500/15 text-violet-400 px-1.5 py-0.5 rounded">/reset</code>, hooks append structured journal capture (link-free) plus session provenance under <code class="font-mono text-xs bg-violet-500/15 text-violet-400 px-1.5 py-0.5 rounded">## Sessions</code>. A dedicated nightly isolated maintenance run then updates existing project/research/contact notes and adds two-way links across journals and typed notes.
+            <h3 class="text-lg font-bold mt-5">Remember</h3>
+            <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
+              Facts, decisions, tasks, and open questions accumulate in the log. A nightly cron rewrites your MEMORY.md snapshot. Your agent starts every session with full context.
             </p>
-            <span class="font-mono text-xs text-violet-400 mt-3 inline-block">[[Evergreen Note]]</span>
           </article>
         </div>
       </section>
 
+      <!-- ════════════════════════════════════════════ FEATURES -->
       <section class="py-20" id="features">
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal">Capabilities</p>
-        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-10 reveal">Everything your vault needs</h2>
+        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-10 reveal">Everything the log provides</h2>
 
         <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border rounded-xl overflow-hidden reveal">
           {features.map((feature) => (
-            <div class="bg-background p-6 hover:bg-card transition-colors">
-              <span class="font-mono text-xs text-violet-400 block mb-3">{feature.label}</span>
+            <div class="bg-background p-6 hover:bg-card transition-colors group">
+              <div class="w-9 h-9 rounded-lg bg-brand-soft flex items-center justify-center text-brand mb-4 group-hover:bg-brand/20 transition-colors" set:html={feature.icon} />
               <h3 class="font-bold text-foreground text-sm mb-1.5">{feature.title}</h3>
               <p class="text-sm text-muted-foreground leading-relaxed">{feature.description}</p>
             </div>
@@ -369,81 +418,172 @@ const edges: Array<[number, number]> = [
         </div>
       </section>
 
+      <!-- ════════════════════════════════════════════ INSTALL -->
       <section class="py-20" id="start">
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal text-center">Get started</p>
         <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-6 reveal text-center">
-          Start in one or two commands
+          Two commands. That's it.
         </h2>
         <p class="text-muted-foreground leading-relaxed max-w-2xl mx-auto mb-8 reveal text-center">
-          Run init for a fresh vault. If workspace `memory/` already exists, run migrate once to import it with per-file sub-agents plus a final `MEMORY.md`/`USER.md` synthesis pass.
+          Install the plugin, run init, and your next session will automatically extract structured memory.
         </p>
 
         <div class="max-w-lg mx-auto reveal">
-          <div class="rounded-xl overflow-hidden border border-border bg-card shadow-2xl shadow-black/40">
-            <div class="flex items-center gap-1.5 px-4 py-3 border-b border-border bg-muted">
-              <span class="w-3 h-3 rounded-full bg-[#ff5f57]"></span>
-              <span class="w-3 h-3 rounded-full bg-[#ffbd2e]"></span>
-              <span class="w-3 h-3 rounded-full bg-[#28c840]"></span>
-              <span class="flex-1"></span>
+          <div class="terminal">
+            <div class="terminal-bar">
+              <div class="flex gap-2">
+                <span class="w-3 h-3 rounded-full bg-white/10"></span>
+                <span class="w-3 h-3 rounded-full bg-white/10"></span>
+                <span class="w-3 h-3 rounded-full bg-white/10"></span>
+              </div>
+              <div class="flex-1"></div>
               <button
-                onclick="navigator.clipboard.writeText('npx reclaw init\\nnpx reclaw migrate');const b=this;b.textContent='Copied!';setTimeout(()=>b.textContent='Copy',1500)"
-                class="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-0.5 rounded hover:bg-white/5 cursor-pointer"
+                id="install-copy-btn"
+                type="button"
+                class="terminal-copy-btn group/copy flex items-center gap-1.5 text-xs text-muted-foreground/40 hover:text-muted-foreground transition-colors cursor-pointer"
+                title="Copy commands"
               >
-                Copy
+                <svg class="copy-icon w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg class="check-icon w-3.5 h-3.5 text-green-400 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <span class="copy-label">Copy</span>
               </button>
             </div>
-            <div class="p-5 font-mono text-sm">
-              <div class="flex items-center mb-2">
-                <span class="text-brand select-none mr-2 shrink-0">$</span>
-                <span class="text-foreground">npx reclaw init</span>
+            <div class="terminal-body">
+              <div class="terminal-line">
+                <span class="terminal-prompt">$</span>
+                <span class="terminal-cmd">openclaw plugins install reclaw</span>
               </div>
-              <div class="flex items-center text-muted-foreground">
-                <span class="text-brand select-none mr-2 shrink-0">$</span>
-                <span class="text-foreground">npx reclaw migrate</span>
-                <span class="typing-cursor"></span>
+              <div class="terminal-line mt-3">
+                <span class="terminal-prompt">$</span>
+                <span class="terminal-cmd">openclaw reclaw init</span>
+              </div>
+              <div class="terminal-line mt-4">
+                <span class="text-muted-foreground/60">┌</span>
+                <span class="text-brand font-semibold ml-2">🦞 Reclaw</span>
+                <span class="text-muted-foreground/50 ml-1">- Reclaim your AI conversations</span>
+              </div>
+              <div class="terminal-line">
+                <span class="text-muted-foreground/60">│</span>
+              </div>
+              <div class="terminal-line">
+                <span class="text-green-400">✓</span>
+                <span class="text-foreground/70 ml-2">Created ~/.openclaw/reclaw/</span>
+              </div>
+              <div class="terminal-line">
+                <span class="text-green-400">✓</span>
+                <span class="text-foreground/70 ml-2">Memory slot set to reclaw</span>
+              </div>
+              <div class="terminal-line">
+                <span class="text-green-400">✓</span>
+                <span class="text-foreground/70 ml-2">Nightly snapshot cron registered</span>
+              </div>
+              <div class="terminal-line">
+                <span class="text-green-400">✓</span>
+                <span class="text-foreground/70 ml-2">MEMORY.md markers added</span>
+              </div>
+              <div class="terminal-line mt-2">
+                <span class="text-muted-foreground/60">└</span>
+                <span class="text-brand ml-2">Total recall.</span>
+                <span class="text-muted-foreground/50 ml-1">Your next session will extract memory automatically.</span>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="py-16 reveal">
-        <div class="rounded-xl border border-violet-500/25 bg-violet-500/[0.06] px-6 py-8 md:px-10 md:py-10 text-center">
-          <p class="font-mono text-xs tracking-[0.2em] uppercase text-violet-400 mb-3">Bootstrap your vault</p>
-          <h2 class="text-xl md:text-2xl font-bold tracking-tight text-foreground mb-3">Already have AI chat history?</h2>
-          <p class="text-muted-foreground leading-relaxed max-w-xl mx-auto mb-6">
-            Bootstrap your Reclaw with existing memories from ChatGPT, Claude, Grok, and more at
-            <a href="https://reclaw.sh" class="text-violet-400 font-semibold hover:text-violet-300 transition-colors"
-              >reclaw.sh</a
-            >
-          </p>
-          <a
-            href="https://reclaw.sh"
-            class="inline-flex items-center px-5 py-2.5 border border-violet-500/40 bg-violet-500/10 text-violet-300 font-semibold text-sm rounded-lg hover:bg-violet-500/20 transition-all hover:-translate-y-0.5"
-          >
-            Visit Reclaw &rarr;
-          </a>
+      <!-- ════════════════════════════════════════════ IMPORT -->
+      <section class="py-20">
+        <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal text-center">Import history</p>
+        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-6 reveal text-center">
+          Bring your conversations with you
+        </h2>
+        <p class="text-muted-foreground leading-relaxed max-w-2xl mx-auto mb-14 reveal text-center">
+          Export from any major AI platform. Reclaw processes them into structured log entries with async background jobs.
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl mx-auto">
+          <!-- ChatGPT -->
+          <div class="reveal provider-card">
+            <div class="provider-icon" style="--glow: 16, 185, 129;">
+              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="rgb(16, 185, 129)"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>
+            </div>
+            <h3 class="text-lg font-bold mt-4">ChatGPT</h3>
+            <p class="text-sm text-muted-foreground mt-1">Conversations</p>
+            <code class="block mt-3 text-[10px] sm:text-xs text-muted-foreground/60 font-mono">openclaw reclaw import chatgpt</code>
+          </div>
+
+          <!-- Claude -->
+          <div class="reveal provider-card">
+            <div class="provider-icon" style="--glow: 251, 191, 136;">
+              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="rgb(251, 191, 136)"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
+            </div>
+            <h3 class="text-lg font-bold mt-4">Claude</h3>
+            <p class="text-sm text-muted-foreground mt-1">Conversations</p>
+            <code class="block mt-3 text-[10px] sm:text-xs text-muted-foreground/60 font-mono">openclaw reclaw import claude</code>
+          </div>
+
+          <!-- Grok -->
+          <div class="reveal provider-card">
+            <div class="provider-icon" style="--glow: 148, 163, 184;">
+              <svg class="w-7 h-7" viewBox="0 0 841.89 595.28" fill="rgb(148, 163, 184)"><path d="m557.09 211.99 8.31 326.37h66.56l8.32-445.18zM640.28 56.91H538.72L379.35 284.53l50.78 72.52zM201.61 538.36h101.56l50.79-72.52-50.79-72.53zM201.61 211.99l228.52 326.37h101.56L303.17 211.99z"/></svg>
+            </div>
+            <h3 class="text-lg font-bold mt-4">Grok</h3>
+            <p class="text-sm text-muted-foreground mt-1">Conversations</p>
+            <code class="block mt-3 text-[10px] sm:text-xs text-muted-foreground/60 font-mono">openclaw reclaw import grok</code>
+          </div>
         </div>
       </section>
     </main>
 
+    <!-- ════════════════════════════════════════════ FOOTER -->
     <footer class="border-t border-border mt-10 py-8">
-      <div class="max-w-5xl mx-auto px-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <p class="text-sm text-muted-foreground">
-          Built with 🦞 by
-          <a href="https://x.com/maxpetretta" class="text-foreground hover:text-brand transition-colors">Max Petretta</a>
+      <div class="max-w-5xl mx-auto px-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <p class="text-sm text-muted-foreground flex items-center gap-1.5">
+          <span>🦞</span>
+          <span>Reclaw &mdash; durable memory for OpenClaw</span>
         </p>
         <div class="flex gap-5 text-sm">
-          <a href="https://www.npmjs.com/package/reclaw" class="text-muted-foreground hover:text-foreground transition-colors"
-            >npm</a
-          >
+          <a href="https://www.npmjs.com/package/reclaw" class="text-muted-foreground hover:text-foreground transition-colors">npm</a>
+          <a href="https://github.com/maxpetretta/reclaw" class="text-muted-foreground hover:text-foreground transition-colors">GitHub</a>
         </div>
       </div>
     </footer>
+
+    <script>
+      function copyToClipboard(text: string, btn: HTMLElement) {
+        navigator.clipboard.writeText(text).then(() => {
+          const copyIcon = btn.querySelector(".copy-icon")
+          const checkIcon = btn.querySelector(".check-icon")
+          const label = btn.querySelector(".copy-label")
+          if (copyIcon) copyIcon.classList.add("hidden")
+          if (checkIcon) checkIcon.classList.remove("hidden")
+          if (label) label.textContent = "Copied!"
+          setTimeout(() => {
+            if (copyIcon) copyIcon.classList.remove("hidden")
+            if (checkIcon) checkIcon.classList.add("hidden")
+            if (label) label.textContent = "Copy"
+          }, 2000)
+        }).catch(() => {
+          const label = btn.querySelector(".copy-label")
+          if (label) {
+            label.textContent = "Failed"
+            setTimeout(() => { label.textContent = "Copy" }, 2000)
+          }
+        })
+      }
+
+      const installBtn = document.getElementById("install-copy-btn")
+      if (installBtn) {
+        installBtn.addEventListener("click", () => {
+          copyToClipboard("openclaw plugins install reclaw\nopenclaw reclaw init", installBtn)
+        })
+      }
+    </script>
   </body>
 </html>
 
 <style>
+  /* ─── Hero ─── */
   .hero-section {
     min-height: clamp(480px, 68vh, 620px);
     background:
@@ -478,6 +618,46 @@ const edges: Array<[number, number]> = [
     height: 100%;
   }
 
+  .hero-scanlines {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: repeating-linear-gradient(
+      0deg, transparent 0px, transparent 2px,
+      rgba(0, 0, 0, 0.03) 2px, rgba(0, 0, 0, 0.03) 4px
+    );
+    pointer-events: none;
+  }
+
+  .hero-marginalia {
+    position: absolute;
+    right: 2rem;
+    top: 2.5rem;
+    z-index: 10;
+    display: none;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-width: 200px;
+    opacity: 0.4;
+    transition: opacity 300ms ease;
+  }
+
+  .hero-section:hover .hero-marginalia {
+    opacity: 0.65;
+  }
+
+  /* Hero entrance sequence */
+  .hero-kicker { animation: rise 0.8s ease-out both; animation-delay: 0.1s; }
+  .hero-title { animation: rise 0.8s ease-out both; animation-delay: 0.25s; }
+  .hero-sub { animation: rise 0.8s ease-out both; animation-delay: 0.45s; }
+  .hero-actions { animation: rise 0.8s ease-out both; animation-delay: 0.65s; }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(24px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── Graph ─── */
   .graph-edges line {
     stroke: rgba(124, 58, 237, 0.25);
     stroke-width: 1;
@@ -510,132 +690,217 @@ const edges: Array<[number, number]> = [
     animation-delay: var(--d);
   }
 
-  .node-coral {
-    fill: var(--brand);
-  }
+  .node-coral { fill: var(--brand); }
+  .node-violet { fill: #7c3aed; }
 
-  .node-violet {
-    fill: #7c3aed;
-  }
-
-  .hero-scanlines {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent 0px,
-      transparent 2px,
-      rgba(0, 0, 0, 0.03) 2px,
-      rgba(0, 0, 0, 0.03) 4px
-    );
-    pointer-events: none;
-  }
-
-  .hero-marginalia {
-    position: absolute;
-    right: 2rem;
-    top: 2.5rem;
-    z-index: 10;
-    display: none;
+  /* ─── Demo ─── */
+  .log-entry {
+    display: flex;
     flex-direction: column;
-    gap: 0.35rem;
-    max-width: 180px;
-    opacity: 0.4;
-    transition: opacity 300ms ease;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.02);
+    border-left: 2px solid transparent;
   }
 
-  .hero-section:hover .hero-marginalia {
-    opacity: 0.65;
-  }
+  .log-entry-decision { border-left-color: #7c3aed; }
+  .log-entry-task { border-left-color: var(--brand); }
+  .log-entry-handoff { border-left-color: #34d399; }
 
-  .note-card {
-    border-radius: 0.5rem;
-    background: rgba(27, 34, 48, 0.5);
-    padding: 0.75rem 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-left-width: 2px;
-  }
-
-  .note-card-brand {
-    border-left-color: var(--brand);
-  }
-
-  .note-card-violet {
-    border-left-color: #8b5cf6;
+  .log-type {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 9px;
   }
 
   .demo-arrow {
     animation: arrow-pulse 2.5s ease-in-out infinite;
   }
 
-  .typing-cursor {
-    display: inline-block;
-    width: 8px;
-    height: 1.15em;
-    background: var(--brand);
-    margin-left: 3px;
-    vertical-align: text-bottom;
-    border-radius: 1px;
-    animation: blink 1.1s step-end infinite;
+  /* ─── Decay ─── */
+  .decay-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    opacity: var(--fade);
   }
 
-  @keyframes edge-travel {
-    from {
-      stroke-dashoffset: 0;
-    }
+  .decay-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
 
-    to {
-      stroke-dashoffset: -48;
-    }
+  .decay-pulse {
+    animation: dot-pulse 3s ease-in-out infinite;
+    animation-delay: var(--pulse-delay);
+  }
+
+  .decay-bar {
+    animation: bar-pulse 3s ease-in-out infinite;
+    animation-delay: var(--pulse-delay);
+  }
+
+  /* ─── Steps ─── */
+  .step-card {
+    position: relative;
+    padding: 28px 24px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.02), transparent);
+    transition: border-color 0.3s, background 0.3s;
+    overflow: hidden;
+  }
+
+  .step-card:hover {
+    border-color: rgba(255, 107, 53, 0.2);
+    background: linear-gradient(to bottom, rgba(255, 107, 53, 0.03), transparent);
+  }
+
+  .step-number {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 0 0 12px 0;
+    background: rgba(255, 107, 53, 0.08);
+    border-right: 1px solid rgba(255, 107, 53, 0.15);
+    border-bottom: 1px solid rgba(255, 107, 53, 0.15);
+    color: rgba(255, 107, 53, 0.9);
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .step-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: rgba(255, 107, 53, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 107, 53, 0.8);
+    transition: background 0.3s;
+  }
+
+  .step-card:hover .step-icon {
+    background: rgba(255, 107, 53, 0.1);
+  }
+
+  /* ─── Terminal ─── */
+  .terminal {
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 20px 60px rgba(0, 0, 0, 0.4);
+  }
+
+  .terminal-bar {
+    display: flex;
+    align-items: center;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .terminal-body {
+    padding: 20px 22px 24px;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
+  .terminal-line {
+    display: flex;
+    align-items: baseline;
+    white-space: pre;
+  }
+
+  .terminal-prompt {
+    color: rgba(255, 107, 53, 0.7);
+    margin-right: 10px;
+    user-select: none;
+  }
+
+  .terminal-cmd {
+    color: var(--foreground);
+    font-weight: 600;
+  }
+
+  /* ─── Providers ─── */
+  .provider-card {
+    padding: 28px 24px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.02), transparent);
+    text-align: center;
+    transition: border-color 0.3s;
+  }
+
+  .provider-card:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .provider-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(var(--glow), 0.06);
+    border: 1px solid rgba(var(--glow), 0.12);
+    transition: background 0.3s, border-color 0.3s;
+  }
+
+  .provider-card:hover .provider-icon {
+    background: rgba(var(--glow), 0.1);
+    border-color: rgba(var(--glow), 0.25);
+  }
+
+  /* ─── Keyframes ─── */
+  @keyframes edge-travel {
+    from { stroke-dashoffset: 0; }
+    to { stroke-dashoffset: -48; }
   }
 
   @keyframes node-pulse {
-    0%,
-    100% {
-      opacity: 0.6;
-    }
-
-    50% {
-      opacity: 1;
-    }
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
   }
 
   @keyframes halo-breathe {
-    0%,
-    100% {
-      opacity: 0.15;
-      transform: scale(0.8);
-    }
-
-    50% {
-      opacity: 0.4;
-      transform: scale(1.2);
-    }
+    0%, 100% { opacity: 0.15; transform: scale(0.8); }
+    50% { opacity: 0.4; transform: scale(1.2); }
   }
 
   @keyframes arrow-pulse {
-    0%,
-    100% {
-      opacity: 0.4;
-    }
-
-    50% {
-      opacity: 1;
-    }
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
   }
 
-  @keyframes blink {
-    0%,
-    100% {
-      opacity: 1;
-    }
-
-    50% {
-      opacity: 0;
-    }
+  @keyframes dot-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0); transform: scale(1); }
+    50% { box-shadow: 0 0 8px 3px rgba(255, 107, 53, 0.25); transform: scale(1.3); }
   }
 
+  @keyframes bar-pulse {
+    0%, 100% { opacity: 1; filter: brightness(1); }
+    50% { opacity: 1; filter: brightness(1.6); }
+  }
+
+  /* ─── Responsive ─── */
   @media (max-width: 767px) {
     .hero-section {
       -webkit-mask-image: linear-gradient(to bottom, black 0%, black 85%, transparent 100%);
@@ -655,13 +920,19 @@ const edges: Array<[number, number]> = [
     .graph-nodes .node,
     .halo,
     .demo-arrow,
-    .typing-cursor {
+    .decay-pulse,
+    .decay-bar {
       animation: none !important;
     }
 
-    .demo-arrow,
-    .typing-cursor {
-      opacity: 0.8;
+    .demo-arrow { opacity: 0.8; }
+
+    .hero-kicker,
+    .hero-title,
+    .hero-sub,
+    .hero-actions {
+      animation: none !important;
+      opacity: 1;
     }
   }
 </style>
