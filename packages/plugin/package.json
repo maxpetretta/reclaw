@@ -1,8 +1,25 @@
 {
   "name": "reclaw",
   "version": "3.0.0",
+  "description": "Durable append-only event log memory system for OpenClaw",
+  "license": "MIT",
+  "repository": "https://github.com/maxpetretta/zettelclaw",
+  "homepage": "https://reclaw.sh",
+  "keywords": [
+    "openclaw",
+    "memory",
+    "plugin",
+    "event-log",
+    "reclaw"
+  ],
   "type": "module",
   "main": "src/plugin.ts",
+  "files": [
+    "src",
+    "prompts",
+    "skills",
+    "openclaw.plugin.json"
+  ],
   "openclaw": {
     "extensions": [
       "./src/plugin.ts"
