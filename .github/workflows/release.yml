@@ -36,12 +36,12 @@ jobs:
         shell: bash
         run: |
           tag="${{ github.event.release.tag_name }}"
-          cli_version="$(node -p "require('./packages/cli/package.json').version")"
+          plugin_version="$(node -p "require('./packages/plugin/package.json').version")"
           skill_version="$(node -p "require('./packages/skill/package.json').version")"
           normalized_tag="${tag#v}"
 
-          if [[ "$normalized_tag" != "$cli_version" ]]; then
-            echo "Release tag ($tag) does not match packages/cli version ($cli_version)."
+          if [[ "$normalized_tag" != "$plugin_version" ]]; then
+            echo "Release tag ($tag) does not match packages/plugin version ($plugin_version)."
             exit 1
           fi
 
@@ -50,8 +50,8 @@ jobs:
             exit 1
           fi
 
-      - name: Publish To npm
-        working-directory: packages/cli
+      - name: Publish Plugin To npm
+        working-directory: packages/plugin
         run: |
           npm publish --provenance --access public 2>&1 || {
             exit_code=$?
