@@ -1,5 +1,6 @@
 import {
   confirm as clackConfirm,
+  intro as clackIntro,
   log as clackLog,
   outro as clackOutro,
   select as clackSelect,
@@ -235,6 +236,7 @@ export function registerImportCommands(
           return;
         }
 
+        clackIntro("🦞 Reclaw - Reclaim your AI conversations");
         const queued = await queueImportJob({
           config: params.config,
           workspaceDir: params.workspaceDir,
@@ -243,15 +245,15 @@ export function registerImportCommands(
           filePath: selection.filePath,
           opts: options,
         });
-        console.log(
+        clackLog.step(
           [
-            `Queued async import job: ${queued.job.id}`,
-            `Status: ${queued.job.status}`,
-            `Next run: ${queued.nextRunAt}`,
-            `State file: ${queued.statePath}`,
-            `Track with: openclaw reclaw import status ${queued.job.id}`,
+            `Queued import job: ${queued.job.id}`,
+            `  Platform: ${selection.platform}`,
+            `  Status: ${queued.job.status}`,
+            `  Track with: openclaw reclaw import status ${queued.job.id}`,
           ].join("\n"),
         );
+        clackOutro("Async import queued.");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message === "Import canceled") {
@@ -286,7 +288,7 @@ export function registerImportCommands(
       }
 
       if (jobs.length === 0) {
-        console.log(`No async import jobs. State file: ${paths.statePath}`);
+        console.log("No import jobs.");
         return;
       }
 
@@ -301,10 +303,14 @@ export function registerImportCommands(
         counts[job.status as ImportJobStatus] += 1;
       }
 
-      console.log(
-        `Import jobs: total=${jobs.length} queued=${counts.queued} running=${counts.running} completed=${counts.completed} failed=${counts.failed}`,
-      );
-      console.log(`State file: ${paths.statePath}`);
+      const parts: string[] = [];
+      if (counts.running > 0) parts.push(`${counts.running} running`);
+      if (counts.queued > 0) parts.push(`${counts.queued} queued`);
+      if (counts.completed > 0) parts.push(`${counts.completed} completed`);
+      if (counts.failed > 0) parts.push(`${counts.failed} failed`);
+
+      console.log(`Import jobs: ${jobs.length} total (${parts.join(", ")})`);
+      console.log("");
       for (const job of jobs) {
         console.log(formatImportJobLine(job));
       }
@@ -314,6 +320,7 @@ export function registerImportCommands(
     .command("resume [jobId]")
     .description("Re-queue failed/queued async import jobs")
     .action(async (jobId: unknown) => {
+      clackIntro("🦞 Reclaw - Reclaim your AI conversations");
       const result = await resumeImportJobs({
         config: params.config,
         workspaceDir: params.workspaceDir,
@@ -321,32 +328,32 @@ export function registerImportCommands(
       });
 
       if (result.resumedJobIds.length === 0 && result.skippedJobIds.length === 0) {
-        console.log("No jobs to resume.");
-        console.log(`State file: ${result.statePath}`);
+        clackOutro("No jobs to resume.");
         return;
       }
 
       if (result.resumedJobIds.length > 0) {
-        console.log(`Resumed jobs (${result.resumedJobIds.length}): ${result.resumedJobIds.join(", ")}`);
+        clackLog.step(`Resumed jobs (${result.resumedJobIds.length}): ${result.resumedJobIds.join(", ")}`);
       }
 
       if (result.skippedJobIds.length > 0) {
-        console.log(`Skipped jobs (${result.skippedJobIds.length}): ${result.skippedJobIds.join(", ")}`);
+        clackLog.info(`Skipped jobs (${result.skippedJobIds.length}): ${result.skippedJobIds.join(", ")}`);
       }
 
       if (result.schedulingErrors.length > 0) {
         for (const failure of result.schedulingErrors) {
-          console.warn(`Failed to schedule ${failure.jobId}: ${failure.error}`);
+          clackLog.warn(`Failed to schedule ${failure.jobId}: ${failure.error}`);
         }
       }
 
-      console.log(`State file: ${result.statePath}`);
+      clackOutro(`${result.resumedJobIds.length} job(s) resumed.`);
     });
 
   importCommand
     .command("stop [jobId]")
     .description("Stop running/queued async import jobs")
     .action(async (jobId: unknown) => {
+      clackIntro("🦞 Reclaw - Reclaim your AI conversations");
       const result = await stopImportJobs({
         config: params.config,
         workspaceDir: params.workspaceDir,
@@ -354,30 +361,29 @@ export function registerImportCommands(
       });
 
       if (result.stoppedJobIds.length === 0 && result.skippedJobIds.length === 0) {
-        console.log("No jobs to stop.");
-        console.log(`State file: ${result.statePath}`);
+        clackOutro("No jobs to stop.");
         return;
       }
 
       if (result.stoppedJobIds.length > 0) {
-        console.log(`Stopped jobs (${result.stoppedJobIds.length}): ${result.stoppedJobIds.join(", ")}`);
+        clackLog.step(`Stopped jobs (${result.stoppedJobIds.length}): ${result.stoppedJobIds.join(", ")}`);
       }
 
       if (result.unscheduledJobIds.length > 0) {
-        console.log(`Removed worker cron jobs (${result.unscheduledJobIds.length}): ${result.unscheduledJobIds.join(", ")}`);
+        clackLog.info(`Removed cron jobs (${result.unscheduledJobIds.length}): ${result.unscheduledJobIds.join(", ")}`);
       }
 
       if (result.skippedJobIds.length > 0) {
-        console.log(`Skipped jobs (${result.skippedJobIds.length}): ${result.skippedJobIds.join(", ")}`);
+        clackLog.info(`Skipped jobs (${result.skippedJobIds.length}): ${result.skippedJobIds.join(", ")}`);
       }
 
       if (result.unscheduleErrors.length > 0) {
         for (const failure of result.unscheduleErrors) {
-          console.warn(`Failed to unschedule ${failure.jobId}: ${failure.error}`);
+          clackLog.warn(`Failed to unschedule ${failure.jobId}: ${failure.error}`);
         }
       }
 
-      console.log(`State file: ${result.statePath}`);
+      clackOutro(`${result.stoppedJobIds.length} job(s) stopped.`);
     });
 
   reclaw
@@ -399,7 +405,7 @@ export function registerImportCommands(
       });
 
       if (result === null) {
-        console.log(`Import job ${jobId} did not run (already completed or stopped).`);
+        clackLog.info(`Import job ${jobId} did not run (already completed or stopped).`);
         return;
       }
 
