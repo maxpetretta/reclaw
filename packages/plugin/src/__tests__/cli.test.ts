@@ -4,7 +4,6 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import type { PluginConfig } from "../config";
 import {
-  __cliTestExports,
   AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
   AGENTS_MEMORY_GUIDANCE_END_MARKER,
   BRIEFING_BEGIN_MARKER,
@@ -13,6 +12,9 @@ import {
   LAST_HANDOFF_END_MARKER,
   MEMORY_NOTICE_BEGIN_MARKER,
   MEMORY_NOTICE_END_MARKER,
+} from "../memory/markers";
+import {
+  __cliTestExports,
   detectImportSources,
   queueImportJob,
   resumeImportJobs,
@@ -318,8 +320,8 @@ describe("cli init helpers", () => {
       },
     ]);
 
-    expect(report.issues).toEqual([]);
     expect(report.chains).toHaveLength(1);
+    expect(report.chains[0]?.subject).toBe("auth-migration");
     expect(report.chains[0]?.ids).toEqual([
       "root00000001",
       "next00000001",

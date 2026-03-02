@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { __llmTestExports } from "../lib/llm";
+import { buildExtractionUserPrompt } from "../extraction/prompt";
 import type { LogEntry } from "../log/schema";
 
 describe("llm extraction prompt", () => {
@@ -25,7 +25,7 @@ describe("llm extraction prompt", () => {
       },
     ];
 
-    const userPrompt = __llmTestExports.buildExtractionUserPrompt({
+    const userPrompt = buildExtractionUserPrompt({
       transcript: "user: auth-migration update",
       subjects: {
         "auth-migration": { display: "Auth Migration", type: "project" },
@@ -39,7 +39,7 @@ describe("llm extraction prompt", () => {
   });
 
   test("formats empty existing entries as n/a", () => {
-    const userPrompt = __llmTestExports.buildExtractionUserPrompt({
+    const userPrompt = buildExtractionUserPrompt({
       transcript: "user: no history",
       subjects: {},
       existingEntries: [],

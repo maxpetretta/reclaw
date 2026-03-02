@@ -6,7 +6,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { registerExtractionHooks } from "../hooks/extraction";
 import { appendEntry, readLog, type LogEntry } from "../log/schema";
-import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/handoff";
+import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/markers";
 import { readState } from "../state";
 import { readRegistry, writeRegistry } from "../subjects/registry";
 

@@ -3,12 +3,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PluginConfig } from "../config";
+import { generateBriefing } from "../briefing/generate";
 import {
   BRIEFING_BEGIN_MARKER,
   BRIEFING_END_MARKER,
-  generateBriefing,
-} from "../briefing/generate";
-import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/handoff";
+  LAST_HANDOFF_BEGIN_MARKER,
+  LAST_HANDOFF_END_MARKER,
+} from "../memory/markers";
 import { writeState } from "../state";
 
 function createConfig(logDir: string): PluginConfig {

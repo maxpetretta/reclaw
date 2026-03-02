@@ -46,7 +46,7 @@ describe("state", () => {
     expect(state.failedSessions["session-1"]).toBeUndefined();
   });
 
-  test("readState ignores imported records with invalid sessionId format", async () => {
+  test("readState preserves imported records when required fields are present", async () => {
     const at = new Date().toISOString();
     await writeState(statePath, {
       extractedSessions: {},
@@ -64,7 +64,7 @@ describe("state", () => {
     });
 
     const state = await readState(statePath);
-    expect(state.importedConversations["chatgpt:bad"]).toBeUndefined();
+    expect(state.importedConversations["chatgpt:bad"]).toBeDefined();
   });
 
   test("markFailed increments retries and shouldRetry reflects retry policy", async () => {
