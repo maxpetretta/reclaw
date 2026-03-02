@@ -7,13 +7,7 @@ import {
   findMentionedSubjects,
   parseExtractionJsonl,
 } from "../extraction/shared";
-import {
-  OpenClawCronError,
-  removeCronJob,
-  runCronJobNow,
-  scheduleSubagentCronJob,
-  waitForCronSummary,
-} from "../lib/openclaw-cron";
+import { runIsolatedModelTask } from "../lib/isolated-model-task";
 import { queryExtractionContext } from "../log/query";
 import {
   finalizeEntry,
@@ -57,8 +51,6 @@ interface CallModelParams {
   model: string;
   systemPrompt: string;
   userPrompt: string;
-  apiBaseUrl?: string;
-  apiToken?: string;
 }
 
 export interface ExtractedImportedEntry {
@@ -70,45 +62,17 @@ export interface ImportExtractionDeps {
   callModel: (params: CallModelParams) => Promise<string>;
 }
 
-function buildCronExtractionMessage(params: CallModelParams): string {
-  return [
-    "You are running an isolated one-shot extraction task.",
-    "Follow the instructions exactly and return only JSONL entries.",
-    "",
-    "## System Prompt",
-    params.systemPrompt.trim(),
-    "",
-    "## User Prompt",
-    params.userPrompt.trim(),
-    "",
-    "Reminder: Return JSONL only, one object per line, no markdown fences or commentary.",
-  ].join("\n");
-}
-
 async function defaultCallModel(params: CallModelParams): Promise<string> {
-  const message = buildCronExtractionMessage(params);
-  const scheduled = await scheduleSubagentCronJob({
-    message,
+  return await runIsolatedModelTask({
     model: params.model,
     sessionName: IMPORT_CRON_SESSION_NAME,
     timeoutSeconds: IMPORT_CRON_TIMEOUT_SECONDS,
-    disabled: true,
+    waitTimeoutMs: IMPORT_CRON_WAIT_TIMEOUT_MS,
+    errorPrefix: "extraction LLM call failed",
+    systemPrompt: params.systemPrompt,
+    userPrompt: params.userPrompt,
+    outputReminder: "Return JSONL only, one object per line, no markdown fences or commentary.",
   });
-
-  try {
-    await runCronJobNow(scheduled.jobId, IMPORT_CRON_WAIT_TIMEOUT_MS);
-    return await waitForCronSummary(scheduled.jobId, 60_000);
-  } catch (error) {
-    if (error instanceof OpenClawCronError && error.details && error.details.trim().length > 0) {
-      throw new Error(`extraction LLM call failed: ${error.message} (${error.details})`);
-    }
-
-    throw new Error(
-      `extraction LLM call failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  } finally {
-    removeCronJob(scheduled.jobId);
-  }
 }
 
 const DEFAULT_DEPS: ImportExtractionDeps = {
@@ -165,8 +129,6 @@ export async function extractImportedConversation(
       model: options.model,
       systemPrompt,
       userPrompt: current.prompt,
-      apiBaseUrl: options.apiBaseUrl,
-      apiToken: options.apiToken,
     });
 
     parsed = parseExtractionJsonl(latestOutput, parseOptions);

@@ -1,4 +1,7 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 interface OpenClawCommandOptions {
   timeoutMs?: number;
@@ -93,33 +96,57 @@ async function runOpenClawRetryingCommand(
   return await runOpenClawWithRetries(args, options);
 }
 
-export function runOpenClaw(
+export async function runOpenClaw(
   args: string[],
   options: OpenClawCommandOptions = {},
-): OpenClawCommandResult {
-  const result = spawnSync("openclaw", args, {
-    encoding: "utf8",
-    timeout: options.timeoutMs ?? 30_000,
-  });
+): Promise<OpenClawCommandResult> {
+  try {
+    const result = await execFileAsync("openclaw", args, {
+      encoding: "utf8",
+      timeout: options.timeoutMs ?? 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
+    });
 
-  if (result.error) {
-    const code = "code" in result.error ? result.error.code : undefined;
+    return {
+      status: 0,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+    };
+  } catch (error) {
+    const raw = error as {
+      code?: unknown;
+      stdout?: unknown;
+      stderr?: unknown;
+      message?: unknown;
+      killed?: unknown;
+      signal?: unknown;
+    };
+    const code = raw.code;
     if (code === "ENOENT") {
       throw new OpenClawCronError("CLI_NOT_FOUND", "openclaw CLI was not found on PATH.");
     }
 
-    throw new OpenClawCronError(
-      "COMMAND_FAILED",
-      `openclaw ${args.join(" ")} failed before execution.`,
-      result.error.message,
-    );
-  }
+    const status = typeof code === "number" ? code : 1;
+    const stdout = typeof raw.stdout === "string" ? raw.stdout : "";
+    const stderr = typeof raw.stderr === "string" ? raw.stderr : "";
 
-  const status = result.status ?? 1;
-  const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
+    if (options.allowFailure) {
+      return {
+        status,
+        stdout,
+        stderr,
+      };
+    }
 
-  if (status !== 0 && !options.allowFailure) {
+    if (raw.killed === true || code === "ETIMEDOUT") {
+      throw new OpenClawCronError(
+        "COMMAND_FAILED",
+        `openclaw ${args.join(" ")} timed out.`,
+        stderr.trim() || stdout.trim() || String(raw.message ?? "timeout"),
+      );
+    }
+
     const detail = stderr.trim() || stdout.trim() || `exit code ${status}`;
     throw new OpenClawCronError(
       "COMMAND_FAILED",
@@ -127,12 +154,6 @@ export function runOpenClaw(
       detail,
     );
   }
-
-  return {
-    status,
-    stdout,
-    stderr,
-  };
 }
 
 export async function scheduleSubagentCronJob(
@@ -386,9 +407,9 @@ export async function runCronJobNow(jobId: string, timeoutMs = 1_900_000): Promi
   }
 }
 
-export function removeCronJob(jobId: string): void {
+export async function removeCronJob(jobId: string): Promise<void> {
   try {
-    runOpenClaw(["cron", "rm", jobId], {
+    await runOpenClaw(["cron", "rm", jobId], {
       allowFailure: true,
       timeoutMs: 15_000,
     });
@@ -441,7 +462,7 @@ async function runOpenClawWithRetries(
         commandOptions.timeoutMs = options.timeoutMs;
       }
 
-      const result = runOpenClaw(args, commandOptions);
+      const result = await runOpenClaw(args, commandOptions);
       if (result.status === 0) {
         return result;
       }

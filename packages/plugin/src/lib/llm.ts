@@ -1,11 +1,14 @@
-import { callGatewayChatCompletion } from "./chat-completions";
-import { resolveGatewayBaseUrl } from "./gateway";
+import { runIsolatedModelTask } from "./isolated-model-task";
 import type { LogEntry } from "../log/schema";
 import type { SubjectRegistry } from "../subjects/registry";
 import {
   buildExtractionUserPrompt,
   loadExtractionPrompt,
 } from "../extraction/prompt";
+
+const EXTRACTION_MODEL_SESSION_NAME = "zettelclaw-extraction-model";
+const EXTRACTION_MODEL_TIMEOUT_SECONDS = 1_800;
+const EXTRACTION_MODEL_WAIT_TIMEOUT_MS = 1_900_000;
 
 export async function extractFromTranscript(opts: {
   transcript: string;
@@ -16,15 +19,19 @@ export async function extractFromTranscript(opts: {
   apiToken?: string;
 }): Promise<string> {
   const prompt = await loadExtractionPrompt();
-  const baseUrl = resolveGatewayBaseUrl(opts.apiBaseUrl);
-  const userPrompt = buildExtractionUserPrompt(opts);
-
-  return await callGatewayChatCompletion({
-    baseUrl,
+  const userPrompt = buildExtractionUserPrompt({
+    transcript: opts.transcript,
+    subjects: opts.subjects,
+    existingEntries: opts.existingEntries,
+  });
+  return await runIsolatedModelTask({
     model: opts.model,
+    sessionName: EXTRACTION_MODEL_SESSION_NAME,
+    timeoutSeconds: EXTRACTION_MODEL_TIMEOUT_SECONDS,
+    waitTimeoutMs: EXTRACTION_MODEL_WAIT_TIMEOUT_MS,
     systemPrompt: prompt,
     userPrompt,
-    apiToken: opts.apiToken,
     errorPrefix: "extraction LLM call failed",
+    outputReminder: "Return JSONL only, one object per line, no markdown fences or commentary.",
   });
 }
