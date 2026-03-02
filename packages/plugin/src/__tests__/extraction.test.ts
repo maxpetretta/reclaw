@@ -6,7 +6,12 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { registerExtractionHooks } from "../hooks/extraction";
 import { appendEntry, readLog, type LogEntry } from "../log/schema";
-import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/markers";
+import {
+  BRIEFING_BEGIN_MARKER,
+  BRIEFING_END_MARKER,
+  LAST_HANDOFF_BEGIN_MARKER,
+  LAST_HANDOFF_END_MARKER,
+} from "../memory/markers";
 import { readState } from "../state";
 import { readRegistry, writeRegistry } from "../subjects/registry";
 
@@ -208,7 +213,7 @@ describe("extraction hooks", () => {
       extractFromTranscript: async () =>
         [
           '{"type":"fact","content":"Auth migration moved under platform systems","subject":"auth-migration","subjectType":"system"}',
-          '{"type":"fact","content":"Pairing with Max on rollout","subject":"max","subjectType":"person"}',
+          '{"type":"fact","content":"Pairing with Alice on rollout","subject":"alice-chen","subjectType":"person"}',
           '{"type":"fact","content":"Ops audit is queued","subject":"ops-audit","subjectType":"invalid"}',
         ].join("\n"),
     });
@@ -220,7 +225,7 @@ describe("extraction hooks", () => {
 
     const registry = await readRegistry(join(logDir, "subjects.json"));
     expect(registry["auth-migration"]?.type).toBe("system");
-    expect(registry.max?.type).toBe("person");
+    expect(registry["alice-chen"]?.type).toBe("person");
     expect(registry["ops-audit"]?.type).toBe("topic");
   });
 
@@ -642,10 +647,10 @@ describe("extraction hooks", () => {
         "## Goals",
         "- Ship V3",
         "",
-        "<!-- BEGIN GENERATED BRIEFING -->",
+        BRIEFING_BEGIN_MARKER,
         "## Active",
         "- auth-migration — old briefing",
-        "<!-- END GENERATED BRIEFING -->",
+        BRIEFING_END_MARKER,
         "",
         LAST_HANDOFF_BEGIN_MARKER,
         "Session: old-session (2026-02-01T00:00:00.000Z)",
@@ -699,7 +704,7 @@ describe("extraction hooks", () => {
     );
 
     const firstMemory = await readFile(memoryPath, "utf8");
-    expect(firstMemory).toContain("## Last Session Handoff");
+    expect(firstMemory).toContain("## Zettelclaw Session Handoff");
     expect(firstMemory).toContain("Session: session-h1");
     expect(firstMemory).toContain("Auth migration in progress");
     expect(firstMemory).toContain("Detail: Backfill remains");
@@ -717,8 +722,8 @@ describe("extraction hooks", () => {
     expect(secondMemory).not.toContain("Session: session-h1");
     expect(secondMemory).toContain("## Goals");
     expect(secondMemory).toContain("## Notes");
-    expect(secondMemory).toContain("<!-- BEGIN GENERATED BRIEFING -->");
-    expect(secondMemory).toContain("<!-- END GENERATED BRIEFING -->");
+    expect(secondMemory).toContain(BRIEFING_BEGIN_MARKER);
+    expect(secondMemory).toContain(BRIEFING_END_MARKER);
   });
 
   test("creates handoff markers in MEMORY.md when missing", async () => {

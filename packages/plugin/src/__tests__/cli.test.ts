@@ -116,7 +116,7 @@ describe("cli init helpers", () => {
         }
       ).internal?.entries?.["session-memory"]?.enabled,
     ).toBe(false);
-    expect(cronJobs.jobs?.some((job) => job.name === "zettelclaw-briefing")).toBe(true);
+    expect(cronJobs.jobs?.some((job) => job.name === "zettelclaw-memory-snapshot")).toBe(true);
     expect(cronJobs.jobs?.some((job) => job.name === "zettelclaw-reset")).toBe(false);
     expect(cronJobs.jobs?.some((job) => job.name === "zettelclaw-nightly")).toBe(false);
     expect(memoryContent).toContain(BRIEFING_BEGIN_MARKER);
@@ -630,7 +630,7 @@ describe("cli init helpers", () => {
                 response: {
                   _id: { $oid: "g2" },
                   role: "assistant",
-                  content: "hello max",
+                  content: "hello user",
                   createdAt: 1704067260,
                 },
               },

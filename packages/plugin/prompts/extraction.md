@@ -28,7 +28,7 @@ You will receive:
 2. One entry per fact/decision. Don't bundle multiple facts into one entry.
    Keep content concise — one sentence to two sentences. Avoid inventories
    (long lists of tools, supplements, table columns, stock tickers). Summarize
-   instead: "Uses a Brian Johnson supplement stack" not the full ingredient list.
+   instead: "Takes a daily supplement stack" not the full ingredient list.
 3. Content should be a single sentence to a short paragraph. Plain text.
 4. Use the detail field when content alone isn't enough. Why a decision was made,
    background on a fact, what prompted a question, constraints on a task.
@@ -56,7 +56,7 @@ You will receive:
 9. Do not re-extract information that already exists in the log unless it has
    materially changed. If the same concept appears in existing entries with
    substantially the same content, skip it entirely. This applies across
-   subjects — if a fact about "bracky" already covers LMSR pricing, do not
+   subjects — if a fact about "auth-migration" already covers retry intervals, do not
    emit a near-identical entry.
 10. If a task is now done, emit a new `task` entry with `status: "done"` and
     describe closure details in `detail` when useful.

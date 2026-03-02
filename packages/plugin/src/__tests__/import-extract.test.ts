@@ -156,7 +156,7 @@ describe("import extraction", () => {
       },
       {
         callModel: async () =>
-          '{"type":"fact","content":"Max is the owner","subject":"max","subjectType":"person"}',
+          '{"type":"fact","content":"Alice is the owner","subject":"alice-chen","subjectType":"person"}',
       },
     );
 
@@ -164,7 +164,7 @@ describe("import extraction", () => {
     expect(entries[0]?.subjectTypeHint).toBe("person");
 
     const registry = await readRegistry(subjectsPath);
-    expect(registry.max?.type).toBe("person");
+    expect(registry["alice-chen"]?.type).toBe("person");
   });
 
   test("defaults to topic subject type when subjectType is omitted", async () => {
@@ -178,12 +178,12 @@ describe("import extraction", () => {
       },
       {
         callModel: async () =>
-          '{"type":"fact","content":"Max uses Termius on his phone","subject":"max-petretta"}',
+          '{"type":"fact","content":"Alice uses Termux on her phone","subject":"alice-chen"}',
       },
     );
 
     const registry = await readRegistry(subjectsPath);
-    expect(registry["max-petretta"]?.type).toBe("topic");
+    expect(registry["alice-chen"]?.type).toBe("topic");
   });
 
   test("ignores transcript-cited event ids for linkage fields", async () => {
@@ -404,10 +404,10 @@ describe("import extraction", () => {
           calls += 1;
           if (calls === 1) {
             return [
-              '{"type":"fact","content":"Maybe Max should change the import flow","subject":"max-petretta","subjectType":"person"}',
-              '{"type":"fact","content":"Possibly Max should update the plugin","subject":"max-petretta","subjectType":"person"}',
-              '{"type":"fact","content":"Likely Max needs to patch the API","subject":"max-petretta","subjectType":"person"}',
-              '{"type":"fact","content":"Perhaps Max should track import jobs better","subject":"max-petretta","subjectType":"person"}',
+              '{"type":"fact","content":"Maybe Alice should change the import flow","subject":"alice-chen","subjectType":"person"}',
+              '{"type":"fact","content":"Possibly Alice should update the plugin","subject":"alice-chen","subjectType":"person"}',
+              '{"type":"fact","content":"Likely Alice needs to patch the API","subject":"alice-chen","subjectType":"person"}',
+              '{"type":"fact","content":"Perhaps Alice should track import jobs better","subject":"alice-chen","subjectType":"person"}',
             ].join("\n");
           }
 

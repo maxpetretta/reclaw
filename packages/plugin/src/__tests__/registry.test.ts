@@ -41,14 +41,14 @@ describe("registry", () => {
 
   test("ensureSubject auto-creates missing slug", async () => {
     await ensureSubject(registryPath, "auth-migration");
-    await ensureSubject(registryPath, "max", "person");
+    await ensureSubject(registryPath, "alice-chen", "person");
 
     const registry = await readRegistry(registryPath);
     expect(registry["auth-migration"]).toEqual({
       display: "Auth Migration",
       type: "topic",
     });
-    expect(registry.max).toEqual({ display: "Max", type: "person" });
+    expect(registry["alice-chen"]).toEqual({ display: "Alice Chen", type: "person" });
   });
 
   test("ensureSubject falls back to topic type for invalid inferred type", async () => {
@@ -62,11 +62,11 @@ describe("registry", () => {
   });
 
   test("ensureSubject defaults to topic type when no hint is provided", async () => {
-    await ensureSubject(registryPath, "max-petretta");
+    await ensureSubject(registryPath, "alice-chen");
 
     const registry = await readRegistry(registryPath);
-    expect(registry["max-petretta"]).toEqual({
-      display: "Max Petretta",
+    expect(registry["alice-chen"]).toEqual({
+      display: "Alice Chen",
       type: "topic",
     });
   });
@@ -98,21 +98,21 @@ describe("registry", () => {
   });
 
   test("upsertSubjectFromExtraction defaults to topic type for new subject when hint is missing", async () => {
-    await upsertSubjectFromExtraction(registryPath, "max-petretta");
+    await upsertSubjectFromExtraction(registryPath, "alice-chen");
 
     const registry = await readRegistry(registryPath);
-    expect(registry["max-petretta"]?.type).toBe("topic");
+    expect(registry["alice-chen"]?.type).toBe("topic");
   });
 
   test("upsertSubjectFromExtraction preserves existing type when no hint is provided", async () => {
     await writeRegistry(registryPath, {
-      "max-petretta": { display: "Max Petretta", type: "topic" },
+      "alice-chen": { display: "Alice Chen", type: "topic" },
     });
 
-    await upsertSubjectFromExtraction(registryPath, "max-petretta");
+    await upsertSubjectFromExtraction(registryPath, "alice-chen");
 
     const registry = await readRegistry(registryPath);
-    expect(registry["max-petretta"]?.type).toBe("topic");
+    expect(registry["alice-chen"]?.type).toBe("topic");
   });
 
   test("renameSubject updates registry and log", async () => {
