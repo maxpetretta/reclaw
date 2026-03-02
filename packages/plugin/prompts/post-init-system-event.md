@@ -34,8 +34,8 @@ AGENTS replacement targets (be explicit):
 - Remove any lines that say to write/read `memory/YYYY-MM-DD.md` from MEMORY.md.
 - Remove outdated documentation that says event corrections are handled via a `replaces` field.
 - Preserve the generated memory snapshot markers and their managed block exactly:
-  - `<!-- BEGIN GENERATED BRIEFING -->`
-  - `<!-- END GENERATED BRIEFING -->`
+  - `<!-- BEGIN ZETTELCLAW MEMORY SNAPSHOT -->`
+  - `<!-- END ZETTELCLAW MEMORY SNAPSHOT -->`
 
 ```markdown
 {{MEMORY_EXCERPT}}

@@ -3,8 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginConfig } from "../config";
 import { isEnoent } from "../lib/guards";
-import { callGatewayChatCompletion } from "../lib/chat-completions";
-import { resolveGatewayBaseUrl } from "../lib/gateway";
+import { runIsolatedModelTask } from "../lib/isolated-model-task";
 import { replaceManagedBlock } from "../memory/managed-block";
 import { BRIEFING_BEGIN_MARKER, BRIEFING_END_MARKER } from "../memory/markers";
 import { isOpenItem } from "../log/query";
@@ -14,6 +13,9 @@ import { readState, type EventUsageState } from "../state";
 const THIS_DIR = dirname(fileURLToPath(import.meta.url));
 const BRIEFING_PROMPT_PATH = join(THIS_DIR, "../../prompts/briefing.md");
 const DAY_MS = 24 * 60 * 60 * 1000;
+const BRIEFING_MODEL_SESSION_NAME = "zettelclaw-memory-snapshot-model";
+const BRIEFING_MODEL_TIMEOUT_SECONDS = 1_800;
+const BRIEFING_MODEL_WAIT_TIMEOUT_MS = 1_900_000;
 
 interface BriefingDeps {
   callBriefingModel: (opts: {
@@ -343,14 +345,16 @@ function applyGeneratedBlock(memoryContent: string, generated: string): string {
 
 const DEFAULT_DEPS: BriefingDeps = {
   async callBriefingModel(opts) {
-    const baseUrl = resolveGatewayBaseUrl(opts.apiBaseUrl);
-    return await callGatewayChatCompletion({
-      baseUrl,
+    return await runIsolatedModelTask({
       model: opts.model,
+      sessionName: BRIEFING_MODEL_SESSION_NAME,
+      timeoutSeconds: BRIEFING_MODEL_TIMEOUT_SECONDS,
+      waitTimeoutMs: BRIEFING_MODEL_WAIT_TIMEOUT_MS,
       systemPrompt: opts.prompt,
       userPrompt: opts.userInput,
-      apiToken: opts.apiToken,
-      errorPrefix: "briefing LLM call failed",
+      errorPrefix: "memory snapshot LLM call failed",
+      outputReminder:
+        "Return only the generated MEMORY.md block content in markdown. No fences. No commentary.",
     });
   },
   async readMemoryFile(path) {
