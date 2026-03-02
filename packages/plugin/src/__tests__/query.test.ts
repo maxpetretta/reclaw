@@ -114,20 +114,21 @@ describe("query", () => {
     ]);
   });
 
-  test("searchLog finds keyword matches and supports fallback when ripgrep is unavailable", async () => {
-    const withRg = await searchLog(logPath, "webhook", { subject: "auth-migration" });
-    expect(withRg.map((entry) => entry.id)).toEqual([
+  test("searchLog finds keyword matches using ripgrep", async () => {
+    const results = await searchLog(logPath, "webhook", { subject: "auth-migration" });
+    expect(results.map((entry) => entry.id)).toEqual([
       "tiddone00001",
       "tidopen00001",
       "did000000001",
       "qid000000001",
     ]);
+  });
 
+  test("searchLog throws when ripgrep is unavailable", async () => {
     const originalPath = process.env.PATH;
     process.env.PATH = "";
     try {
-      const withoutRg = await searchLog(logPath, "staging");
-      expect(withoutRg.map((entry) => entry.id)).toEqual(["did000000001"]);
+      await expect(searchLog(logPath, "staging")).rejects.toThrow("ripgrep search failed");
     } finally {
       process.env.PATH = originalPath;
     }

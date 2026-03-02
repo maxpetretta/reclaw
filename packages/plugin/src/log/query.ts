@@ -1,5 +1,6 @@
 import { open } from "node:fs/promises";
 import { runPluginCommandWithTimeout } from "openclaw/plugin-sdk";
+import { isEnoent } from "../lib/guards";
 import { readLog, type EntryType, type LogEntry, validateEntry } from "./schema";
 
 export interface LogQueryFilter {
@@ -11,14 +12,6 @@ export interface LogQueryFilter {
   to?: string;
 }
 
-function isEnoent(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ENOENT"
-  );
-}
 
 function matchesKeyword(entry: LogEntry, keyword: string): boolean {
   const normalized = keyword.toLowerCase();
@@ -284,12 +277,11 @@ export async function searchLog(
   }
 
   const rgIds = await ripgrepSearch(logPath, trimmedKeyword);
-  const fallbackIds =
-    rgIds === null
-      ? new Set(allEntries.filter((entry) => matchesKeyword(entry, trimmedKeyword)).map((entry) => entry.id))
-      : rgIds;
+  if (rgIds === null) {
+    throw new Error("ripgrep search failed");
+  }
 
-  return applyFilterAndResolution(allEntries, fallbackIds, filter);
+  return applyFilterAndResolution(allEntries, rgIds, filter);
 }
 
 export async function getLastHandoff(logPath: string): Promise<LogEntry | undefined> {
