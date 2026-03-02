@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
-import { isObject } from "../lib/guards";
+import { isObject, normalizeError } from "../lib/guards";
 import { extractFromTranscript } from "../lib/llm";
 import {
   readGatewayToken,
@@ -77,14 +77,6 @@ function resolveMemoryMdPath(
   }
 
   return join(process.cwd(), "MEMORY.md");
-}
-
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
 }
 
 function resolvePaths(config: PluginConfig): ExtractionPaths {

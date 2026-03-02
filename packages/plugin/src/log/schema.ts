@@ -89,12 +89,20 @@ function validateCommonTextFields(raw: Record<string, unknown>): { ok: true } | 
   return { ok: true };
 }
 
-function parseType(rawType: unknown): EntryType | undefined {
+export function parseEntryType(rawType: unknown): EntryType | undefined {
   if (typeof rawType !== "string") {
     return undefined;
   }
 
   return ENTRY_TYPES.find((entryType) => entryType === rawType);
+}
+
+export function parseEntryStatus(rawStatus: unknown): "open" | "done" | undefined {
+  if (rawStatus === "open" || rawStatus === "done") {
+    return rawStatus;
+  }
+
+  return undefined;
 }
 
 function parseSubject(rawSubject: unknown): string | undefined {
@@ -108,7 +116,7 @@ function parseSubject(rawSubject: unknown): string | undefined {
 function buildLlmEntry(
   raw: Record<string, unknown>,
 ): { ok: true; entry: Omit<LogEntry, "id" | "timestamp" | "session"> } | { ok: false; error: string } {
-  const type = parseType(raw.type);
+  const type = parseEntryType(raw.type);
   if (!type) {
     return { ok: false, error: "type must be one of task, fact, decision, question, handoff" };
   }
@@ -265,7 +273,7 @@ export function validateLlmOutput(
     return { ok: false, error: "LLM output must not include id, timestamp, or session" };
   }
 
-  const type = parseType(raw.type);
+  const type = parseEntryType(raw.type);
   if (!type) {
     return { ok: false, error: "type must be one of task, fact, decision, question, handoff" };
   }

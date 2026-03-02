@@ -4,7 +4,7 @@ import type { PluginConfig } from "../config";
 import { isObject } from "../lib/guards";
 import { extractTextContent } from "../lib/text";
 import { queryLog, searchLog, type LogQueryFilter } from "../log/query";
-import type { EntryType, LogEntry } from "../log/schema";
+import { parseEntryType, parseEntryStatus, type EntryType, type LogEntry } from "../log/schema";
 import { incrementEventUsage } from "../state";
 import { textResult } from "./shared";
 
@@ -23,9 +23,6 @@ interface MemorySearchDeps {
   incrementEventUsage: typeof incrementEventUsage;
 }
 
-const ENTRY_TYPE_SET = new Set<EntryType>(["task", "fact", "decision", "question", "handoff"]);
-const STATUS_SET = new Set(["open", "done"]);
-
 const DEFAULT_DEPS: MemorySearchDeps = {
   queryLog,
   searchLog,
@@ -40,22 +37,6 @@ function normalizeQuery(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function normalizeEntryType(value: unknown): EntryType | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  return ENTRY_TYPE_SET.has(value as EntryType) ? (value as EntryType) : undefined;
-}
-
-function normalizeStatus(value: unknown): "open" | "done" | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  return STATUS_SET.has(value) ? (value as "open" | "done") : undefined;
 }
 
 function normalizeSubject(value: unknown): string | undefined {
@@ -105,9 +86,9 @@ function dedupeEntries(entries: LogEntry[]): LogEntry[] {
 }
 
 function buildStructuredFilter(params: SearchParams): { filter: LogQueryFilter; hasStructuredFilters: boolean } {
-  const type = normalizeEntryType(params.type);
+  const type = parseEntryType(params.type);
   const subject = normalizeSubject(params.subject);
-  const status = normalizeStatus(params.status);
+  const status = parseEntryStatus(params.status);
 
   return {
     filter: {

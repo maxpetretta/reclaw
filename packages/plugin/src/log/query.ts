@@ -77,7 +77,7 @@ function normalizeSubjectList(subjects: string[]): Set<string> {
   return new Set(normalized);
 }
 
-function isOpenItem(entry: LogEntry): boolean {
+export function isOpenItem(entry: LogEntry): boolean {
   return (entry.type === "task" && entry.status === "open") || entry.type === "question";
 }
 

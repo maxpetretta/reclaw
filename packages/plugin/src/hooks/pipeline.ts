@@ -1,5 +1,6 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
+import { normalizeError } from "../lib/guards";
 import {
   DEFAULT_EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
   findMentionedSubjects,
@@ -48,14 +49,6 @@ interface ExtractionPipelineParams {
 
 const EVENT_ID_LENGTH = 12;
 const TRANSCRIPT_EVENT_ID_PATTERN = /\[([A-Za-z0-9_-]{12})\]/gu;
-
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
 
 function extractReferencedEventIds(transcript: string): string[] {
   if (!transcript.trim()) {

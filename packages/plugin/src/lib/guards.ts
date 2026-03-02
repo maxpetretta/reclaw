@@ -18,3 +18,11 @@ export function isNonEmptyString(value: unknown): value is string {
 export function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
+
+export function normalizeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}

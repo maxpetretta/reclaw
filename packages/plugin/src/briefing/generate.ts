@@ -7,6 +7,7 @@ import { callGatewayChatCompletion } from "../lib/chat-completions";
 import { resolveGatewayBaseUrl } from "../lib/gateway";
 import { replaceManagedBlock } from "../memory/managed-block";
 import { BRIEFING_BEGIN_MARKER, BRIEFING_END_MARKER } from "../memory/markers";
+import { isOpenItem } from "../log/query";
 import { readLog, type LogEntry } from "../log/schema";
 import { readState, type EventUsageState } from "../state";
 
@@ -92,10 +93,6 @@ function isWithinDays(entry: LogEntry, nowMs: number, days: number): boolean {
 
   const cutoff = nowMs - days * DAY_MS;
   return timestampMs >= cutoff;
-}
-
-function isOpenItem(entry: LogEntry): boolean {
-  return (entry.type === "task" && entry.status === "open") || entry.type === "question";
 }
 
 function getMostRecentBySubject(entries: LogEntry[]): Map<string, LogEntry> {
