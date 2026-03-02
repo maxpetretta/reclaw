@@ -3,8 +3,7 @@
   "private": true,
   "workspaces": ["packages/plugin", "packages/skill", "packages/website"],
   "scripts": {
-    "clone": "./scripts/clone-openclaw-workspace.sh",
-    "smoke": "./scripts/run-local-smoke-tests.sh",
+    "smoke": "./scripts/run-plugin-smoke-tests.sh",
     "web": "bun run --cwd packages/website dev",
     "web:dev": "bun run --cwd packages/website dev",
     "web:build": "bun run --cwd packages/website build",
