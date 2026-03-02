@@ -1,44 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { ImportPlatform } from "../import/types";
-import { isObject } from "../lib/guards";
 import type { ImportJobOptionsState, ImportJobState } from "../state";
+import {
+  parseIsoDateInput,
+  readPositiveNumberOption as readNumberOption,
+  toObject,
+} from "./parse";
 
-export function toObject(value: unknown): Record<string, unknown> {
-  return isObject(value) ? value : {};
-}
-
-export function readNumberOption(value: unknown, fallback: number): number {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return Math.floor(value);
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
-  }
-
-  return fallback;
-}
-
-function parseIsoDateInput(raw: unknown): string | undefined {
-  if (typeof raw !== "string") {
-    return undefined;
-  }
-
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const parsed = Date.parse(trimmed);
-  if (!Number.isFinite(parsed)) {
-    return undefined;
-  }
-
-  return new Date(parsed).toISOString();
-}
+export { toObject, readNumberOption };
 
 function readPositiveIntOption(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {

@@ -1,8 +1,9 @@
 import type { PluginConfig } from "../config";
 import { queryLog, searchLog } from "../log/query";
-import type { EntryType, LogEntry } from "../log/schema";
+import { parseEntryType, parseEntryStatus, type LogEntry } from "../log/schema";
 import { resolvePaths } from "./paths";
 import type { CommandLike } from "./command-like";
+import { parseIsoDateInput, readPositiveNumberOption, toObject } from "./parse";
 
 interface TraceChain {
   subject: string;
@@ -11,59 +12,6 @@ interface TraceChain {
 
 interface TraceReport {
   chains: TraceChain[];
-}
-
-function toObject(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-}
-
-function parseEntryType(raw: unknown): EntryType | undefined {
-  if (raw === "task" || raw === "fact" || raw === "decision" || raw === "question" || raw === "handoff") {
-    return raw;
-  }
-
-  return undefined;
-}
-
-function parseStatus(raw: unknown): "open" | "done" | undefined {
-  if (raw === "open" || raw === "done") {
-    return raw;
-  }
-
-  return undefined;
-}
-
-function parseIsoDateInput(raw: unknown): string | undefined {
-  if (typeof raw !== "string") {
-    return undefined;
-  }
-
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const parsed = Date.parse(trimmed);
-  if (!Number.isFinite(parsed)) {
-    return undefined;
-  }
-
-  return new Date(parsed).toISOString();
-}
-
-function readNumberOption(value: unknown, fallback: number): number {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return Math.floor(value);
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
-  }
-
-  return fallback;
 }
 
 function formatTimestamp(iso: string): string {
@@ -174,7 +122,7 @@ export function registerLogCommands(
     .action(async (opts: unknown) => {
       const options = toObject(opts);
       const paths = resolvePaths(params.config, params.workspaceDir);
-      const limit = readNumberOption(options.limit, 20);
+      const limit = readPositiveNumberOption(options.limit, 20);
 
       const entries = await queryLog(paths.logPath, {
         ...(parseEntryType(options.type) ? { type: parseEntryType(options.type) } : {}),
@@ -205,7 +153,7 @@ export function registerLogCommands(
         ...(typeof options.subject === "string" && options.subject.trim()
           ? { subject: options.subject.trim() }
           : {}),
-        ...(parseStatus(options.status) ? { status: parseStatus(options.status) } : {}),
+        ...(parseEntryStatus(options.status) ? { status: parseEntryStatus(options.status) } : {}),
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
       };

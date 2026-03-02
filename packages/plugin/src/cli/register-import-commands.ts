@@ -37,10 +37,7 @@ import {
 } from "./import-ui";
 import { resolvePaths } from "./paths";
 import type { CommandLike } from "./command-like";
-
-function toObject(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-}
+import { toObject } from "./parse";
 
 function unwrapPromptValue<T>(value: T | symbol): T {
   if (typeof value === "symbol") {

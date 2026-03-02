@@ -2,10 +2,7 @@ import type { PluginConfig } from "../config";
 import { ensureSubject, readRegistry, renameSubject, writeRegistry } from "../subjects/registry";
 import { resolvePaths } from "./paths";
 import type { CommandLike } from "./command-like";
-
-function toObject(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-}
+import { toObject } from "./parse";
 
 function sortRegistryEntries(registry: Record<string, { display: string; type: string }>): Array<[string, { display: string; type: string }]> {
   return Object.entries(registry).sort(([left], [right]) => left.localeCompare(right));

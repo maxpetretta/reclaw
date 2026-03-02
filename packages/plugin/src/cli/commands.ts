@@ -37,6 +37,7 @@ import {
   writeCronJobsDocument,
 } from "../lib/cron-jobs-store";
 import { parseInteractiveImportJobs } from "./import-ui";
+import { toObject } from "./parse";
 
 const POST_INIT_EVENT_PROMPT = "post-init-system-event.md";
 const AGENTS_MEMORY_PROMPT = "agents-memory-guidance.md";
@@ -66,10 +67,6 @@ interface VerifyResult {
   ok: boolean;
   checks: VerifyCheck[];
   paths: InitPaths;
-}
-
-function toObject(value: unknown): Record<string, unknown> {
-  return isObject(value) ? value : {};
 }
 
 function resolvePluginPromptsDir(): string {
