@@ -2,6 +2,7 @@
   "id": "zettelclaw",
   "name": "Zettelclaw",
   "kind": "memory",
+  "skills": ["./skills"],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
