@@ -903,7 +903,7 @@ Extends the builtin schema with optional structured filters:
 - **MEMORY.md semantic search** — delegated to the builtin (hybrid BM25+vector, MMR, temporal decay, all inherited).
 - **Log search** — handled by the wrapper directly via structured filters (in-process JSONL parsing by type/subject/status) + ripgrep keyword search over `content` and `detail` fields. No vector index over log entries for v1.
 
-This is sufficient because log entries are short, structured, and tagged — structured filters cover precise lookups ("all open tasks for auth-migration"), and ripgrep covers keyword searches ("webhook"). Semantic search adds the most value over MEMORY.md where content is longer and less structured. A vector index over log entries can be added in v2 if keyword + structured filters prove insufficient at scale.
+This is sufficient because log entries are short, structured, and tagged — structured filters cover precise lookups ("all open tasks for auth-migration"), and ripgrep covers keyword searches ("webhook"). Semantic search adds the most value over MEMORY.md where content is longer and less structured. A vector index over log entries can be added in a future version if keyword + structured filters prove insufficient at scale.
 
 ### 9.3 `memory_get` (wrapped)
 
@@ -989,7 +989,7 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 | 4 | Extraction triggers | Plugin hook API provides `session_end`, `before_reset`, `before_compaction`, `after_compaction`, `session_start` — richer than internal hooks. Primary: `session_end` (all session ends). Secondary: `before_reset` (provides `messages[]` inline). Sweep: `gateway_start`. Scope: main sessions only (skip subagents, cron, hooks). |
 | 5 | Transcript access | `before_reset` uses `messages[]` first, then `sessionFile`, then `(agentId, sessionId)` transcript lookup fallback. `session_end` resolves by `sessionId`. `.reset.*` variants are supported. |
 | 6 | Snapshot generation | LLM-powered summarization for the generated MEMORY.md block. |
-| 7 | Obsidian layer | Deferred to v2. |
+| 7 | Obsidian layer | Deferred to a future version. |
 | 8 | Historical continuity | Full append-only history retained; continuity is reconstructed by subject + timestamp ordering. |
 | 9 | Session ID format | OpenClaw's `sessionId` from hook event context. Maps to `<sessionId>.jsonl` transcript. |
 | 10 | Duplicate handoffs | `state.json` tracks `extractedSessions` map (set of sessionIds). Same session = skip. Failed sessions tracked with retry count (max 1 retry). Map pruned after 30d. |
