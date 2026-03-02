@@ -39,7 +39,7 @@ function formatEntry(entry: LogEntry): string {
   return base;
 }
 
-function printEntries(entries: LogEntry[]): void {
+function printEntries(entries: LogEntry[], total?: number): void {
   if (entries.length === 0) {
     console.log("No entries.");
     return;
@@ -47,6 +47,10 @@ function printEntries(entries: LogEntry[]): void {
 
   for (const entry of entries) {
     console.log(formatEntry(entry));
+  }
+
+  if (typeof total === "number" && total > entries.length) {
+    console.log(`(showing ${entries.length} of ${total} entries)`);
   }
 }
 
@@ -131,7 +135,7 @@ export function registerLogCommands(
           : {}),
       });
 
-      printEntries(entries.slice(0, limit));
+      printEntries(entries.slice(0, limit), entries.length);
     });
 
   reclaw
