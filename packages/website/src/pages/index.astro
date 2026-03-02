@@ -3,9 +3,9 @@ import "@fontsource-variable/inter/standard.css"
 import "@fontsource-variable/inter/standard-italic.css"
 import "@/styles/global.css"
 
-const title = "Reclaw | Durable memory for OpenClaw"
+const title = "Reclaw | Reclaim your AI conversations"
 const description =
-  "An append-only event log that captures structured knowledge from every session. Facts, decisions, tasks — extracted automatically, searchable instantly."
+  "Export your ChatGPT, Claude, and Grok history — normalize to markdown, bootstrap your agent's memory."
 
 const features = [
   {
@@ -143,149 +143,132 @@ const decayRows = [
   </head>
 
   <body class="bg-background text-foreground antialiased">
-    <!-- ════════════════════════════════════════════ HEADER -->
-    <header class="sticky top-0 z-50 backdrop-blur-xl bg-background/80 border-b border-border">
-      <div class="max-w-5xl mx-auto px-5 h-14 flex items-center justify-between">
-        <a href="#top" class="flex items-center gap-2 text-foreground font-semibold text-sm">
-          <span>🦞</span>
-          <span>Reclaw</span>
-        </a>
-        <nav class="hidden md:flex items-center gap-8 text-sm text-muted-foreground">
-          <a href="#how" class="hover:text-foreground transition-colors">How it works</a>
-          <a href="#features" class="hover:text-foreground transition-colors">Features</a>
-          <a href="#start" class="hover:text-foreground transition-colors">Get started</a>
-        </nav>
-        <a
-          href="https://github.com/maxpetretta/reclaw"
-          class="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          GitHub &rarr;
-        </a>
-      </div>
-    </header>
+    <!-- ════════════════════════════════════════════ STICKY GITHUB NAV -->
+    <nav class="fixed top-0 right-0 z-50 p-4 sm:p-5">
+      <a
+        href="https://github.com/maxpetretta/reclaw"
+        target="_blank"
+        rel="noopener"
+        class="github-btn group inline-flex items-center gap-2 rounded-full border border-border bg-background/70 backdrop-blur-lg px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-amber-500/40 transition-all"
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+        GitHub
+      </a>
+    </nav>
 
     <!-- ════════════════════════════════════════════ HERO -->
-    <section id="top" class="hero-section relative overflow-hidden md:mx-5 lg:mx-auto md:max-w-5xl md:mt-6 md:rounded-2xl md:border md:border-border reveal">
-      <div class="hero-graph" aria-hidden="true">
-        <svg viewBox="0 0 1200 620" preserveAspectRatio="xMidYMid slice" role="presentation" focusable="false">
-          <defs>
-            <radialGradient id="glow-coral" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="var(--brand)" stop-opacity="0.9" />
-              <stop offset="100%" stop-color="var(--brand)" stop-opacity="0" />
-            </radialGradient>
-            <radialGradient id="glow-violet" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.9" />
-              <stop offset="100%" stop-color="#7c3aed" stop-opacity="0" />
-            </radialGradient>
-            <filter id="edge-blur">
-              <feGaussianBlur stdDeviation="0.8" />
-            </filter>
-          </defs>
-
-          <g class="graph-edges">
-            {edges.map(([a, b], index) => {
-              const sourceNode = nodes[a]
-              const targetNode = nodes[b]
-              if (!(sourceNode && targetNode)) return null
-              return (
-                <line
-                  x1={sourceNode.cx} y1={sourceNode.cy}
-                  x2={targetNode.cx} y2={targetNode.cy}
-                  style={`--edge-d: ${(index * 0.4) % 3}s`}
-                />
-              )
-            })}
-          </g>
-
-          <g class="graph-halos">
-            {nodes.map((node) => (
-              <circle
-                cx={node.cx} cy={node.cy} r={node.r * 4}
-                fill={node.color === "coral" ? "url(#glow-coral)" : "url(#glow-violet)"}
-                style={`--d: ${node.d}s`}
-                class="halo"
-              />
-            ))}
-          </g>
-
-          <g class="graph-nodes">
-            {nodes.map((node) => (
-              <circle cx={node.cx} cy={node.cy} r={node.r} class={`node node-${node.color}`} style={`--d: ${node.d}s`} />
-            ))}
-          </g>
-        </svg>
+    <section class="relative min-h-[100svh] flex items-center justify-center overflow-hidden px-6">
+      <!-- Amber orb -->
+      <div class="amber-orb" aria-hidden="true"></div>
+      <!-- Strata lines -->
+      <div class="strata" aria-hidden="true">
+        <div class="strata-line" style="--y: 18%; --w: 60%; --delay: 0s;"></div>
+        <div class="strata-line" style="--y: 34%; --w: 45%; --delay: 0.4s;"></div>
+        <div class="strata-line" style="--y: 52%; --w: 70%; --delay: 0.8s;"></div>
+        <div class="strata-line" style="--y: 68%; --w: 38%; --delay: 1.2s;"></div>
+        <div class="strata-line" style="--y: 82%; --w: 55%; --delay: 1.6s;"></div>
       </div>
 
-      <div class="hero-scanlines" aria-hidden="true"></div>
-
-      <div class="relative z-10 px-6 pt-24 pb-16 md:px-10 md:pt-48 md:pb-24">
-        <p class="hero-kicker font-mono text-[8px] sm:text-xs tracking-[0.2em] uppercase text-brand mb-5 inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand-soft px-3.5 py-1.5 backdrop-blur-sm">
-          <span aria-hidden="true">🦞</span>
-          Durable memory for OpenClaw
+      <div class="relative z-10 max-w-3xl text-center">
+        <p class="hero-kicker mb-5 text-sm font-semibold tracking-[0.2em] uppercase text-amber-400/90">
+          Your conversations deserve better
         </p>
-
-        <h1 class="hero-title hero-heading font-extrabold tracking-tighter leading-none text-foreground">
-          <span class="whitespace-nowrap">Conversations fade.</span><br />
-          <span class="hero-accent whitespace-nowrap">Knowledge compounds.</span>
+        <h1 class="hero-title text-5xl sm:text-6xl md:text-7xl font-extrabold leading-[1.08] tracking-tight">
+          Your best ideas are
+          <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-orange-400 to-red-400">buried in old chats</span>
         </h1>
-
-        <p class="hero-sub mt-8 text-lg md:text-xl text-[#C8CDDF] max-w-xl leading-relaxed">
-          An append-only event log that captures structured knowledge from every session &mdash; facts, decisions, tasks, questions &mdash; extracted automatically, searchable instantly.
+        <p class="hero-sub mt-7 text-lg sm:text-xl text-muted-foreground max-w-xl mx-auto leading-relaxed">
+          Reclaw recovers knowledge from your ChatGPT, Claude, and Grok history — and turns it into memory your agent can actually use.
         </p>
-
-        <div class="hero-actions mt-10 flex flex-wrap gap-3">
-          <a
-            href="#start"
-            class="inline-flex items-center px-5 py-2.5 bg-brand text-white font-semibold text-sm rounded-lg hover:brightness-110 transition-all hover:-translate-y-0.5 active:translate-y-0 shadow-lg shadow-brand/30"
+        <div class="hero-actions mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
+          <div class="group relative">
+            <div class="absolute -inset-1 rounded-xl bg-gradient-to-r from-amber-500/40 to-orange-600/40 blur-lg opacity-60 group-hover:opacity-100 transition-opacity"></div>
+            <a
+              href="#start"
+              class="relative inline-flex items-center gap-2.5 rounded-lg bg-gradient-to-b from-amber-500 to-orange-600 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-600/25 hover:shadow-orange-500/40 transition-all"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              Get started
+            </a>
+          </div>
+          <button
+            id="hero-copy-btn"
+            type="button"
+            class="copy-pill inline-flex items-center gap-2.5 rounded-lg border border-border px-6 py-3.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-amber-500/40 transition-colors cursor-pointer"
           >
-            Get started
-          </a>
-          <a
-            href="https://github.com/maxpetretta/reclaw"
-            class="inline-flex items-center px-5 py-2.5 border border-border text-foreground font-semibold text-sm rounded-lg hover:bg-card transition-all hover:-translate-y-0.5 active:translate-y-0 backdrop-blur-sm"
-          >
-            View on GitHub
-          </a>
+            <code class="hero-copy-text font-mono text-[13px] inline-block w-[5.2rem] text-center">npx reclaw</code>
+            <svg class="copy-icon w-3.5 h-3.5 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <svg class="check-icon w-3.5 h-3.5 text-green-400 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
         </div>
       </div>
 
-      <aside class="hero-marginalia" aria-hidden="true">
-        <span class="font-mono text-xs text-violet-400 tracking-wide">append-only</span>
-        <span class="text-sm italic text-muted-foreground leading-relaxed border-l-2 border-violet-500/30 pl-2.5"
-          >"The log is authoritative. The snapshot is a cache."</span
-        >
-      </aside>
+      <!-- Scroll hint -->
+      <div class="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-muted-foreground/50">
+        <span class="text-[11px] tracking-widest uppercase">Scroll</span>
+        <svg class="w-4 h-4 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+      </div>
     </section>
 
+    <!-- ════════════════════════════════════════════ THE PROBLEM -->
+    <section class="relative py-20 sm:py-24 px-6">
+      <div class="reveal max-w-2xl mx-auto text-center">
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight leading-snug">
+          Thousands of conversations.<br/>
+          <span class="text-muted-foreground">Zero lasting memory.</span>
+        </h2>
+        <p class="mt-6 text-muted-foreground text-base sm:text-lg leading-relaxed max-w-lg mx-auto">
+          You&rsquo;ve spent hundreds of hours talking to AI — debugging, brainstorming, making decisions. All of it sits in export zips, decaying. Unsearchable. Forgotten.
+        </p>
+      </div>
+
+      <!-- Decay visualization -->
+      <div class="reveal mt-14 max-w-2xl mx-auto space-y-2.5">
+        <div class="decay-row" style="--fade: 1; --pulse-delay: 0s;">
+          <div class="decay-dot bg-amber-400 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/35 via-amber-400/15 to-amber-400/05" style="--pulse-delay: 0s;"></div>
+          <span class="text-xs text-amber-400/70 tabular-nums w-20 text-right">today</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.85; --pulse-delay: 0.3s;">
+          <div class="decay-dot bg-amber-400/80 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/25 via-amber-400/10 to-transparent" style="--pulse-delay: 0.3s;"></div>
+          <span class="text-xs text-amber-400/50 tabular-nums w-20 text-right">3 days</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.7; --pulse-delay: 0.6s;">
+          <div class="decay-dot bg-amber-400/60 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/18 to-transparent" style="--pulse-delay: 0.6s;"></div>
+          <span class="text-xs text-muted-foreground/50 tabular-nums w-20 text-right">2 weeks</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.5; --pulse-delay: 0.9s;">
+          <div class="decay-dot bg-amber-400/40 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/12 to-transparent" style="--pulse-delay: 0.9s;"></div>
+          <span class="text-xs text-muted-foreground/40 tabular-nums w-20 text-right">1 month</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.35; --pulse-delay: 1.2s;">
+          <div class="decay-dot bg-amber-400/25 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/08 to-transparent" style="--pulse-delay: 1.2s;"></div>
+          <span class="text-xs text-muted-foreground/30 tabular-nums w-20 text-right">3 months</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.2; --pulse-delay: 1.5s;">
+          <div class="decay-dot bg-amber-400/12 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/04 to-transparent" style="--pulse-delay: 1.5s;"></div>
+          <span class="text-xs text-muted-foreground/20 tabular-nums w-20 text-right">6 months</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.1; --pulse-delay: 1.8s;">
+          <div class="decay-dot bg-amber-400/06 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/02 to-transparent" style="--pulse-delay: 1.8s;"></div>
+          <span class="text-xs text-muted-foreground/10 tabular-nums w-20 text-right">1 year</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.04; --pulse-delay: 2.1s;">
+          <div class="decay-dot bg-amber-400/03"></div>
+          <div class="flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/01 to-transparent"></div>
+          <span class="text-xs text-muted-foreground/05 tabular-nums w-20 text-right">gone</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════ NEW SITE CONTENT -->
     <main class="max-w-5xl mx-auto px-5">
-      <!-- ════════════════════════════════════════════ PROBLEM -->
-      <section class="py-20 sm:py-24">
-        <div class="reveal max-w-2xl mx-auto text-center">
-          <h2 class="text-2xl sm:text-4xl font-bold tracking-tight leading-snug">
-            Conversations fade.<br />
-            <span class="text-muted-foreground">Knowledge should compound.</span>
-          </h2>
-          <p class="mt-6 text-muted-foreground text-base sm:text-lg leading-relaxed max-w-lg mx-auto">
-            Every session produces decisions, context, and open loops. Without durable memory, your agent starts from zero each time.
-          </p>
-        </div>
-
-        <div class="reveal mt-14 max-w-2xl mx-auto space-y-2.5">
-          {decayRows.map((row, i) => (
-            <div class="decay-row" style={`--fade: ${row.fade}; --pulse-delay: ${i * 0.3}s;`}>
-              <div class={`decay-dot bg-${row.color} ${i < 7 ? 'decay-pulse' : ''}`}></div>
-              <div
-                class={`decay-bar flex-1 h-3 rounded-full bg-gradient-to-r ${row.barStops}`}
-                style={`--pulse-delay: ${i * 0.3}s;`}
-              ></div>
-              <span class={`text-xs tabular-nums w-20 text-right ${i === 0 ? 'text-brand/70' : i < 4 ? 'text-brand/50' : 'text-muted-foreground/' + Math.max(5, Math.round(row.fade * 50))}`}>
-                {row.label}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-
       <!-- ════════════════════════════════════════════ DEMO -->
       <section class="py-20" id="demo">
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal">See it in action</p>
@@ -572,6 +555,35 @@ const decayRows = [
         })
       }
 
+      const heroButton = document.getElementById("hero-copy-btn")
+      if (heroButton) {
+        heroButton.addEventListener("click", () => {
+          const textEl = heroButton.querySelector(".hero-copy-text")
+          const copyIcon = heroButton.querySelector(".copy-icon")
+          const checkIcon = heroButton.querySelector(".check-icon")
+
+          navigator.clipboard
+            .writeText("npx reclaw")
+            .then(() => {
+              if (textEl) textEl.textContent = "Copied!"
+              if (copyIcon) copyIcon.classList.add("hidden")
+              if (checkIcon) checkIcon.classList.remove("hidden")
+
+              setTimeout(() => {
+                if (textEl) textEl.textContent = "npx reclaw"
+                if (copyIcon) copyIcon.classList.remove("hidden")
+                if (checkIcon) checkIcon.classList.add("hidden")
+              }, 2000)
+            })
+            .catch(() => {
+              if (textEl) {
+                textEl.textContent = "Copy failed"
+                setTimeout(() => { textEl.textContent = "npx reclaw" }, 2000)
+              }
+            })
+        })
+      }
+
       const installBtn = document.getElementById("install-copy-btn")
       if (installBtn) {
         installBtn.addEventListener("click", () => {
@@ -583,115 +595,13 @@ const decayRows = [
 </html>
 
 <style>
-  /* ─── Hero ─── */
-  .hero-section {
-    min-height: clamp(480px, 68vh, 620px);
-    background:
-      radial-gradient(ellipse 60% 50% at 70% 30%, rgba(124, 58, 237, 0.14) 0%, transparent 70%),
-      radial-gradient(ellipse 40% 60% at 20% 70%, rgba(255, 107, 53, 0.08) 0%, transparent 70%),
-      linear-gradient(160deg, rgba(20, 18, 30, 0.9) 0%, rgba(11, 15, 20, 0.95) 100%);
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.03) inset,
-      0 40px 80px -20px rgba(0, 0, 0, 0.6),
-      0 0 120px -40px rgba(124, 58, 237, 0.15);
-  }
-
-  .hero-heading {
-    font-size: clamp(1.75rem, 6.5vw, 5rem);
-  }
-
+  /* ─── Gradient accent text ─── */
   .hero-accent {
     background: linear-gradient(135deg, var(--brand) 20%, #ff9f6b 50%, #7c3aed 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
-
-  .hero-graph {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-  }
-
-  .hero-graph svg {
-    width: 100%;
-    height: 100%;
-  }
-
-  .hero-scanlines {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    background: repeating-linear-gradient(
-      0deg, transparent 0px, transparent 2px,
-      rgba(0, 0, 0, 0.03) 2px, rgba(0, 0, 0, 0.03) 4px
-    );
-    pointer-events: none;
-  }
-
-  .hero-marginalia {
-    position: absolute;
-    right: 2rem;
-    top: 2.5rem;
-    z-index: 10;
-    display: none;
-    flex-direction: column;
-    gap: 0.35rem;
-    max-width: 200px;
-    opacity: 0.4;
-    transition: opacity 300ms ease;
-  }
-
-  .hero-section:hover .hero-marginalia {
-    opacity: 0.65;
-  }
-
-  /* Hero entrance sequence */
-  .hero-kicker { animation: rise 0.8s ease-out both; animation-delay: 0.1s; }
-  .hero-title { animation: rise 0.8s ease-out both; animation-delay: 0.25s; }
-  .hero-sub { animation: rise 0.8s ease-out both; animation-delay: 0.45s; }
-  .hero-actions { animation: rise 0.8s ease-out both; animation-delay: 0.65s; }
-
-  @keyframes rise {
-    from { opacity: 0; transform: translateY(24px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* ─── Graph ─── */
-  .graph-edges line {
-    stroke: rgba(124, 58, 237, 0.4);
-    stroke-width: 1;
-    stroke-linecap: round;
-    stroke-dasharray: 6 10;
-    animation: edge-travel 6s linear infinite;
-    animation-delay: var(--edge-d);
-    filter: url(#edge-blur);
-  }
-
-  .graph-edges line:nth-child(odd) {
-    stroke: rgba(255, 107, 53, 0.35);
-    animation-duration: 8s;
-    stroke-dasharray: 4 12;
-  }
-
-  .graph-edges line:nth-child(3n) {
-    stroke: rgba(255, 255, 255, 0.15);
-    animation-duration: 10s;
-  }
-
-  .halo {
-    opacity: 0.3;
-    animation: halo-breathe 5s ease-in-out infinite;
-    animation-delay: var(--d);
-  }
-
-  .node {
-    animation: node-pulse 4s ease-in-out infinite;
-    animation-delay: var(--d);
-  }
-
-  .node-coral { fill: var(--brand); }
-  .node-violet { fill: #7c3aed; }
 
   /* ─── Demo ─── */
   .log-entry {
@@ -717,31 +627,6 @@ const decayRows = [
 
   .demo-arrow {
     animation: arrow-pulse 2.5s ease-in-out infinite;
-  }
-
-  /* ─── Decay ─── */
-  .decay-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    opacity: var(--fade);
-  }
-
-  .decay-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .decay-pulse {
-    animation: dot-pulse 3s ease-in-out infinite;
-    animation-delay: var(--pulse-delay);
-  }
-
-  .decay-bar {
-    animation: bar-pulse 3s ease-in-out infinite;
-    animation-delay: var(--pulse-delay);
   }
 
   /* ─── Steps ─── */
@@ -870,55 +755,13 @@ const decayRows = [
   }
 
   /* ─── Keyframes ─── */
-  @keyframes edge-travel {
-    from { stroke-dashoffset: 0; }
-    to { stroke-dashoffset: -48; }
-  }
-
-  @keyframes node-pulse {
-    0%, 100% { opacity: 0.35; }
-    50% { opacity: 0.7; }
-  }
-
-  @keyframes halo-breathe {
-    0%, 100% { opacity: 0.15; transform: scale(0.8); }
-    50% { opacity: 0.4; transform: scale(1.2); }
-  }
-
   @keyframes arrow-pulse {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
   }
 
-  @keyframes dot-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0); transform: scale(1); }
-    50% { box-shadow: 0 0 8px 3px rgba(255, 107, 53, 0.25); transform: scale(1.3); }
-  }
-
-  @keyframes bar-pulse {
-    0%, 100% { opacity: 1; filter: brightness(1); }
-    50% { opacity: 1; filter: brightness(1.6); }
-  }
-
-  /* ─── Responsive ─── */
-  @media (max-width: 767px) {
-    .hero-section {
-      -webkit-mask-image: linear-gradient(to bottom, black 0%, black 85%, transparent 100%);
-      mask-image: linear-gradient(to bottom, black 0%, black 85%, transparent 100%);
-      box-shadow: none;
-    }
-  }
-
-  @media (min-width: 860px) {
-    .hero-marginalia {
-      display: flex;
-    }
-  }
-
+  /* ─── Accessibility ─── */
   @media (prefers-reduced-motion: reduce) {
-    .graph-edges line,
-    .graph-nodes .node,
-    .halo,
     .demo-arrow,
     .decay-pulse,
     .decay-bar {
