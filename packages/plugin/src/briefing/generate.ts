@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginConfig } from "../config";
+import { isEnoent } from "../lib/guards";
 import { callGatewayChatCompletion } from "../lib/chat-completions";
 import { resolveGatewayBaseUrl } from "../lib/gateway";
 import { replaceManagedBlock } from "../memory/managed-block";
@@ -44,14 +45,6 @@ interface SubjectActivity {
 
 let promptCache: string | null = null;
 
-function isEnoent(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ENOENT"
-  );
-}
 
 async function loadPrompt(): Promise<string> {
   if (promptCache !== null) {
@@ -88,18 +81,13 @@ function formatEntryWithId(entry: LogEntry): string {
   return `- id=${entry.id} | ${formatEntry(entry).slice(2)}`;
 }
 
-function toTimestampValue(timestamp: string): number {
-  const value = Date.parse(timestamp);
-  return Number.isFinite(value) ? value : 0;
-}
-
-function toTimestampMs(timestamp: string): number | null {
-  const value = Date.parse(timestamp);
-  return Number.isFinite(value) ? value : null;
+function parseTimestamp(value: string): number | null {
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function isWithinDays(entry: LogEntry, nowMs: number, days: number): boolean {
-  const timestampMs = toTimestampMs(entry.timestamp);
+  const timestampMs = parseTimestamp(entry.timestamp);
   if (timestampMs === null) {
     return false;
   }
@@ -126,8 +114,8 @@ function getMostRecentBySubject(entries: LogEntry[]): Map<string, LogEntry> {
       continue;
     }
 
-    const currentMs = toTimestampMs(current.timestamp);
-    const nextMs = toTimestampMs(entry.timestamp);
+    const currentMs = parseTimestamp(current.timestamp);
+    const nextMs = parseTimestamp(entry.timestamp);
 
     if (nextMs === null) {
       continue;
@@ -170,7 +158,7 @@ function buildDurableEntries(
         return right.score - left.score;
       }
 
-      return toTimestampValue(right.entry.timestamp) - toTimestampValue(left.entry.timestamp);
+      return (parseTimestamp(right.entry.timestamp) ?? 0) - (parseTimestamp(left.entry.timestamp) ?? 0);
     })
     .slice(0, Math.max(1, limit))
     .map((candidate) => candidate.entry);
@@ -203,7 +191,7 @@ function buildBriefingBuckets(
       continue;
     }
 
-    const latestTimestampMs = toTimestampMs(latestEntry.timestamp);
+    const latestTimestampMs = parseTimestamp(latestEntry.timestamp);
     if (latestTimestampMs !== null && latestTimestampMs < staleCutoff) {
       staleSubjectIds.add(latestEntry.id);
     }
@@ -212,21 +200,14 @@ function buildBriefingBuckets(
   const staleSubjects = entries.filter((entry) => staleSubjectIds.has(entry.id));
   const durableEntries = buildDurableEntries(entries, activeEntries, eventUsage);
 
-  const selectedIds = new Set<string>();
-  for (const entry of activeEntries) {
-    selectedIds.add(entry.id);
-  }
-  for (const entry of openItems) {
-    selectedIds.add(entry.id);
-  }
-  for (const entry of staleSubjects) {
-    selectedIds.add(entry.id);
-  }
-  for (const entry of durableEntries) {
-    selectedIds.add(entry.id);
-  }
+  const activeIds = new Set(activeEntries.map((entry) => entry.id));
+  const openItemIds = new Set(openItems.map((entry) => entry.id));
+  const durableIds = new Set(durableEntries.map((entry) => entry.id));
 
-  const selectedEntries = entries.filter((entry) => selectedIds.has(entry.id));
+  const selectedEntries = entries.filter((entry) =>
+    activeIds.has(entry.id) || openItemIds.has(entry.id) ||
+    staleSubjectIds.has(entry.id) || durableIds.has(entry.id),
+  );
 
   return {
     activeEntries,
@@ -259,7 +240,7 @@ function buildSubjectActivity(entries: LogEntry[], limit = 12): SubjectActivity[
     }
 
     existing.entries += 1;
-    if (toTimestampValue(entry.timestamp) >= toTimestampValue(existing.latestTimestamp)) {
+    if ((parseTimestamp(entry.timestamp) ?? 0) >= (parseTimestamp(existing.latestTimestamp) ?? 0)) {
       existing.latestTimestamp = entry.timestamp;
     }
     existing.typeCounts[entry.type] = (existing.typeCounts[entry.type] ?? 0) + 1;
@@ -271,8 +252,8 @@ function buildSubjectActivity(entries: LogEntry[], limit = 12): SubjectActivity[
         return right.entries - left.entries;
       }
 
-      const rightTs = toTimestampValue(right.latestTimestamp);
-      const leftTs = toTimestampValue(left.latestTimestamp);
+      const rightTs = parseTimestamp(right.latestTimestamp) ?? 0;
+      const leftTs = parseTimestamp(left.latestTimestamp) ?? 0;
       if (rightTs !== leftTs) {
         return rightTs - leftTs;
       }
