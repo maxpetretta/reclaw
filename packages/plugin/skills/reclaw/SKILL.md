@@ -1,1 +1,1 @@
-../../../skill/zettelclaw/SKILL.md
+../../../skill/reclaw/SKILL.md
