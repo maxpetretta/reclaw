@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
+import { escapeRegex, isObject } from "../lib/guards";
 import { queryExtractionContext, queryLog } from "../log/query";
 import {
   appendEntry,
@@ -49,24 +50,12 @@ interface SessionCandidate {
 
 export interface ExtractionHookDeps {
   extractFromTranscript: typeof extractFromTranscript;
-  findTranscriptFile: typeof findTranscriptFile;
-  findSessionKeyForSession: typeof findSessionKeyForSession;
-  queryLog: typeof queryLog;
-  readTranscript: typeof readTranscript;
-  formatTranscript: typeof formatTranscript;
-  listSessionCandidates: typeof listSessionCandidates;
   readMemoryFile: (path: string) => Promise<string>;
   writeMemoryFile: (path: string, content: string) => Promise<void>;
 }
 
 const DEFAULT_DEPS: ExtractionHookDeps = {
   extractFromTranscript,
-  findTranscriptFile,
-  findSessionKeyForSession,
-  queryLog,
-  readTranscript,
-  formatTranscript,
-  listSessionCandidates,
   async readMemoryFile(path) {
     try {
       return await readFile(path, "utf8");
@@ -91,13 +80,6 @@ const DEFAULT_DEPS: ExtractionHookDeps = {
 
 const EXTRACTION_CONTEXT_MAX_PER_SUBJECT = 50;
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 function findMentionedSubjects(transcript: string, subjects: SubjectRegistry): string[] {
   if (!transcript.trim()) {
@@ -614,7 +596,6 @@ async function loadBeforeResetMessages(
   params: {
     event: { messages?: unknown[]; sessionFile?: string };
     ctx: { agentId?: string; sessionId?: string };
-    deps: ExtractionHookDeps;
   },
 ): Promise<TranscriptMessage[]> {
   const fromEvent = extractBeforeResetMessages(params.event.messages);
@@ -629,17 +610,17 @@ async function loadBeforeResetMessages(
 
   if (sessionFile) {
     try {
-      return await params.deps.readTranscript(sessionFile);
+      return await readTranscript(sessionFile);
     } catch {
       // Fall through to lookup by session id.
     }
   }
 
   if (params.ctx.agentId && params.ctx.sessionId) {
-    const transcriptFile = await params.deps.findTranscriptFile(params.ctx.agentId, params.ctx.sessionId);
+    const transcriptFile = await findTranscriptFile(params.ctx.agentId, params.ctx.sessionId);
     if (transcriptFile) {
       try {
-        return await params.deps.readTranscript(transcriptFile);
+        return await readTranscript(transcriptFile);
       } catch {
         return [];
       }
@@ -670,7 +651,7 @@ async function runExtractionPipeline(params: {
     return;
   }
 
-  const transcript = params.deps.formatTranscript(params.messages);
+  const transcript = formatTranscript(params.messages);
   const transcriptEventIds = extractReferencedEventIds(transcript);
   if (!transcript.trim()) {
     await markExtracted(params.paths.statePath, params.sessionId, 0);
@@ -680,7 +661,7 @@ async function runExtractionPipeline(params: {
 
   try {
     if (transcriptEventIds.length > 0) {
-      const allEntries = await params.deps.queryLog(params.paths.logPath, {});
+      const allEntries = await queryLog(params.paths.logPath, {});
       if (allEntries.length > 0) {
         const byId = new Set(allEntries.map((entry) => entry.id));
         const citedIds = [...new Set(
@@ -802,12 +783,12 @@ export function registerExtractionHooks(
       return;
     }
 
-    const sessionKey = await runtimeDeps.findSessionKeyForSession(ctx.agentId, event.sessionId);
+    const sessionKey = await findSessionKeyForSession(ctx.agentId, event.sessionId);
     if (sessionKey && !shouldExtractSession(sessionKey, config.extraction.skipSessionTypes)) {
       return;
     }
 
-    const transcriptFile = await runtimeDeps.findTranscriptFile(ctx.agentId, event.sessionId);
+    const transcriptFile = await findTranscriptFile(ctx.agentId, event.sessionId);
     if (!transcriptFile) {
       await markFailed(paths.statePath, event.sessionId, "transcript file not found");
       return;
@@ -815,7 +796,7 @@ export function registerExtractionHooks(
 
     let messages: TranscriptMessage[];
     try {
-      messages = await runtimeDeps.readTranscript(transcriptFile);
+      messages = await readTranscript(transcriptFile);
     } catch (error) {
       await markFailed(paths.statePath, event.sessionId, normalizeError(error));
       return;
@@ -850,7 +831,6 @@ export function registerExtractionHooks(
     const messages = await loadBeforeResetMessages({
       event,
       ctx,
-      deps: runtimeDeps,
     });
     if (!hasUserMessage(messages)) {
       return;
@@ -870,24 +850,24 @@ export function registerExtractionHooks(
   });
 
   api.registerHook("gateway_start", async (event) => {
-    const candidates = await runtimeDeps.listSessionCandidates();
+    const candidates = await listSessionCandidates();
 
     for (const candidate of candidates) {
       const resolvedSessionKey =
         candidate.sessionKey ??
-        (await runtimeDeps.findSessionKeyForSession(candidate.agentId, candidate.sessionId));
+        (await findSessionKeyForSession(candidate.agentId, candidate.sessionId));
       if (resolvedSessionKey && !shouldExtractSession(resolvedSessionKey, config.extraction.skipSessionTypes)) {
         continue;
       }
 
-      const transcriptFile = await runtimeDeps.findTranscriptFile(candidate.agentId, candidate.sessionId);
+      const transcriptFile = await findTranscriptFile(candidate.agentId, candidate.sessionId);
       if (!transcriptFile) {
         continue;
       }
 
       let messages: TranscriptMessage[];
       try {
-        messages = await runtimeDeps.readTranscript(transcriptFile);
+        messages = await readTranscript(transcriptFile);
       } catch (error) {
         await markFailed(paths.statePath, candidate.sessionId, normalizeError(error));
         continue;

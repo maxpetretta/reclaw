@@ -6,7 +6,7 @@ import {
   type ZettelclawState,
   writeState,
 } from "../state";
-import { upsertSubjectFromExtraction } from "../subjects/registry";
+import { readRegistry, upsertSubjectFromExtraction } from "../subjects/registry";
 import { parseChatGptConversations } from "./adapters/chatgpt";
 import { parseClaudeConversations } from "./adapters/claude";
 import { parseGrokConversations } from "./adapters/grok";
@@ -18,6 +18,7 @@ import type { ImportPlatform, ImportedConversation } from "./types";
 export const DEFAULT_IMPORT_MIN_MESSAGES = 4;
 export const DEFAULT_IMPORT_JOBS = 3;
 export const DEFAULT_IMPORT_MODEL = "anthropic/claude-sonnet-4-6";
+export const IMPORT_STOP_REQUESTED_ERROR = "import stop requested";
 
 export interface ReclawImportOptions {
   platform: ImportPlatform;
@@ -34,6 +35,7 @@ export interface ReclawImportOptions {
   force?: boolean;
   transcripts?: boolean;
   verbose?: boolean;
+  shouldStop?: () => Promise<boolean>;
   apiBaseUrl?: string;
   apiToken?: string;
   openClawHome?: string;
@@ -51,6 +53,7 @@ export interface ReclawImportSummary {
   imported: number;
   failed: number;
   entriesWritten: number;
+  subjectsCreated: number;
   transcriptsWritten: number;
   dryRun: boolean;
 }
@@ -82,11 +85,6 @@ interface ReclawImportDeps {
     apiBaseUrl?: string;
     apiToken?: string;
   }) => Promise<Array<LogEntry | ExtractedImportedEntry>>;
-  upsertSubject: (path: string, slug: string, inferredType?: string) => Promise<void>;
-  appendEntry: (logPath: string, entry: LogEntry) => Promise<void>;
-  readState: (path: string) => Promise<ZettelclawState>;
-  writeState: (path: string, state: ZettelclawState) => Promise<void>;
-  writeImportedSession: typeof writeImportedSession;
 }
 
 const DEFAULT_LOGGER: ImportLogger = {
@@ -142,11 +140,6 @@ const DEFAULT_DEPS: ReclawImportDeps = {
       ensureSubjects: false,
     });
   },
-  upsertSubject: upsertSubjectFromExtraction,
-  appendEntry,
-  readState,
-  writeState,
-  writeImportedSession,
 };
 
 function normalizeExtractedImportEntry(
@@ -287,16 +280,31 @@ async function runWithConcurrency<T>(
   const limit = Math.max(1, Math.floor(maxJobs));
   const workerCount = Math.min(limit, items.length);
   let nextIndex = 0;
+  let abortError: unknown = null;
 
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
       while (nextIndex < items.length) {
+        if (abortError) {
+          return;
+        }
+
         const currentIndex = nextIndex;
         nextIndex += 1;
-        await worker(items[currentIndex] as T, currentIndex);
+
+        try {
+          await worker(items[currentIndex] as T, currentIndex);
+        } catch (error) {
+          abortError = abortError ?? error;
+          return;
+        }
       }
     }),
   );
+
+  if (abortError) {
+    throw abortError;
+  }
 }
 
 export async function runReclawImport(
@@ -317,6 +325,16 @@ export async function runReclawImport(
   const dryRun = options.dryRun === true;
   const afterMs = parseBoundary(options.after, "--after");
   const beforeMs = parseBoundary(options.before, "--before");
+  const shouldStop = options.shouldStop;
+  const ensureNotStopped = async (): Promise<void> => {
+    if (!shouldStop) {
+      return;
+    }
+
+    if (await shouldStop()) {
+      throw new Error(IMPORT_STOP_REQUESTED_ERROR);
+    }
+  };
 
   const rawImport = await runtimeDeps.readImportFile({
     platform: options.platform,
@@ -326,7 +344,7 @@ export async function runReclawImport(
   });
   const parsedRaw = runtimeDeps.parseConversations(options.platform, rawImport);
   const deduped = dedupeInputConversations(options.platform, parsedRaw);
-  const initialState = await runtimeDeps.readState(options.statePath);
+  const initialState = await readState(options.statePath);
 
   const summary: ReclawImportSummary = {
     platform: options.platform,
@@ -339,6 +357,7 @@ export async function runReclawImport(
     imported: 0,
     failed: 0,
     entriesWritten: 0,
+    subjectsCreated: 0,
     transcriptsWritten: 0,
     dryRun,
   };
@@ -346,6 +365,7 @@ export async function runReclawImport(
   const selected: CandidateConversation[] = [];
 
   for (const conversation of deduped.conversations) {
+    await ensureNotStopped();
     const key = createConversationKey(options.platform, conversation.conversationId);
     const updatedAtMs = Date.parse(conversation.updatedAt);
 
@@ -406,6 +426,10 @@ export async function runReclawImport(
     return summary;
   }
 
+  const knownSubjects = new Set<string>(
+    Object.keys(await readRegistry(options.subjectsPath)),
+  );
+
   let commitQueue: Promise<void> = Promise.resolve();
   const withCommitLock = async <T>(fn: () => Promise<T>): Promise<T> => {
     const task = commitQueue.then(fn, fn);
@@ -418,9 +442,11 @@ export async function runReclawImport(
 
   let completed = 0;
   await runWithConcurrency(selected, jobs, async (candidate) => {
+    await ensureNotStopped();
     const sessionId = buildSessionId(options.platform, candidate.conversation.conversationId);
 
     try {
+      await ensureNotStopped();
       const historicalTimestamp = resolveHistoricalTimestamp(candidate.conversation);
       const extractedEntries = await runtimeDeps.extractConversation({
         conversation: candidate.conversation,
@@ -446,13 +472,20 @@ export async function runReclawImport(
         };
       });
 
+      let createdSubjectsForConversation = 0;
       await withCommitLock(async () => {
+        await ensureNotStopped();
         for (const entry of entries) {
           if (!entry.subject) {
             continue;
           }
 
-          await runtimeDeps.upsertSubject(
+          if (!knownSubjects.has(entry.subject)) {
+            knownSubjects.add(entry.subject);
+            createdSubjectsForConversation += 1;
+          }
+
+          await upsertSubjectFromExtraction(
             options.subjectsPath,
             entry.subject,
             entry.subjectTypeHint,
@@ -462,11 +495,11 @@ export async function runReclawImport(
         for (const entry of entries) {
           const { subjectTypeHint, ...logEntry } = entry;
           void subjectTypeHint;
-          await runtimeDeps.appendEntry(options.logPath, logEntry);
+          await appendEntry(options.logPath, logEntry);
         }
 
         if (transcripts) {
-          await runtimeDeps.writeImportedSession({
+          await writeImportedSession({
             conversation: candidate.conversation,
             sessionId,
             openClawHome: options.openClawHome,
@@ -476,21 +509,26 @@ export async function runReclawImport(
         }
 
         summary.entriesWritten += entries.length;
+        summary.subjectsCreated += createdSubjectsForConversation;
         summary.imported += 1;
-        const latestState = await runtimeDeps.readState(options.statePath);
+        const latestState = await readState(options.statePath);
         latestState.importedConversations[candidate.key] = createImportedStateRecord(
           sessionId,
           candidate.conversation,
           entries.length,
         );
-        await runtimeDeps.writeState(options.statePath, latestState);
+        await writeState(options.statePath, latestState);
       });
 
       completed += 1;
       logger.info(
-        `[${completed}/${summary.selected}] imported ${candidate.key} (${entries.length} entries)`,
+        `[${completed}/${summary.selected}] imported ${candidate.key} (entries=${entries.length}, subjectsCreated=${createdSubjectsForConversation})`,
       );
     } catch (error) {
+      if (error instanceof Error && error.message === IMPORT_STOP_REQUESTED_ERROR) {
+        throw error;
+      }
+
       completed += 1;
       summary.failed += 1;
       const reason = error instanceof Error ? error.message : String(error);
