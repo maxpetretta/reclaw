@@ -191,7 +191,7 @@ export async function resolveImportSelection(input: {
     throw new Error("Import requires interactive TTY when platform/file args are omitted.");
   }
 
-  clackIntro("🦞 Reclaw import");
+  clackIntro("🦞 Reclaw - Reclaim your AI conversations");
   const detectSpin = clackSpinner();
   detectSpin.start("Auto-detecting import sources");
   const detections = await detectImportSources(input.workspaceDir);
