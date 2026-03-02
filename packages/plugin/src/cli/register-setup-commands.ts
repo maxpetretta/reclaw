@@ -1,6 +1,9 @@
+import { intro as clackIntro, log as clackLog, outro as clackOutro } from "@clack/prompts";
 import type { PluginConfig } from "../config";
 import type { CommandLike } from "./command-like";
 import type { InitPaths } from "./paths";
+
+const BANNER = "🦞 Reclaw - Reclaim your AI conversations";
 
 interface InitResult {
   paths: InitPaths;
@@ -24,36 +27,45 @@ export function registerSetupCommands(
     .command("init")
     .description("Initialize reclaw memory store and config")
     .action(async () => {
+      clackIntro(BANNER);
       const initResult = await params.runInit(params.config, params.workspaceDir);
       const paths = initResult.paths;
-      console.log("Reclaw initialized.");
-      console.log(`Log directory: ${paths.logDir}`);
-      console.log(`Config updated: ${paths.openClawConfigPath}`);
-      console.log(`MEMORY.md markers ensured: ${paths.memoryMdPath}`);
+      clackLog.step(`Created ${paths.logDir}`);
+      clackLog.step(`Config updated: ${paths.openClawConfigPath}`);
+      clackLog.step(`MEMORY.md markers added: ${paths.memoryMdPath}`);
       if (initResult.guidanceEvent.sent) {
-        console.log("Main session notified to update AGENTS.md and MEMORY.md guidance.");
+        clackLog.step("Main session notified to update AGENTS.md and MEMORY.md guidance");
       } else {
-        console.log(
-          `Warning: could not notify main session to update AGENTS.md/MEMORY.md guidance (${initResult.guidanceEvent.message ?? "unknown error"})`,
+        clackLog.warn(
+          `Could not notify main session (${initResult.guidanceEvent.message ?? "unknown error"})`,
         );
       }
+      clackOutro("Ready. Your next session will extract memory automatically.");
     });
 
   reclaw
     .command("uninstall")
     .description("Reverse init config and remove generated memory snapshot block")
     .action(async () => {
+      clackIntro(BANNER);
       const paths = await params.runUninstall(params.config, params.workspaceDir);
-      console.log("Reclaw uninstalled.");
-      console.log(`Config reverted: ${paths.openClawConfigPath}`);
-      console.log(`Generated memory snapshot block removed: ${paths.memoryMdPath}`);
-      console.log(`Log data preserved in: ${paths.logDir}`);
+      clackLog.step(`Config reverted: ${paths.openClawConfigPath}`);
+      clackLog.step(`Generated snapshot block removed: ${paths.memoryMdPath}`);
+      clackLog.step(`Log data preserved in ${paths.logDir}`);
+      clackOutro("Reclaw uninstalled.");
     });
 
   reclaw
     .command("verify")
     .description("Verify reclaw setup and required files")
     .action(async () => {
-      await params.runVerify(params.config, params.workspaceDir);
+      clackIntro(BANNER);
+      try {
+        await params.runVerify(params.config, params.workspaceDir);
+        clackOutro("Verify passed.");
+      } catch {
+        clackOutro("Verify failed.");
+        process.exitCode = 1;
+      }
     });
 }

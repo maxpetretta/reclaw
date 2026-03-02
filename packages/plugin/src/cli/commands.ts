@@ -508,8 +508,6 @@ export async function runVerify(config: PluginConfig, workspaceDir?: string): Pr
     throw new Error("Reclaw verify failed");
   }
 
-  console.log("Reclaw verify passed.");
-  console.log(`Log directory: ${result.paths.logDir}`);
   return result;
 }
 
