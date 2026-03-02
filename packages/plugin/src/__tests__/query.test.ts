@@ -124,11 +124,12 @@ describe("query", () => {
     ]);
   });
 
-  test("searchLog throws when ripgrep is unavailable", async () => {
+  test("searchLog falls back when ripgrep is unavailable", async () => {
     const originalPath = process.env.PATH;
     process.env.PATH = "";
     try {
-      await expect(searchLog(logPath, "staging")).rejects.toThrow("ripgrep search failed");
+      const results = await searchLog(logPath, "staging");
+      expect(results.map((entry) => entry.id)).toEqual(["did000000001"]);
     } finally {
       process.env.PATH = originalPath;
     }

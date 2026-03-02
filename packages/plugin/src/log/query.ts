@@ -185,6 +185,16 @@ async function ripgrepSearch(logPath: string, keyword: string): Promise<Set<stri
   return ids;
 }
 
+function fallbackKeywordSearch(entries: LogEntry[], keyword: string): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    if (matchesKeyword(entry, keyword)) {
+      ids.add(entry.id);
+    }
+  }
+  return ids;
+}
+
 function applyFilterAndResolution(
   allEntries: LogEntry[],
   candidateIds: Set<string> | null,
@@ -340,11 +350,9 @@ export async function searchLog(
   }
 
   const rgIds = await ripgrepSearch(logPath, trimmedKeyword);
-  if (rgIds === null) {
-    throw new Error("ripgrep search failed");
-  }
+  const candidateIds = rgIds ?? fallbackKeywordSearch(allEntries, trimmedKeyword);
 
-  return applyFilterAndResolution(allEntries, rgIds, filter);
+  return applyFilterAndResolution(allEntries, candidateIds, filter);
 }
 
 export async function getLastHandoff(logPath: string): Promise<LogEntry | undefined> {
