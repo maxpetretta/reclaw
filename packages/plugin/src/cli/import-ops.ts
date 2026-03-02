@@ -612,34 +612,27 @@ export async function runImportCommand(
 }
 
 export function printImportSummary(result: RunImportCommandResult, platform: ImportPlatform): void {
-  const summary = result.summary;
-  console.log("Reclaw import summary:");
-  console.log(`  Parsed: ${summary.parsed}`);
-  console.log(`  Deduped in input: ${summary.dedupedInInput}`);
-  console.log(`  Selected: ${summary.selected}`);
-  console.log(`  Skipped (date): ${summary.skippedByDate}`);
-  console.log(`  Skipped (min-messages): ${summary.skippedByMinMessages}`);
-  console.log(`  Skipped (already imported): ${summary.skippedAlreadyImported}`);
-  console.log(`  Imported: ${summary.imported}`);
-  console.log(`  Failed: ${summary.failed}`);
-  console.log(`  Entries written: ${summary.entriesWritten}`);
-  console.log(`  Subjects created: ${summary.subjectsCreated}`);
-  console.log(`  Transcripts written: ${summary.transcriptsWritten}`);
-  console.log(`  State file: ${result.statePath}`);
+  const s = result.summary;
+  const mode = s.dryRun ? " (dry-run)" : "";
+  const failedSuffix = s.failed > 0 ? `, ${s.failed} failed` : "";
+
+  console.log(`Import ${s.dryRun ? "preview" : "complete"} (${platform})${mode}`);
+  console.log("");
+  console.log(`  Conversations  ${s.parsed} parsed → ${s.selected} selected → ${s.imported} imported${failedSuffix}`);
+  console.log(`  Entries        ${s.entriesWritten} written, ${s.subjectsCreated} subjects created`);
+  console.log(`  Transcripts    ${s.transcriptsWritten} written`);
+
   if (result.legacyBackupPath) {
-    console.log(`  Source backup: ${result.legacyBackupPath}`);
+    console.log(`  Source backup  ${result.legacyBackupPath}`);
   }
   if (result.memoryDocBackupPath) {
-    console.log(`  MEMORY.md backup: ${result.memoryDocBackupPath}`);
+    console.log(`  MEMORY.md bak  ${result.memoryDocBackupPath}`);
   }
   if (result.userDocBackupPath) {
-    console.log(`  USER.md backup: ${result.userDocBackupPath}`);
+    console.log(`  USER.md bak    ${result.userDocBackupPath}`);
   }
-  if (platform === "openclaw" && !summary.dryRun) {
-    console.log(`  OpenClaw memory dir cleared: ${result.legacyMemoryCleared ? "yes" : "no"}`);
-  }
-  if (summary.dryRun) {
-    console.log("  Mode: dry-run");
+  if (platform === "openclaw" && !s.dryRun) {
+    console.log(`  Source cleared  ${result.legacyMemoryCleared ? "yes" : "no"}`);
   }
 }
 

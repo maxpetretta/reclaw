@@ -56,53 +56,41 @@ function formatImportProgress(progress: ImportJobProgressState): string {
   return `${progress.completed}/${progress.total} (${percentage}%)`;
 }
 
+function padEnd(text: string, width: number): string {
+  return text.length >= width ? text : text + " ".repeat(width - text.length);
+}
+
 export function formatImportJobLine(job: ImportJobState): string {
-  const pieces = [
-    `${job.id}`,
-    `status=${job.status}`,
-    `platform=${job.platform}`,
-    `attempts=${job.attempts}`,
-    `updated=${job.updatedAt}`,
-  ];
   const progress = resolveImportJobProgress(job);
+  const progressText = progress ? formatImportProgress(progress) : "-";
+  const entriesText = progress ? `${progress.entriesWritten} entries` : "";
+  const errorText = job.error ? `  error: ${job.error}` : "";
 
-  if (progress) {
-    pieces.push(
-      `progress=${formatImportProgress(progress)}`,
-      `events=${progress.entriesWritten}`,
-      `subjects=${progress.subjectsCreated}`,
-    );
-  }
-
-  if (job.error) {
-    pieces.push(`error=${job.error}`);
-  }
-
-  return pieces.join(" | ");
+  return `  ${padEnd(job.id, 10)}  ${padEnd(job.status, 10)}  ${padEnd(job.platform, 10)}  ${padEnd(progressText, 14)}  ${entriesText}${errorText}`;
 }
 
 export function formatImportJobStatusDetail(job: ImportJobState): string {
+  const progress = resolveImportJobProgress(job);
   const lines = [
-    `status=${job.status}`,
-    `platform=${job.platform}`,
-    `attempts=${job.attempts}`,
-    `updated=${job.updatedAt}`,
+    `  Job:       ${job.id}`,
+    `  Status:    ${job.status}`,
+    `  Platform:  ${job.platform}`,
+    `  Attempts:  ${job.attempts}`,
+    `  Updated:   ${job.updatedAt}`,
+    `  Source:    ${job.filePath}`,
   ];
 
-  const progress = resolveImportJobProgress(job);
   if (progress) {
     lines.push(
-      `progress=${formatImportProgress(progress)}`,
-      `events=${progress.entriesWritten}`,
-      `subjects=${progress.subjectsCreated}`,
+      `  Progress:  ${formatImportProgress(progress)}`,
+      `  Entries:   ${progress.entriesWritten}`,
+      `  Subjects:  ${progress.subjectsCreated}`,
     );
   }
 
-  lines.push(`source=${job.filePath}`);
-
   if (job.error) {
-    lines.push(`error=${job.error}`);
+    lines.push(`  Error:     ${job.error}`);
   }
 
-  return lines.join(" | ");
+  return lines.join("\n");
 }
