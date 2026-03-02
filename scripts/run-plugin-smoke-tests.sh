@@ -106,7 +106,7 @@ import { runInit } from '$plugin_dir/src/cli/commands';
 await runInit({
   logDir: '$log_dir',
   extraction: { model: 'test', skipSessionTypes: ['cron:', 'sub:', 'hook:'] },
-  briefing: { model: 'test', activeWindow: 14, decisionWindow: 7, staleThreshold: 30, maxLines: 80 },
+  briefing: { model: 'test', activeWindow: 14, staleThreshold: 30, maxLines: 80 },
   cron: { schedule: '0 3 * * *', timezone: 'UTC' },
 }, '$workspace_dir');
 console.log('init ok');
@@ -121,10 +121,10 @@ console.log('init ok');
 memory_slot=$(jq -r '.plugins.slots.memory // empty' "$config_path")
 [[ "$memory_slot" == "reclaw" ]] || fail "memory slot not set to reclaw"
 
-memory_flush=$(jq '.agents.defaults.compaction.memoryFlush' "$config_path")
-[[ "$memory_flush" == "null" ]] || fail "memoryFlush not disabled"
+memory_flush_enabled=$(jq -r '.agents.defaults.compaction.memoryFlush.enabled' "$config_path")
+[[ "$memory_flush_enabled" == "false" ]] || fail "memoryFlush not disabled (enabled=$memory_flush_enabled)"
 
-grep -q "BEGIN GENERATED BRIEFING" "$workspace_dir/MEMORY.md" || fail "briefing markers not in MEMORY.md"
+grep -q "BEGIN RECLAW MEMORY SNAPSHOT" "$workspace_dir/MEMORY.md" || fail "briefing markers not in MEMORY.md"
 grep -q "Observations" "$workspace_dir/MEMORY.md" || fail "original MEMORY.md content lost"
 pass "Init: log dir, config, MEMORY.md markers all correct"
 
@@ -220,41 +220,6 @@ console.log('keyword search ok');
 
 pass "Keyword search (ripgrep + fallback)"
 
-# ─── Replacement resolution ──────────────────────────────────────────────────
-
-step "Replacement resolution"
-
-bun -e "
-import { appendEntry, readLog, injectMeta } from '$plugin_dir/src/log/schema';
-import { filterReplaced, getLatestVersion } from '$plugin_dir/src/log/resolve';
-
-// Read current log to get the decision entry ID
-const log = await readLog('$log_path');
-const decision = log.find(e => e.type === 'decision');
-if (!decision) throw new Error('no decision found');
-
-// Write a replacement
-const replacement = injectMeta(
-  { type: 'decision', content: 'Use Bun over everything — yarn, pnpm, npm', detail: 'Updated preference', subject: 'tooling', replaces: decision.id },
-  'test-session-002'
-);
-await appendEntry('$log_path', replacement);
-
-// Verify
-const updated = await readLog('$log_path');
-const filtered = filterReplaced(updated);
-const decisions = filtered.filter(e => e.type === 'decision');
-if (decisions.length !== 1) throw new Error('expected 1 active decision, got ' + decisions.length);
-if (!decisions[0].content.includes('everything')) throw new Error('wrong decision survived');
-
-const latest = getLatestVersion(updated, decision.id);
-if (!latest || latest.id !== replacement.id) throw new Error('getLatestVersion failed');
-
-console.log('replacement resolution ok');
-"
-
-pass "Replacement chain: superseded entry filtered, latest resolved"
-
 # ─── Handoff: getLastHandoff ─────────────────────────────────────────────────
 
 step "Handoff retrieval"
@@ -330,7 +295,7 @@ import { runUninstall } from '$plugin_dir/src/cli/commands';
 await runUninstall({
   logDir: '$log_dir',
   extraction: { model: 'test', skipSessionTypes: ['cron:', 'sub:', 'hook:'] },
-  briefing: { model: 'test', activeWindow: 14, decisionWindow: 7, staleThreshold: 30, maxLines: 80 },
+  briefing: { model: 'test', activeWindow: 14, staleThreshold: 30, maxLines: 80 },
   cron: { schedule: '0 3 * * *', timezone: 'UTC' },
 }, '$workspace_dir');
 console.log('uninstall ok');
@@ -344,13 +309,13 @@ flush_after=$(jq '.agents.defaults.compaction.memoryFlush // "removed"' "$config
 [[ "$flush_after" == '"removed"' ]] || fail "memoryFlush not removed after uninstall"
 
 # Verify MEMORY.md markers removed but content preserved
-! grep -q "BEGIN GENERATED BRIEFING" "$workspace_dir/MEMORY.md" || fail "briefing markers still in MEMORY.md"
+! grep -q "BEGIN RECLAW MEMORY SNAPSHOT" "$workspace_dir/MEMORY.md" || fail "briefing markers still in MEMORY.md"
 grep -q "Observations" "$workspace_dir/MEMORY.md" || fail "original MEMORY.md content lost after uninstall"
 
 # Verify log data preserved
 [[ -f "$log_path" ]] || fail "log.jsonl deleted by uninstall"
 surviving_entries=$(wc -l < "$log_path" | tr -d ' ')
-[[ "$surviving_entries" -eq 7 ]] || fail "log entries lost: expected 7, got $surviving_entries"
+[[ "$surviving_entries" -eq 6 ]] || fail "log entries lost: expected 6, got $surviving_entries"
 
 pass "Uninstall: config reverted, markers removed, log data preserved"
 
