@@ -16,6 +16,7 @@ import {
   detectImportSources,
   queueImportJob,
   resumeImportJobs,
+  stopImportJobs,
   runImportCommand,
   runImportWorker,
   buildPostInitSystemEventText,
@@ -24,6 +25,7 @@ import {
   runVerify,
   verifySetup,
 } from "../cli/commands";
+import { IMPORT_STOP_REQUESTED_ERROR } from "../import/run";
 import { readState, writeState } from "../state";
 
 function createConfig(logDir: string): PluginConfig {
@@ -355,6 +357,7 @@ describe("cli init helpers", () => {
             imported: 1,
             failed: 0,
             entriesWritten: 1,
+            subjectsCreated: 1,
             transcriptsWritten: 1,
             dryRun: false,
           };
@@ -401,6 +404,7 @@ describe("cli init helpers", () => {
           imported: 0,
           failed: 0,
           entriesWritten: 0,
+          subjectsCreated: 0,
           transcriptsWritten: 0,
           dryRun: true,
         }),
@@ -455,6 +459,7 @@ describe("cli init helpers", () => {
             imported: 1,
             failed: 0,
             entriesWritten: 1,
+            subjectsCreated: 1,
             transcriptsWritten: 0,
             dryRun: false,
           };
@@ -524,6 +529,134 @@ describe("cli init helpers", () => {
     expect(detections.chatgpt.some((detection) => detection.path === chatgptExportPath)).toBe(true);
   });
 
+  test("detectImportSources keeps chatgpt/claude/grok detections scoped to matching exports", async () => {
+    const chatgptDir = join(workspaceDir, "extracts", "chatgpt");
+    const claudeDir = join(workspaceDir, "extracts", "claude");
+    const grokDir = join(workspaceDir, "extracts", "grok", "30d", "export_data", "bundle-1");
+    await mkdir(chatgptDir, { recursive: true });
+    await mkdir(claudeDir, { recursive: true });
+    await mkdir(grokDir, { recursive: true });
+
+    const chatgptPath = join(chatgptDir, "conversations.json");
+    await writeFile(
+      chatgptPath,
+      JSON.stringify([
+        {
+          id: "chatgpt-conv-1",
+          title: "ChatGPT test",
+          create_time: 1704067200,
+          update_time: 1704067500,
+          current_node: "node-2",
+          mapping: {
+            "node-1": {
+              id: "node-1",
+              message: {
+                id: "m1",
+                author: { role: "user" },
+                create_time: 1704067200,
+                content: { content_type: "text", parts: ["hello"] },
+              },
+              children: ["node-2"],
+            },
+            "node-2": {
+              id: "node-2",
+              parent: "node-1",
+              message: {
+                id: "m2",
+                author: { role: "assistant" },
+                create_time: 1704067260,
+                content: { content_type: "text", parts: ["world"] },
+              },
+            },
+          },
+        },
+      ]),
+      "utf8",
+    );
+
+    const claudePath = join(claudeDir, "conversations.json");
+    await writeFile(
+      claudePath,
+      JSON.stringify([
+        {
+          uuid: "claude-conv-1",
+          name: "Claude test",
+          created_at: "2024-01-01T00:00:00.000Z",
+          updated_at: "2024-01-01T00:01:00.000Z",
+          account: { uuid: "acct-1" },
+          chat_messages: [
+            {
+              uuid: "c1",
+              sender: "human",
+              text: "hello claude",
+              created_at: "2024-01-01T00:00:01.000Z",
+            },
+            {
+              uuid: "c2",
+              sender: "assistant",
+              text: "hi there",
+              created_at: "2024-01-01T00:00:05.000Z",
+            },
+          ],
+        },
+      ]),
+      "utf8",
+    );
+
+    const grokPath = join(grokDir, "prod-grok-backend.json");
+    await writeFile(
+      grokPath,
+      JSON.stringify({
+        conversations: [
+          {
+            conversation: {
+              _id: { $oid: "grok-conv-1" },
+              title: "Grok test",
+              createdAt: 1704067200,
+              updatedAt: 1704067260,
+            },
+            responses: [
+              {
+                response: {
+                  _id: { $oid: "g1" },
+                  role: "user",
+                  content: "hello grok",
+                  createdAt: 1704067200,
+                },
+              },
+              {
+                response: {
+                  _id: { $oid: "g2" },
+                  role: "assistant",
+                  content: "hello max",
+                  createdAt: 1704067260,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const detections = await detectImportSources(workspaceDir);
+    const chatgptPaths = detections.chatgpt.map((detection) => detection.path);
+    const claudePaths = detections.claude.map((detection) => detection.path);
+    const grokPaths = detections.grok.map((detection) => detection.path);
+
+    expect(chatgptPaths).toContain(chatgptPath);
+    expect(chatgptPaths).not.toContain(claudePath);
+    expect(chatgptPaths).not.toContain(grokPath);
+
+    expect(claudePaths).toContain(claudePath);
+    expect(claudePaths).not.toContain(chatgptPath);
+    expect(claudePaths).not.toContain(grokPath);
+
+    expect(grokPaths).toContain(grokPath);
+    expect(grokPaths).not.toContain(chatgptPath);
+    expect(grokPaths).not.toContain(claudePath);
+  });
+
   test("normalizeCliInputPath expands tilde to home directory", () => {
     const resolved = __cliTestExports.normalizeCliInputPath("~/Desktop/extracts-mini/grok");
     expect(resolved).toBe(resolvePath(join(homedir(), "Desktop/extracts-mini/grok")));
@@ -568,6 +701,65 @@ describe("cli init helpers", () => {
     expect(resolved).toBe(grokExportPath);
   });
 
+  test("resolveImportPathForPlatform prefers chatgpt conversations over shared metadata JSON", async () => {
+    const chatgptDir = join(workspaceDir, "chatgpt-export");
+    await mkdir(chatgptDir, { recursive: true });
+
+    const sharedPath = join(chatgptDir, "shared_conversations.json");
+    await writeFile(
+      sharedPath,
+      JSON.stringify([
+        {
+          id: "shared-1",
+          conversation_id: "shared-1",
+          title: "Shared metadata",
+          is_anonymous: false,
+        },
+      ]),
+      "utf8",
+    );
+
+    const conversationsPath = join(chatgptDir, "conversations.json");
+    await writeFile(
+      conversationsPath,
+      JSON.stringify([
+        {
+          id: "chatgpt-conv-1",
+          title: "Import test",
+          create_time: 1704067200,
+          update_time: 1704067500,
+          current_node: "node-2",
+          mapping: {
+            "node-1": {
+              id: "node-1",
+              message: {
+                id: "m1",
+                author: { role: "user" },
+                create_time: 1704067200,
+                content: { content_type: "text", parts: ["hello"] },
+              },
+              children: ["node-2"],
+            },
+            "node-2": {
+              id: "node-2",
+              parent: "node-1",
+              message: {
+                id: "m2",
+                author: { role: "assistant" },
+                create_time: 1704067260,
+                content: { content_type: "text", parts: ["world"] },
+              },
+            },
+          },
+        },
+      ]),
+      "utf8",
+    );
+
+    const resolved = await __cliTestExports.resolveImportPathForPlatform("chatgpt", chatgptDir);
+    expect(resolved).toBe(conversationsPath);
+  });
+
   test("queueImportJob persists async job and schedules one-shot cron worker", async () => {
     const sourcePath = join(workspaceDir, "chatgpt-export.json");
     await writeFile(sourcePath, "[]", "utf8");
@@ -607,6 +799,91 @@ describe("cli init helpers", () => {
     expect((workerJob?.payload as { message?: string }).message).toContain(
       `openclaw zettelclaw import-worker --job ${queued.job.id}`,
     );
+  });
+
+  test("stopImportJobs marks queued job failed and removes worker cron job", async () => {
+    const sourcePath = join(workspaceDir, "chatgpt-export.json");
+    await writeFile(sourcePath, "[]", "utf8");
+
+    const queued = await queueImportJob({
+      config: createConfig(logDir),
+      workspaceDir,
+      apiConfig: {},
+      platform: "chatgpt",
+      filePath: sourcePath,
+      opts: {
+        async: true,
+      },
+    });
+
+    const stopped = await stopImportJobs({
+      config: createConfig(logDir),
+      workspaceDir,
+      jobId: queued.job.id,
+    });
+
+    expect(stopped.stoppedJobIds).toContain(queued.job.id);
+    expect(stopped.unscheduledJobIds).toContain(queued.job.id);
+    expect(stopped.unscheduleErrors).toHaveLength(0);
+
+    const state = await readState(join(logDir, "state.json"));
+    const job = state.importJobs[queued.job.id];
+    expect(job?.status).toBe("failed");
+    expect(job?.error).toBe("Stopped by user");
+    expect(job?.stopRequestedAt).toBeDefined();
+    expect(job?.cronJobId).toBeUndefined();
+    expect(job?.cronJobName).toBeUndefined();
+
+    const cronDoc = JSON.parse(await readFile(join(openClawHome, "cron", "jobs.json"), "utf8")) as {
+      jobs?: Array<Record<string, unknown>>;
+    };
+    const workerJob = cronDoc.jobs?.find(
+      (entry) => entry.name === `zettelclaw-import-worker-${queued.job.id}`,
+    );
+    expect(workerJob).toBeUndefined();
+  });
+
+  test("stopImportJobs marks running job with stop request and leaves terminal update to worker", async () => {
+    const sourcePath = join(workspaceDir, "chatgpt-export.json");
+    await writeFile(sourcePath, "[]", "utf8");
+
+    const queued = await queueImportJob({
+      config: createConfig(logDir),
+      workspaceDir,
+      apiConfig: {},
+      platform: "chatgpt",
+      filePath: sourcePath,
+      opts: {
+        async: true,
+      },
+    });
+
+    const statePath = join(logDir, "state.json");
+    const state = await readState(statePath);
+    const running = state.importJobs[queued.job.id];
+    expect(running).toBeDefined();
+    if (running) {
+      running.status = "running";
+      running.startedAt = new Date().toISOString();
+      running.attempts = 1;
+      state.importJobs[queued.job.id] = running;
+      await writeState(statePath, state);
+    }
+
+    const stopped = await stopImportJobs({
+      config: createConfig(logDir),
+      workspaceDir,
+      jobId: queued.job.id,
+    });
+
+    expect(stopped.stoppedJobIds).toContain(queued.job.id);
+    expect(stopped.unscheduledJobIds).toContain(queued.job.id);
+
+    const nextState = await readState(statePath);
+    const job = nextState.importJobs[queued.job.id];
+    expect(job?.status).toBe("running");
+    expect(job?.error).toBe("Stop requested by user");
+    expect(job?.stopRequestedAt).toBeDefined();
   });
 
   test("runImportWorker marks queued job completed with summary", async () => {
@@ -651,6 +928,7 @@ describe("cli init helpers", () => {
               imported: 1,
               failed: 0,
               entriesWritten: 2,
+              subjectsCreated: 1,
               transcriptsWritten: 1,
               dryRun: false,
             },
@@ -671,6 +949,88 @@ describe("cli init helpers", () => {
     expect(finished?.status).toBe("completed");
     expect(finished?.attempts).toBe(1);
     expect(finished?.summary?.entriesWritten).toBe(2);
+  });
+
+  test("runImportWorker returns null when job was stopped before worker start", async () => {
+    const sourcePath = join(workspaceDir, "chatgpt-export.json");
+    await writeFile(sourcePath, "[]", "utf8");
+
+    const queued = await queueImportJob({
+      config: createConfig(logDir),
+      workspaceDir,
+      apiConfig: {},
+      platform: "chatgpt",
+      filePath: sourcePath,
+      opts: {
+        async: true,
+      },
+    });
+
+    await stopImportJobs({
+      config: createConfig(logDir),
+      workspaceDir,
+      jobId: queued.job.id,
+    });
+
+    let called = 0;
+    const result = await runImportWorker(
+      {
+        config: createConfig(logDir),
+        workspaceDir,
+        apiConfig: {},
+        jobId: queued.job.id,
+      },
+      {
+        runImportCommand: async () => {
+          called += 1;
+          throw new Error("should not run");
+        },
+      },
+    );
+
+    expect(result).toBeNull();
+    expect(called).toBe(0);
+
+    const state = await readState(join(logDir, "state.json"));
+    const job = state.importJobs[queued.job.id];
+    expect(job?.status).toBe("failed");
+    expect(job?.error).toBe("Stopped by user");
+  });
+
+  test("runImportWorker marks stop-requested failures with user-facing stopped message", async () => {
+    const sourcePath = join(workspaceDir, "chatgpt-export.json");
+    await writeFile(sourcePath, "[]", "utf8");
+
+    const queued = await queueImportJob({
+      config: createConfig(logDir),
+      workspaceDir,
+      apiConfig: {},
+      platform: "chatgpt",
+      filePath: sourcePath,
+      opts: {
+        async: true,
+      },
+    });
+
+    const result = await runImportWorker(
+      {
+        config: createConfig(logDir),
+        workspaceDir,
+        apiConfig: {},
+        jobId: queued.job.id,
+      },
+      {
+        runImportCommand: async () => {
+          throw new Error(IMPORT_STOP_REQUESTED_ERROR);
+        },
+      },
+    );
+
+    expect(result).toBeNull();
+    const state = await readState(join(logDir, "state.json"));
+    const job = state.importJobs[queued.job.id];
+    expect(job?.status).toBe("failed");
+    expect(job?.error).toBe("Stopped by user");
   });
 
   test("resumeImportJobs re-queues failed jobs and clears error", async () => {

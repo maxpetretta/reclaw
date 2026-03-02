@@ -3,6 +3,7 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promi
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isEnoent, isObject } from "../lib/guards";
 import {
   confirm as clackConfirm,
   intro as clackIntro,
@@ -22,6 +23,7 @@ import {
   DEFAULT_IMPORT_JOBS,
   DEFAULT_IMPORT_MIN_MESSAGES,
   DEFAULT_IMPORT_MODEL,
+  IMPORT_STOP_REQUESTED_ERROR,
   type ReclawImportSummary,
   runReclawImport,
 } from "../import/run";
@@ -32,7 +34,14 @@ import { parseGrokConversations } from "../import/adapters/grok";
 import { queryLog, searchLog } from "../log/query";
 import type { EntryType, LogEntry } from "../log/schema";
 import { ensureSubject, readRegistry, renameSubject, writeRegistry } from "../subjects/registry";
-import { readState, writeState, type ImportJobOptionsState, type ImportJobState, type ImportJobStatus } from "../state";
+import {
+  readState,
+  writeState,
+  type ImportJobOptionsState,
+  type ImportJobProgressState,
+  type ImportJobState,
+  type ImportJobStatus,
+} from "../state";
 
 export const BRIEFING_BEGIN_MARKER = "<!-- BEGIN GENERATED BRIEFING -->";
 export const BRIEFING_END_MARKER = "<!-- END GENERATED BRIEFING -->";
@@ -106,18 +115,6 @@ interface TraceReport {
   issues: TraceIssue[];
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isEnoent(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ENOENT"
-  );
-}
 
 function toObject(value: unknown): Record<string, unknown> {
   return isObject(value) ? value : {};
@@ -472,6 +469,7 @@ export interface RunImportCommandOptions {
   filePath: string;
   opts: unknown;
   logger?: ImportProgressLogger;
+  shouldStop?: () => Promise<boolean>;
 }
 
 export interface RunImportCommandResult {
@@ -497,6 +495,8 @@ const IMPORT_WORKER_EXEC_TIMEOUT_SECONDS = 2 * 60 * 60;
 const IMPORT_WORKER_SCHEDULE_DELAY_MS = 2_000;
 const INTERACTIVE_IMPORT_JOBS_MIN = 1;
 const INTERACTIVE_IMPORT_JOBS_MAX = 10;
+const IMPORT_STOP_REQUESTED_DISPLAY = "Stop requested by user";
+const IMPORT_STOPPED_DISPLAY = "Stopped by user";
 
 interface QueueImportJobResult {
   job: ImportJobState;
@@ -511,6 +511,14 @@ interface ResumeImportJobsResult {
   resumedJobIds: string[];
   skippedJobIds: string[];
   schedulingErrors: Array<{ jobId: string; error: string }>;
+}
+
+interface StopImportJobsResult {
+  statePath: string;
+  stoppedJobIds: string[];
+  skippedJobIds: string[];
+  unscheduledJobIds: string[];
+  unscheduleErrors: Array<{ jobId: string; error: string }>;
 }
 
 async function hasFinishedCronRun(cronRunsDir: string, cronJobId: string): Promise<boolean> {
@@ -617,10 +625,6 @@ function buildImportWorkerCronName(jobId: string): string {
   return `${IMPORT_WORKER_NAME_PREFIX}${jobId}`;
 }
 
-function buildImportWorkerSessionKey(cronJobId: string): string {
-  return `agent:main:cron:${cronJobId}`;
-}
-
 function buildImportWorkerCronJob(
   jobId: string,
   existing: Record<string, unknown> | undefined,
@@ -698,6 +702,41 @@ async function scheduleImportWorkerCron(
     cronJobName,
     nextRunAt,
   };
+}
+
+async function unscheduleImportWorkerCron(
+  cronJobsPath: string,
+  job: Pick<ImportJobState, "id" | "cronJobId" | "cronJobName">,
+): Promise<boolean> {
+  const expectedName = job.cronJobName?.trim() || buildImportWorkerCronName(job.id);
+  const expectedId = job.cronJobId?.trim();
+  const doc = await readCronJobsDocument(cronJobsPath);
+
+  const nextJobs = doc.jobs.filter((entry) => {
+    if (typeof expectedId === "string" && expectedId.length > 0) {
+      const entryId = typeof entry.id === "string" ? entry.id : "";
+      if (entryId === expectedId) {
+        return false;
+      }
+    }
+
+    const entryName = readJobName(entry);
+    if (entryName && entryName === expectedName) {
+      return false;
+    }
+
+    return true;
+  });
+
+  if (nextJobs.length === doc.jobs.length) {
+    return false;
+  }
+
+  await writeCronJobsDocument(cronJobsPath, {
+    ...doc,
+    jobs: nextJobs,
+  });
+  return true;
 }
 
 function createImportJobRecord(input: {
@@ -816,15 +855,106 @@ export async function runImportWorker(
     return null;
   }
 
+  if (job.stopRequestedAt) {
+    const stoppedAt = new Date().toISOString();
+    job.status = "failed";
+    job.updatedAt = stoppedAt;
+    job.finishedAt = stoppedAt;
+    job.error = IMPORT_STOPPED_DISPLAY;
+    state.importJobs[jobId] = job;
+    await writeState(paths.statePath, state);
+    return null;
+  }
+
   const startIso = new Date().toISOString();
   job.status = "running";
   job.updatedAt = startIso;
   job.startedAt = startIso;
   job.attempts += 1;
+  job.progress = {
+    total: 0,
+    completed: 0,
+    imported: 0,
+    failed: 0,
+    entriesWritten: 0,
+    subjectsCreated: 0,
+  };
   delete job.finishedAt;
   delete job.error;
+  delete job.summary;
+  delete job.stopRequestedAt;
   state.importJobs[jobId] = job;
   await writeState(paths.statePath, state);
+
+  const progress: ImportJobProgressState = {
+    total: 0,
+    completed: 0,
+    imported: 0,
+    failed: 0,
+    entriesWritten: 0,
+    subjectsCreated: 0,
+  };
+  let stopRequested = false;
+  let lastStopCheckAt = 0;
+  const shouldStop = async (): Promise<boolean> => {
+    if (stopRequested) {
+      return true;
+    }
+
+    const now = Date.now();
+    if (now - lastStopCheckAt < 500) {
+      return false;
+    }
+    lastStopCheckAt = now;
+
+    const latestState = await readState(paths.statePath);
+    const latestJob = latestState.importJobs[jobId];
+    stopRequested = Boolean(latestJob?.stopRequestedAt);
+    return stopRequested;
+  };
+  const markStoppedState = async (): Promise<void> => {
+    const stoppedAt = new Date().toISOString();
+    const latestState = await readState(paths.statePath);
+    const latestJob = latestState.importJobs[jobId];
+    if (!latestJob) {
+      return;
+    }
+
+    latestJob.status = "failed";
+    latestJob.updatedAt = stoppedAt;
+    latestJob.finishedAt = stoppedAt;
+    latestJob.error = IMPORT_STOPPED_DISPLAY;
+    latestState.importJobs[jobId] = latestJob;
+    await writeState(paths.statePath, latestState);
+  };
+  let progressPersistQueue: Promise<void> = Promise.resolve();
+  const enqueueProgressPersist = (message: string): void => {
+    progressPersistQueue = progressPersistQueue
+      .then(async () => {
+        if (!applyImportProgressMessage(progress, message)) {
+          return;
+        }
+
+        const latestState = await readState(paths.statePath);
+        const latestJob = latestState.importJobs[jobId];
+        if (!latestJob || latestJob.status !== "running") {
+          return;
+        }
+        if (latestJob.stopRequestedAt) {
+          stopRequested = true;
+          return;
+        }
+
+        latestJob.progress = { ...progress };
+        latestJob.updatedAt = new Date().toISOString();
+        latestState.importJobs[jobId] = latestJob;
+        await writeState(paths.statePath, latestState);
+      })
+      .catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`zettelclaw import progress persist failed for ${jobId}: ${reason}`);
+      });
+  };
 
   try {
     const runImport = deps.runImportCommand ?? runImportCommand;
@@ -840,15 +970,24 @@ export async function runImportWorker(
         async: false,
         dryRun: false,
       },
+      shouldStop,
       logger: {
         info(message) {
           console.log(message);
+          enqueueProgressPersist(message);
         },
         warn(message) {
           console.warn(message);
+          enqueueProgressPersist(message);
         },
       },
     });
+    await progressPersistQueue;
+
+    if (await shouldStop()) {
+      await markStoppedState();
+      return null;
+    }
 
     const finishedState = await readState(paths.statePath);
     const finishedJob = finishedState.importJobs[jobId];
@@ -858,13 +997,28 @@ export async function runImportWorker(
       finishedJob.updatedAt = finishedAt;
       finishedJob.finishedAt = finishedAt;
       finishedJob.summary = result.summary;
+      finishedJob.progress = {
+        total: result.summary.selected,
+        completed: result.summary.imported + result.summary.failed,
+        imported: result.summary.imported,
+        failed: result.summary.failed,
+        entriesWritten: result.summary.entriesWritten,
+        subjectsCreated: result.summary.subjectsCreated,
+      };
       delete finishedJob.error;
+      delete finishedJob.stopRequestedAt;
       finishedState.importJobs[jobId] = finishedJob;
       await writeState(paths.statePath, finishedState);
     }
 
     return result;
   } catch (error) {
+    await progressPersistQueue;
+    if (error instanceof Error && error.message === IMPORT_STOP_REQUESTED_ERROR) {
+      await markStoppedState();
+      return null;
+    }
+
     const failedState = await readState(paths.statePath);
     const failedJob = failedState.importJobs[jobId];
     if (failedJob) {
@@ -873,6 +1027,7 @@ export async function runImportWorker(
       failedJob.updatedAt = failedAt;
       failedJob.finishedAt = failedAt;
       failedJob.error = error instanceof Error ? error.message : String(error);
+      delete failedJob.stopRequestedAt;
       failedState.importJobs[jobId] = failedJob;
       await writeState(paths.statePath, failedState);
     }
@@ -938,6 +1093,7 @@ export async function resumeImportJobs(
     job.updatedAt = queuedAt;
     delete job.finishedAt;
     delete job.error;
+    delete job.stopRequestedAt;
 
     try {
       const scheduled = await scheduleImportWorkerCron(paths.cronJobsPath, jobId);
@@ -967,6 +1123,137 @@ export async function resumeImportJobs(
   };
 }
 
+export async function stopImportJobs(
+  input: {
+    config: PluginConfig;
+    workspaceDir?: string;
+    jobId?: string;
+  },
+): Promise<StopImportJobsResult> {
+  const paths = resolvePaths(input.config, input.workspaceDir);
+  await ensureImportStoreFiles(paths, paths.statePath);
+  const state = await readState(paths.statePath);
+
+  const requestedJobId = input.jobId?.trim();
+  const candidates = requestedJobId
+    ? [requestedJobId]
+    : Object.values(state.importJobs)
+        .filter((job) => job.status === "queued" || job.status === "running")
+        .map((job) => job.id);
+
+  const stoppedJobIds: string[] = [];
+  const skippedJobIds: string[] = [];
+  const unscheduledJobIds: string[] = [];
+  const unscheduleErrors: Array<{ jobId: string; error: string }> = [];
+
+  for (const jobId of candidates) {
+    const job = state.importJobs[jobId];
+    if (!job) {
+      skippedJobIds.push(jobId);
+      continue;
+    }
+
+    if (job.status === "completed" || job.status === "failed") {
+      skippedJobIds.push(jobId);
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    job.stopRequestedAt = now;
+    job.updatedAt = now;
+    job.error = IMPORT_STOP_REQUESTED_DISPLAY;
+
+    try {
+      const unscheduled = await unscheduleImportWorkerCron(paths.cronJobsPath, job);
+      if (unscheduled) {
+        unscheduledJobIds.push(jobId);
+        delete job.cronJobId;
+        delete job.cronJobName;
+      }
+    } catch (error) {
+      unscheduleErrors.push({
+        jobId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    if (job.status === "queued") {
+      job.status = "failed";
+      job.finishedAt = now;
+      job.error = IMPORT_STOPPED_DISPLAY;
+    }
+
+    state.importJobs[job.id] = job;
+    stoppedJobIds.push(jobId);
+  }
+
+  await writeState(paths.statePath, state);
+
+  return {
+    statePath: paths.statePath,
+    stoppedJobIds,
+    skippedJobIds,
+    unscheduledJobIds,
+    unscheduleErrors,
+  };
+}
+
+function clampProgress(value: number, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+
+  if (value < 0) {
+    return 0;
+  }
+
+  if (value > total) {
+    return total;
+  }
+
+  return value;
+}
+
+function buildProgressFromSummary(job: ImportJobState): ImportJobProgressState | undefined {
+  if (!job.summary) {
+    return undefined;
+  }
+
+  return {
+    total: job.summary.selected,
+    completed: job.summary.imported + job.summary.failed,
+    imported: job.summary.imported,
+    failed: job.summary.failed,
+    entriesWritten: job.summary.entriesWritten,
+    subjectsCreated: job.summary.subjectsCreated,
+  };
+}
+
+function resolveImportJobProgress(job: ImportJobState): ImportJobProgressState | undefined {
+  const fromSummary = buildProgressFromSummary(job);
+  const source = job.progress ?? fromSummary;
+  if (!source) {
+    return undefined;
+  }
+
+  const total = Math.max(0, source.total);
+  const completed = clampProgress(source.completed, total);
+
+  return {
+    total,
+    completed,
+    imported: Math.max(0, source.imported),
+    failed: Math.max(0, source.failed),
+    entriesWritten: Math.max(0, source.entriesWritten),
+    subjectsCreated: Math.max(0, source.subjectsCreated),
+  };
+}
+
+function formatImportProgress(progress: ImportJobProgressState): string {
+  const percentage = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+  return `${progress.completed}/${progress.total} (${percentage}%)`;
+}
+
 function formatImportJobLine(job: ImportJobState): string {
   const pieces = [
     `${job.id}`,
@@ -975,12 +1262,13 @@ function formatImportJobLine(job: ImportJobState): string {
     `attempts=${job.attempts}`,
     `updated=${job.updatedAt}`,
   ];
+  const progress = resolveImportJobProgress(job);
 
-  if (job.summary) {
+  if (progress) {
     pieces.push(
-      `imported=${job.summary.imported}`,
-      `failed=${job.summary.failed}`,
-      `entries=${job.summary.entriesWritten}`,
+      `progress=${formatImportProgress(progress)}`,
+      `events=${progress.entriesWritten}`,
+      `subjects=${progress.subjectsCreated}`,
     );
   }
 
@@ -989,6 +1277,85 @@ function formatImportJobLine(job: ImportJobState): string {
   }
 
   return pieces.join(" | ");
+}
+
+const IMPORT_PROGRESS_SELECTION_RE = /parsed=\d+,\s*selected=(\d+),\s*dryRun=/u;
+const IMPORT_PROGRESS_STEP_RE =
+  /^\[(\d+)\/(\d+)\]\s+(imported|failed)\s+.*?(?:\((?:entries=(\d+),\s*subjectsCreated=(\d+))\))?$/u;
+
+function applyImportProgressMessage(
+  progress: ImportJobProgressState,
+  message: string,
+): boolean {
+  const selectionMatch = message.match(IMPORT_PROGRESS_SELECTION_RE);
+  if (selectionMatch) {
+    const total = Number.parseInt(selectionMatch[1] ?? "", 10);
+    if (Number.isFinite(total) && total >= 0) {
+      progress.total = Math.max(progress.total, total);
+      progress.completed = clampProgress(progress.completed, progress.total);
+      return true;
+    }
+  }
+
+  const stepMatch = message.match(IMPORT_PROGRESS_STEP_RE);
+  if (!stepMatch) {
+    return false;
+  }
+
+  const completed = Number.parseInt(stepMatch[1] ?? "", 10);
+  const total = Number.parseInt(stepMatch[2] ?? "", 10);
+  const action = stepMatch[3];
+  const entries = stepMatch[4] ? Number.parseInt(stepMatch[4], 10) : NaN;
+  const subjects = stepMatch[5] ? Number.parseInt(stepMatch[5], 10) : NaN;
+
+  if (!Number.isFinite(completed) || !Number.isFinite(total) || completed < 0 || total < 0) {
+    return false;
+  }
+
+  if (total > progress.total) {
+    progress.total = total;
+  }
+  progress.completed = clampProgress(completed, progress.total);
+
+  if (action === "imported") {
+    progress.imported += 1;
+    if (Number.isFinite(entries) && entries > 0) {
+      progress.entriesWritten += entries;
+    }
+    if (Number.isFinite(subjects) && subjects > 0) {
+      progress.subjectsCreated += subjects;
+    }
+  } else if (action === "failed") {
+    progress.failed += 1;
+  }
+
+  return true;
+}
+
+function formatImportJobStatusDetail(job: ImportJobState): string {
+  const lines = [
+    `status=${job.status}`,
+    `platform=${job.platform}`,
+    `attempts=${job.attempts}`,
+    `updated=${job.updatedAt}`,
+  ];
+
+  const progress = resolveImportJobProgress(job);
+  if (progress) {
+    lines.push(
+      `progress=${formatImportProgress(progress)}`,
+      `events=${progress.entriesWritten}`,
+      `subjects=${progress.subjectsCreated}`,
+    );
+  }
+
+  lines.push(`source=${job.filePath}`);
+
+  if (job.error) {
+    lines.push(`error=${job.error}`);
+  }
+
+  return lines.join(" | ");
 }
 
 export async function runImportCommand(
@@ -1048,6 +1415,7 @@ export async function runImportCommand(
       force: options.force === true,
       transcripts: options.transcripts !== false,
       verbose: options.verbose === true,
+      shouldStop: input.shouldStop,
       apiBaseUrl: resolveApiBaseUrl(input.apiConfig),
       apiToken: readGatewayToken(input.apiConfig),
       openClawHome: resolveOpenClawHome(),
@@ -1313,20 +1681,321 @@ function createEmptyDetections(): ImportDetections {
   };
 }
 
+const MAX_IMPORT_SCAN_JSON_BYTES = 250 * 1024 * 1024;
+const IMPORT_CANDIDATE_SAMPLE_LIMIT = 5;
+const IMPORT_PLATFORM_DISFAVORED_FILES: Record<Exclude<ImportPlatform, "openclaw">, string[]> = {
+  chatgpt: [
+    "shared_conversations.json",
+    "group_chats.json",
+    "message_feedback.json",
+    "basispoints.json",
+    "shopping.json",
+    "sora.json",
+    "user.json",
+    "users.json",
+    "projects.json",
+    "memories.json",
+    "prod-mc-auth-mgmt-api.json",
+    "prod-mc-billing.json",
+  ],
+  claude: [
+    "users.json",
+    "projects.json",
+    "memories.json",
+    "user.json",
+    "shared_conversations.json",
+    "group_chats.json",
+    "prod-mc-auth-mgmt-api.json",
+    "prod-mc-billing.json",
+  ],
+  grok: [
+    "prod-mc-auth-mgmt-api.json",
+    "prod-mc-billing.json",
+    "user.json",
+    "users.json",
+    "projects.json",
+    "memories.json",
+    "shared_conversations.json",
+  ],
+};
+
 function scorePathHint(platform: ImportPlatform, filePath: string): number {
-  const base = filePath.toLowerCase();
-  const hints: Record<Exclude<ImportPlatform, "openclaw">, RegExp[]> = {
-    chatgpt: [/chatgpt/u, /openai/u, /conversation/u, /conversations/u],
-    claude: [/claude/u, /anthropic/u, /conversation/u, /conversations/u],
-    grok: [/grok/u, /xai/u, /conversation/u, /conversations/u],
-  };
+  const normalizedPath = filePath.replaceAll("\\", "/").toLowerCase();
+  const lowerName = basename(normalizedPath).toLowerCase();
+  const hasSegment = (segment: string): boolean =>
+    normalizedPath.includes(`/${segment}/`) || normalizedPath.endsWith(`/${segment}`);
 
   if (platform === "openclaw") {
-    return base.endsWith("/memory") ? 30 : base.includes("/memory/") ? 20 : 0;
+    return normalizedPath.endsWith("/memory") ? 30 : normalizedPath.includes("/memory/") ? 20 : 0;
   }
 
-  const patterns = hints[platform];
-  return patterns.reduce((score, pattern) => (pattern.test(base) ? score + 10 : score), 0);
+  if (platform === "chatgpt") {
+    let score = 0;
+    if (hasSegment("chatgpt") || normalizedPath.includes("chatgpt")) {
+      score += 100;
+    }
+    if (hasSegment("openai") || normalizedPath.includes("openai")) {
+      score += 90;
+    }
+    if (lowerName === "conversations.json" || lowerName === "conversation.json") {
+      score += 70;
+    }
+    if (IMPORT_PLATFORM_DISFAVORED_FILES.chatgpt.includes(lowerName)) {
+      score -= 240;
+    }
+    if (
+      hasSegment("claude") ||
+      normalizedPath.includes("anthropic") ||
+      hasSegment("grok") ||
+      normalizedPath.includes("xai")
+    ) {
+      score -= 120;
+    }
+    return score;
+  }
+
+  if (platform === "claude") {
+    let score = 0;
+    if (hasSegment("claude") || normalizedPath.includes("claude")) {
+      score += 110;
+    }
+    if (hasSegment("anthropic") || normalizedPath.includes("anthropic")) {
+      score += 100;
+    }
+    if (lowerName === "conversations.json" || lowerName === "conversation.json") {
+      score += 70;
+    }
+    if (IMPORT_PLATFORM_DISFAVORED_FILES.claude.includes(lowerName)) {
+      score -= 220;
+    }
+    if (
+      hasSegment("chatgpt") ||
+      normalizedPath.includes("openai") ||
+      hasSegment("grok") ||
+      normalizedPath.includes("xai")
+    ) {
+      score -= 120;
+    }
+    return score;
+  }
+
+  let score = 0;
+  if (hasSegment("grok") || normalizedPath.includes("grok")) {
+    score += 110;
+  }
+  if (hasSegment("xai") || normalizedPath.includes("xai")) {
+    score += 100;
+  }
+  if (lowerName === "prod-grok-backend.json") {
+    score += 220;
+  }
+  if (lowerName === "conversations.json" || lowerName === "conversation.json") {
+    score += 40;
+  }
+  if (IMPORT_PLATFORM_DISFAVORED_FILES.grok.includes(lowerName)) {
+    score -= 220;
+  }
+  if (
+    hasSegment("chatgpt") ||
+    normalizedPath.includes("openai") ||
+    hasSegment("claude") ||
+    normalizedPath.includes("anthropic")
+  ) {
+    score -= 120;
+  }
+  return score;
+}
+
+function readImportConversationSample(raw: unknown): Record<string, unknown>[] {
+  let source: unknown[] = [];
+  if (Array.isArray(raw)) {
+    source = raw;
+  } else if (isObject(raw)) {
+    if (Array.isArray(raw.conversations)) {
+      source = raw.conversations;
+    } else if (Array.isArray(raw.data)) {
+      source = raw.data;
+    }
+  }
+
+  const sampled = source.filter(isObject).slice(0, IMPORT_CANDIDATE_SAMPLE_LIMIT);
+  return sampled;
+}
+
+function readFirstObjectFromArray(value: unknown): Record<string, unknown> | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  for (const item of value) {
+    if (isObject(item)) {
+      return item;
+    }
+  }
+
+  return null;
+}
+
+function scoreRawStructureHint(platform: Exclude<ImportPlatform, "openclaw">, raw: unknown): number {
+  const sample = readImportConversationSample(raw);
+  if (sample.length === 0) {
+    return 0;
+  }
+
+  if (platform === "chatgpt") {
+    let score = 0;
+    for (const conversation of sample) {
+      if (isObject(conversation.mapping)) {
+        score += 90;
+      }
+      if (typeof conversation.current_node === "string") {
+        score += 70;
+      }
+      if (typeof conversation.create_time === "number" || typeof conversation.update_time === "number") {
+        score += 25;
+      }
+      if (Array.isArray(conversation.chat_messages)) {
+        score -= 40;
+      }
+      if (isObject(conversation.conversation) && Array.isArray(conversation.responses)) {
+        score -= 70;
+      }
+      if (conversation.is_anonymous === true) {
+        score -= 90;
+      }
+    }
+    return score;
+  }
+
+  if (platform === "claude") {
+    let score = 0;
+    for (const conversation of sample) {
+      if (Array.isArray(conversation.chat_messages)) {
+        score += 90;
+      }
+      if (typeof conversation.uuid === "string" || typeof conversation.conversation_uuid === "string") {
+        score += 40;
+      }
+      if (typeof conversation.name === "string") {
+        score += 25;
+      }
+      if (isObject(conversation.account)) {
+        score += 10;
+      }
+      const firstMessage = readFirstObjectFromArray(conversation.chat_messages ?? conversation.messages);
+      if (
+        firstMessage &&
+        (typeof firstMessage.sender === "string" || typeof firstMessage.role === "string")
+      ) {
+        score += 20;
+      }
+      if (isObject(conversation.mapping) || typeof conversation.current_node === "string") {
+        score -= 60;
+      }
+      if (isObject(conversation.conversation) && Array.isArray(conversation.responses)) {
+        score -= 80;
+      }
+    }
+    return score;
+  }
+
+  let score = 0;
+  if (isObject(raw)) {
+    if (Array.isArray(raw.projects)) {
+      score += 20;
+    }
+    if (Array.isArray(raw.tasks)) {
+      score += 20;
+    }
+    if (Array.isArray(raw.media_posts)) {
+      score += 20;
+    }
+  }
+
+  for (const conversation of sample) {
+    if (isObject(conversation.conversation) && Array.isArray(conversation.responses)) {
+      score += 140;
+    }
+    if (Array.isArray(conversation.responses)) {
+      score += 40;
+      const firstResponse = readFirstObjectFromArray(conversation.responses);
+      if (firstResponse && isObject(firstResponse.response)) {
+        score += 25;
+      }
+    }
+    if (isObject(conversation.messagesById)) {
+      score += 70;
+    }
+    if (Array.isArray(conversation.turns) || Array.isArray(conversation.messages)) {
+      score += 20;
+    }
+    if (Array.isArray(conversation.chat_messages) && typeof conversation.uuid === "string") {
+      score -= 90;
+    }
+    if (isObject(conversation.mapping) || typeof conversation.current_node === "string") {
+      score -= 80;
+    }
+  }
+
+  return score;
+}
+
+function selectParsedConversations(platform: Exclude<ImportPlatform, "openclaw">, raw: unknown) {
+  if (platform === "chatgpt") {
+    return parseChatGptConversations(raw);
+  }
+  if (platform === "claude") {
+    return parseClaudeConversations(raw);
+  }
+  return parseGrokConversations(raw);
+}
+
+function countExtractableConversations(platform: Exclude<ImportPlatform, "openclaw">, raw: unknown): number {
+  const parsed = selectParsedConversations(platform, raw);
+  return parsed.filter((conversation) => conversation.messages.length > 0).length;
+}
+
+interface ImportJsonCandidateScore {
+  platform: Exclude<ImportPlatform, "openclaw">;
+  extractableConversations: number;
+  score: number;
+}
+
+function scoreImportJsonCandidate(
+  platform: Exclude<ImportPlatform, "openclaw">,
+  filePath: string,
+  parsed: unknown,
+): ImportJsonCandidateScore | null {
+  const extractableCount = countExtractableConversations(platform, parsed);
+  if (extractableCount <= 0) {
+    return null;
+  }
+
+  const pathScore = scorePathHint(platform, filePath);
+  const structureScore = scoreRawStructureHint(platform, parsed);
+  const confidenceScore = pathScore + structureScore;
+  if (confidenceScore < 0) {
+    return null;
+  }
+
+  return {
+    platform,
+    extractableConversations: extractableCount,
+    score: extractableCount * 100 + confidenceScore,
+  };
+}
+
+function isPreferredImportFileName(platform: Exclude<ImportPlatform, "openclaw">, filePath: string): boolean {
+  const lowerName = basename(filePath).toLowerCase();
+  if (platform === "grok") {
+    return (
+      lowerName === "prod-grok-backend.json" ||
+      lowerName === "conversations.json" ||
+      lowerName === "conversation.json"
+    );
+  }
+
+  return lowerName === "conversations.json" || lowerName === "conversation.json";
 }
 
 function shouldSkipDirectory(name: string): boolean {
@@ -1359,7 +2028,7 @@ async function pathType(path: string): Promise<"file" | "dir" | null> {
 async function readJsonFile(path: string): Promise<unknown | null> {
   try {
     const metadata = await stat(path);
-    if (!metadata.isFile() || metadata.size > 75 * 1024 * 1024) {
+    if (!metadata.isFile() || metadata.size > MAX_IMPORT_SCAN_JSON_BYTES) {
       return null;
     }
 
@@ -1379,23 +2048,28 @@ async function resolveImportJsonPathFromDirectory(
     return null;
   }
 
+  const sortedCandidates = [...candidates].sort((left, right) => left.localeCompare(right));
+  const nonDisfavored = sortedCandidates.filter((candidatePath) => {
+    const lowerName = basename(candidatePath).toLowerCase();
+    return !IMPORT_PLATFORM_DISFAVORED_FILES[platform].includes(lowerName);
+  });
+
   let bestParsedCandidate: { path: string; score: number } | null = null;
-  for (const candidatePath of candidates) {
+  for (const candidatePath of nonDisfavored) {
     const parsed = await readJsonFile(candidatePath);
     if (parsed === null) {
       continue;
     }
 
-    const parsedCount = countParsedConversations(platform, parsed);
-    if (parsedCount <= 0) {
+    const candidateScore = scoreImportJsonCandidate(platform, candidatePath, parsed);
+    if (!candidateScore) {
       continue;
     }
 
-    const score = parsedCount * 100 + scorePathHint(platform, candidatePath);
-    if (!bestParsedCandidate || score > bestParsedCandidate.score) {
+    if (!bestParsedCandidate || candidateScore.score > bestParsedCandidate.score) {
       bestParsedCandidate = {
         path: candidatePath,
-        score,
+        score: candidateScore.score,
       };
     }
   }
@@ -1404,20 +2078,18 @@ async function resolveImportJsonPathFromDirectory(
     return bestParsedCandidate.path;
   }
 
-  const sortedCandidates = [...candidates].sort((left, right) => left.localeCompare(right));
-  if (sortedCandidates.length === 1) {
-    return sortedCandidates[0] ?? null;
+  if (nonDisfavored.length === 1) {
+    return nonDisfavored[0] ?? null;
   }
 
-  const preferredByName = sortedCandidates.filter((candidatePath) => {
-    const lowerName = basename(candidatePath).toLowerCase();
-    return lowerName === "conversations.json" || lowerName === "conversation.json";
-  });
+  const preferredByName = nonDisfavored.filter((candidatePath) =>
+    isPreferredImportFileName(platform, candidatePath),
+  );
   if (preferredByName.length === 1) {
     return preferredByName[0] ?? null;
   }
 
-  const hinted = sortedCandidates.filter((candidatePath) => scorePathHint(platform, candidatePath) > 0);
+  const hinted = nonDisfavored.filter((candidatePath) => scorePathHint(platform, candidatePath) > 0);
   if (hinted.length === 1) {
     return hinted[0] ?? null;
   }
@@ -1538,18 +2210,6 @@ async function listJsonCandidates(root: string, maxDepth = 3, maxFiles = 300): P
   return candidates;
 }
 
-function countParsedConversations(platform: Exclude<ImportPlatform, "openclaw">, raw: unknown): number {
-  if (platform === "chatgpt") {
-    return parseChatGptConversations(raw).length;
-  }
-
-  if (platform === "claude") {
-    return parseClaudeConversations(raw).length;
-  }
-
-  return parseGrokConversations(raw).length;
-}
-
 function sortDetections(detections: ImportDetection[]): ImportDetection[] {
   return detections.sort((left, right) => {
     if (right.score !== left.score) {
@@ -1588,42 +2248,38 @@ export async function detectImportSources(workspaceDir?: string): Promise<Import
       }
     }
 
-    const discoveredJson = await listJsonCandidates(root);
+    const discoveredJson = await listJsonCandidates(root, 6, 600);
     for (const candidate of discoveredJson) {
       jsonCandidates.add(candidate);
     }
   }
 
   for (const filePath of jsonCandidates) {
-    let rawText = "";
-    try {
-      const metadata = await stat(filePath);
-      if (!metadata.isFile() || metadata.size > 75 * 1024 * 1024) {
-        continue;
-      }
-      rawText = await readFile(filePath, "utf8");
-    } catch {
+    const parsed = await readJsonFile(filePath);
+    if (parsed === null) {
       continue;
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawText) as unknown;
-    } catch {
-      continue;
-    }
-
+    let bestCandidate: ImportJsonCandidateScore | null = null;
     for (const platform of ["chatgpt", "claude", "grok"] as const) {
-      const parsedCount = countParsedConversations(platform, parsed);
-      if (parsedCount <= 0) {
+      const scored = scoreImportJsonCandidate(platform, filePath, parsed);
+      if (!scored) {
         continue;
       }
 
-      detections[platform].push({
-        platform,
+      if (!bestCandidate || scored.score > bestCandidate.score) {
+        bestCandidate = scored;
+      }
+    }
+
+    if (bestCandidate) {
+      detections[bestCandidate.platform].push({
+        platform: bestCandidate.platform,
         path: filePath,
-        detail: `${parsedCount} conversation${parsedCount === 1 ? "" : "s"}`,
-        score: parsedCount + scorePathHint(platform, filePath),
+        detail: `${bestCandidate.extractableConversations} conversation${
+          bestCandidate.extractableConversations === 1 ? "" : "s"
+        }`,
+        score: bestCandidate.score,
       });
     }
   }
@@ -1772,6 +2428,7 @@ function printImportSummary(result: RunImportCommandResult, platform: ImportPlat
   console.log(`  Imported: ${summary.imported}`);
   console.log(`  Failed: ${summary.failed}`);
   console.log(`  Entries written: ${summary.entriesWritten}`);
+  console.log(`  Subjects created: ${summary.subjectsCreated}`);
   console.log(`  Transcripts written: ${summary.transcriptsWritten}`);
   console.log(`  State file: ${result.statePath}`);
   if (result.legacyBackupPath) {
@@ -2627,11 +3284,15 @@ function registerZettelclawCliCommands(
 
           const paths = resolvePaths(config, workspaceDir);
 
-          clackLog.message(`Source: ${platformLabel(selection.platform)}`);
-          clackLog.message(`Path: ${selection.filePath}`);
-          clackLog.message(`Model: ${normalizeModelOption(importOptions.model) ?? DEFAULT_IMPORT_MODEL}`);
-          clackLog.message(`Parallel jobs: ${importOptions.jobs}`);
-          clackLog.message(`State file: ${paths.statePath}`);
+          clackLog.message(
+            [
+              `Source: ${platformLabel(selection.platform)}`,
+              `Path: ${selection.filePath}`,
+              `Model: ${normalizeModelOption(importOptions.model) ?? DEFAULT_IMPORT_MODEL}`,
+              `Parallel jobs: ${importOptions.jobs}`,
+              `State file: ${paths.statePath}`,
+            ].join("\n"),
+          );
 
           if (selection.platform === "openclaw") {
             const preflightSpin = clackSpinner();
@@ -2639,22 +3300,16 @@ function registerZettelclawCliCommands(
             const preflight = await readOpenClawMemoryPreflight(selection.filePath);
             preflightSpin.stop("Source stats loaded");
             clackLog.message(
-              `OpenClaw preflight: files=${preflight.markdownFiles}, daily=${preflight.dailyFiles}, other=${preflight.otherFiles}`,
-            );
-            clackLog.message(
-              `OpenClaw preflight: dateRange=${preflight.dateRange}, size=${formatBytes(preflight.sourceSizeBytes)}`,
-            );
-            clackLog.message(
-              `OpenClaw preflight: source cleanup=${importOptions.keepSource === true ? "disabled" : "enabled"}`,
-            );
-            clackLog.message(
-              `OpenClaw preflight: memory doc backups=${importOptions.backupMemoryDocs === true ? "enabled" : "disabled"}`,
+              [
+                `OpenClaw preflight: files=${preflight.markdownFiles}, daily=${preflight.dailyFiles}, other=${preflight.otherFiles}`,
+                `OpenClaw preflight: dateRange=${preflight.dateRange}, size=${formatBytes(preflight.sourceSizeBytes)}`,
+              ].join("\n"),
             );
           }
 
           const previewSpin = clackSpinner();
           previewSpin.start("Running preview (dry-run)");
-          const previewResult = await runImportCommand({
+          await runImportCommand({
             config,
             workspaceDir,
             apiConfig: api.config,
@@ -2667,7 +3322,6 @@ function registerZettelclawCliCommands(
             logger: createSilentImportLogger(),
           });
           previewSpin.stop("Preview complete");
-          printImportSummary(previewResult, selection.platform);
 
           if (options.dryRun === true) {
             clackOutro("Dry-run complete.");
@@ -2697,14 +3351,15 @@ function registerZettelclawCliCommands(
             opts: importOptions,
           });
           queueSpin.stop("Import queued");
-          clackLog.message(`Job: ${queued.job.id}`);
-          clackLog.message(`Status: ${queued.job.status}`);
-          clackLog.message(`Next run: ${queued.nextRunAt}`);
-          clackLog.message(`State file: ${queued.statePath}`);
-          const sessionKey = buildImportWorkerSessionKey(queued.cronJobId);
-          clackLog.message(`Worker session key: ${sessionKey}`);
-          clackLog.message(`Attach with: openclaw tui --session ${sessionKey}`);
-          clackLog.message(`Track with: openclaw zettelclaw import status ${queued.job.id}`);
+          clackLog.message(
+            [
+              `Job: ${queued.job.id}`,
+              `Status: ${queued.job.status}`,
+              `Next run: ${queued.nextRunAt}`,
+              `State file: ${queued.statePath}`,
+              `Track with: openclaw zettelclaw import status ${queued.job.id}`,
+            ].join("\n"),
+          );
           clackOutro("Async import queued.");
           return;
         }
@@ -2733,14 +3388,15 @@ function registerZettelclawCliCommands(
           filePath: selection.filePath,
           opts: options,
         });
-        console.log(`Queued async import job: ${queued.job.id}`);
-        console.log(`Status: ${queued.job.status}`);
-        console.log(`Next run: ${queued.nextRunAt}`);
-        console.log(`State file: ${queued.statePath}`);
-        const sessionKey = buildImportWorkerSessionKey(queued.cronJobId);
-        console.log(`Worker session key: ${sessionKey}`);
-        console.log(`Attach with: openclaw tui --session ${sessionKey}`);
-        console.log(`Track with: openclaw zettelclaw import status ${queued.job.id}`);
+        console.log(
+          [
+            `Queued async import job: ${queued.job.id}`,
+            `Status: ${queued.job.status}`,
+            `Next run: ${queued.nextRunAt}`,
+            `State file: ${queued.statePath}`,
+            `Track with: openclaw zettelclaw import status ${queued.job.id}`,
+          ].join("\n"),
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message === "Import canceled") {
@@ -2770,8 +3426,7 @@ function registerZettelclawCliCommands(
         if (!match) {
           throw new Error(`import job not found: ${requestedJobId}`);
         }
-        console.log(formatImportJobLine(match));
-        console.log(`filePath=${match.filePath}`);
+        console.log(formatImportJobStatusDetail(match));
         return;
       }
 
@@ -2833,6 +3488,43 @@ function registerZettelclawCliCommands(
       console.log(`State file: ${result.statePath}`);
     });
 
+  importCommand
+    .command("stop [jobId]")
+    .description("Stop running/queued async import jobs")
+    .action(async (jobId: unknown) => {
+      const result = await stopImportJobs({
+        config,
+        workspaceDir,
+        jobId: typeof jobId === "string" && jobId.trim().length > 0 ? jobId.trim() : undefined,
+      });
+
+      if (result.stoppedJobIds.length === 0 && result.skippedJobIds.length === 0) {
+        console.log("No jobs to stop.");
+        console.log(`State file: ${result.statePath}`);
+        return;
+      }
+
+      if (result.stoppedJobIds.length > 0) {
+        console.log(`Stopped jobs (${result.stoppedJobIds.length}): ${result.stoppedJobIds.join(", ")}`);
+      }
+
+      if (result.unscheduledJobIds.length > 0) {
+        console.log(`Removed worker cron jobs (${result.unscheduledJobIds.length}): ${result.unscheduledJobIds.join(", ")}`);
+      }
+
+      if (result.skippedJobIds.length > 0) {
+        console.log(`Skipped jobs (${result.skippedJobIds.length}): ${result.skippedJobIds.join(", ")}`);
+      }
+
+      if (result.unscheduleErrors.length > 0) {
+        for (const failure of result.unscheduleErrors) {
+          console.warn(`Failed to unschedule ${failure.jobId}: ${failure.error}`);
+        }
+      }
+
+      console.log(`State file: ${result.statePath}`);
+    });
+
   zettelclaw
     .command("import-worker")
     .description("Internal async import worker executor")
@@ -2852,7 +3544,7 @@ function registerZettelclawCliCommands(
       });
 
       if (result === null) {
-        console.log(`Import job ${jobId} already completed.`);
+        console.log(`Import job ${jobId} did not run (already completed or stopped).`);
         return;
       }
 

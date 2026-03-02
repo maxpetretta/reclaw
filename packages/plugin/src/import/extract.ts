@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { escapeRegex, isObject } from "../lib/guards";
 import {
   OpenClawCronError,
   removeCronJob,
@@ -31,10 +32,18 @@ const HISTORICAL_SYSTEM_PREFIX = [
   "- Extract durable memory exactly as written, without assuming current status.",
   "- Apply a strict durability filter: only keep details likely to matter in future sessions.",
   "- Prefer long-lived user context: projects, workflows, preferences, health patterns, and unresolved questions.",
+  "- Prefer subject slugs for the thing discussed (`project`, `topic`, `system`) rather than the user as a catch-all person subject.",
+  "- Use `person` subjects only when the memory is explicitly about that person (identity, relationship, preference, health, biography).",
+  "- For health/medical topics use a `health` subject, for investing use `investing`, for hobbies use the hobby name, etc.",
+  "- Match extraction density to transcript complexity; longer transcripts should usually yield multiple durable entries.",
   "- Skip one-off lookup results unless they reveal a durable pattern or preference.",
   "- Examples to skip: menus, store addresses/hours, trivia/song ID requests, generic explainers, transient shopping lookups, and codebase architecture details (database schemas, contract patterns, dependency lists) discoverable from project source code.",
+  "- Do not extract the act of researching or asking about something. Only extract the durable conclusion or preference that resulted. 'User researched X' or 'User asked about X' entries are not durable.",
+  "- Do not emit speculative questions. Only emit `question` entries for things the user explicitly left unresolved.",
   "- Do not emit handoff entries in historical import mode.",
   "- You may include an optional `timestamp` field per entry for historical placement.",
+  "- Prefer exact timestamps from transcript messages when available.",
+  "- If confidence is low, emit a `question` instead of an uncertain `fact`.",
   "- If only a date is known, use that date at noon (12:00:00).",
   "- If omitted, timestamp defaults to the conversation's historical updatedAt time.",
 ].join("\n");
@@ -67,7 +76,7 @@ interface CallModelParams {
 interface ParsedLlmEntry {
   entry: Omit<LogEntry, "id" | "timestamp" | "session">;
   subjectTypeHint?: string;
-  timestampHint?: string;
+  timestampHint?: ImportTimestampHint;
 }
 
 export interface ExtractedImportedEntry {
@@ -79,12 +88,21 @@ export interface ImportExtractionDeps {
   callModel: (params: CallModelParams) => Promise<string>;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+interface ImportTimestampHint {
+  iso: string;
+  dateOnly?: string;
 }
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+type QualityIssueSeverity = "moderate" | "severe";
+
+interface QualityIssue {
+  severity: QualityIssueSeverity;
+  message: string;
+}
+
+
+function normalizeText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, " ");
 }
 
 function findMentionedSubjects(transcript: string, subjects: SubjectRegistry): string[] {
@@ -153,7 +171,7 @@ function formatConversationMetadata(conversation: ImportedConversation): string 
 
 function formatTranscript(conversation: ImportedConversation): string {
   return conversation.messages
-    .map((message) => `${message.role}: ${message.content}`)
+    .map((message) => `[${message.createdAt}] ${message.role}: ${message.content}`)
     .join("\n");
 }
 
@@ -210,7 +228,7 @@ function applyRequiredSubjectFallback(raw: unknown): unknown {
   return candidate;
 }
 
-function parseImportTimestampHint(raw: unknown): string | undefined {
+function parseImportTimestampHint(raw: unknown): ImportTimestampHint | undefined {
   if (!isObject(raw)) {
     return undefined;
   }
@@ -222,8 +240,16 @@ function parseImportTimestampHint(raw: unknown): string | undefined {
 
   const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(candidate);
   if (dateOnlyMatch) {
+    const dateOnly = `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}`;
     const noonIso = `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}T12:00:00.000Z`;
-    return Number.isFinite(Date.parse(noonIso)) ? noonIso : undefined;
+    if (!Number.isFinite(Date.parse(noonIso))) {
+      return undefined;
+    }
+
+    return {
+      iso: noonIso,
+      dateOnly,
+    };
   }
 
   const parsed = Date.parse(candidate);
@@ -231,7 +257,9 @@ function parseImportTimestampHint(raw: unknown): string | undefined {
     return undefined;
   }
 
-  return new Date(parsed).toISOString();
+  return {
+    iso: new Date(parsed).toISOString(),
+  };
 }
 
 function parseLlmOutput(rawOutput: string): {
@@ -293,6 +321,184 @@ function parseLlmOutput(rawOutput: string): {
   };
 }
 
+function resolveDateOnlyTimestampHint(
+  dateOnly: string,
+  conversation: ImportedConversation,
+): string | undefined {
+  const targetNoon = Date.parse(`${dateOnly}T12:00:00.000Z`);
+  if (!Number.isFinite(targetNoon)) {
+    return undefined;
+  }
+
+  let bestIso: string | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const message of conversation.messages) {
+    if (typeof message.createdAt !== "string" || !message.createdAt.startsWith(`${dateOnly}T`)) {
+      continue;
+    }
+
+    const parsed = Date.parse(message.createdAt);
+    if (!Number.isFinite(parsed)) {
+      continue;
+    }
+
+    const iso = new Date(parsed).toISOString();
+    const distance = Math.abs(parsed - targetNoon);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIso = iso;
+    }
+  }
+
+  return bestIso;
+}
+
+function resolveEntryTimestampHint(
+  hint: ImportTimestampHint | undefined,
+  conversation: ImportedConversation,
+  fallback: string,
+): string {
+  if (!hint) {
+    return fallback;
+  }
+
+  if (!hint.dateOnly) {
+    return hint.iso;
+  }
+
+  return resolveDateOnlyTimestampHint(hint.dateOnly, conversation) ?? hint.iso;
+}
+
+function dedupeParsedEntries(entries: ParsedLlmEntry[]): ParsedLlmEntry[] {
+  const seen = new Set<string>();
+  const deduped: ParsedLlmEntry[] = [];
+
+  for (const parsedEntry of entries) {
+    const statusText =
+      parsedEntry.entry.type === "task" ? `:${parsedEntry.entry.status}` : "";
+    const subjectText = "subject" in parsedEntry.entry ? parsedEntry.entry.subject : "";
+    const detailText = typeof parsedEntry.entry.detail === "string" ? parsedEntry.entry.detail : "";
+    const key = [
+      parsedEntry.entry.type,
+      statusText,
+      normalizeText(subjectText),
+      normalizeText(parsedEntry.entry.content),
+      normalizeText(detailText),
+    ].join("|");
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(parsedEntry);
+  }
+
+  return deduped;
+}
+
+function estimateCoverageTarget(conversation: ImportedConversation): number {
+  const substantiveMessageCount = conversation.messages.filter((message) => {
+    if (message.role === "system") {
+      return false;
+    }
+
+    return message.content.trim().length >= 24;
+  }).length;
+
+  if (substantiveMessageCount >= 40) {
+    return 8;
+  }
+  if (substantiveMessageCount >= 28) {
+    return 6;
+  }
+  if (substantiveMessageCount >= 18) {
+    return 4;
+  }
+  if (substantiveMessageCount >= 10) {
+    return 3;
+  }
+  if (substantiveMessageCount >= 6) {
+    return 2;
+  }
+  return 1;
+}
+
+function evaluateQualityIssues(params: {
+  parsedEntries: ParsedLlmEntry[];
+  conversation: ImportedConversation;
+  subjects: SubjectRegistry;
+}): QualityIssue[] {
+  const issues: QualityIssue[] = [];
+  const { parsedEntries, conversation, subjects } = params;
+
+  if (parsedEntries.length === 0) {
+    return issues;
+  }
+
+  const coverageTarget = estimateCoverageTarget(conversation);
+  const coverageDeficit = coverageTarget - parsedEntries.length;
+  if (coverageDeficit >= 2) {
+    issues.push({
+      severity: "severe",
+      message: `Coverage is too sparse for this transcript. Produce around ${coverageTarget} durable entries when justified.`,
+    });
+  } else if (coverageDeficit === 1 && coverageTarget >= 3) {
+    issues.push({
+      severity: "moderate",
+      message: `Coverage is slightly sparse. Target about ${coverageTarget} durable entries when supported by transcript evidence.`,
+    });
+  }
+
+  if (parsedEntries.length >= 3) {
+    const subjectHintBySlug = new Map<string, string>();
+    for (const parsedEntry of parsedEntries) {
+      if (parsedEntry.subjectTypeHint && "subject" in parsedEntry.entry) {
+        subjectHintBySlug.set(parsedEntry.entry.subject, parsedEntry.subjectTypeHint);
+      }
+    }
+
+    const subjectCounts = new Map<string, number>();
+    for (const parsedEntry of parsedEntries) {
+      if (!("subject" in parsedEntry.entry)) {
+        continue;
+      }
+      const current = subjectCounts.get(parsedEntry.entry.subject) ?? 0;
+      subjectCounts.set(parsedEntry.entry.subject, current + 1);
+    }
+
+    let dominantSubject: string | undefined;
+    let dominantCount = 0;
+    for (const [subject, count] of subjectCounts.entries()) {
+      if (count > dominantCount) {
+        dominantSubject = subject;
+        dominantCount = count;
+      }
+    }
+
+    if (dominantSubject && dominantCount / parsedEntries.length >= 0.75) {
+      const hintedType = subjectHintBySlug.get(dominantSubject);
+      const dominantIsPerson =
+        hintedType === "person" || subjects[dominantSubject]?.type === "person";
+
+      if (dominantIsPerson) {
+        issues.push({
+          severity: "severe",
+          message:
+            "Too many entries use a person subject as a catch-all. Split entries across topical subjects that describe what was discussed (health, investing, golf, nutrition, career, etc.) — person subjects are only for facts about the person themselves (identity, location, biography).",
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
+function shouldRunQualityRepair(issues: QualityIssue[]): boolean {
+  return issues.some((issue) => issue.severity === "severe");
+}
+
 function buildExtractionUserPrompt(opts: {
   conversation: ImportedConversation;
   transcript: string;
@@ -324,6 +530,27 @@ function buildRepairUserPrompt(baseUserPrompt: string, invalidOutput: string): s
     "Rewrite the output as strict JSONL entries only.",
     "Do not add explanations, markdown, or code fences.",
     "Each line must be one JSON object that matches the extraction schema.",
+  ].join("\n");
+}
+
+function buildQualityRepairUserPrompt(
+  baseUserPrompt: string,
+  priorOutput: string,
+  issues: QualityIssue[],
+): string {
+  return [
+    baseUserPrompt,
+    "",
+    "## Previous Output To Improve",
+    priorOutput,
+    "",
+    "## Quality Issues To Fix",
+    ...issues.map((issue, index) => `${index + 1}. [${issue.severity}] ${issue.message}`),
+    "",
+    "Rewrite the output as strict JSONL entries only.",
+    "Do not add explanations, markdown, or code fences.",
+    "Each line must be one JSON object that matches the extraction schema.",
+    "Keep subjects specific to the thing discussed and use `question` for uncertain statements.",
   ].join("\n");
 }
 
@@ -414,16 +641,49 @@ export async function extractImportedConversation(
     apiToken: options.apiToken,
   });
 
-  let parsed = parseLlmOutput(firstOutput);
+  let latestOutput = firstOutput;
+  let parsed = parseLlmOutput(latestOutput);
   if (parsed.processableLines > 0 && parsed.parsedEntries.length === 0) {
     const repairedOutput = await runtimeDeps.callModel({
       model: options.model,
       systemPrompt,
-      userPrompt: buildRepairUserPrompt(userPrompt, firstOutput),
+      userPrompt: buildRepairUserPrompt(userPrompt, latestOutput),
       apiBaseUrl: options.apiBaseUrl,
       apiToken: options.apiToken,
     });
-    parsed = parseLlmOutput(repairedOutput);
+    latestOutput = repairedOutput;
+    parsed = parseLlmOutput(latestOutput);
+  }
+
+  if (parsed.parsedEntries.length > 0) {
+    parsed = {
+      ...parsed,
+      parsedEntries: dedupeParsedEntries(parsed.parsedEntries),
+    };
+  }
+
+  const qualityIssues = evaluateQualityIssues({
+    parsedEntries: parsed.parsedEntries,
+    conversation: options.conversation,
+    subjects,
+  });
+
+  if (parsed.parsedEntries.length > 0 && shouldRunQualityRepair(qualityIssues)) {
+    const qualityOutput = await runtimeDeps.callModel({
+      model: options.model,
+      systemPrompt,
+      userPrompt: buildQualityRepairUserPrompt(userPrompt, latestOutput, qualityIssues),
+      apiBaseUrl: options.apiBaseUrl,
+      apiToken: options.apiToken,
+    });
+    const qualityParsed = parseLlmOutput(qualityOutput);
+    if (qualityParsed.parsedEntries.length > 0) {
+      parsed = {
+        ...qualityParsed,
+        parsedEntries: dedupeParsedEntries(qualityParsed.parsedEntries),
+      };
+      latestOutput = qualityOutput;
+    }
   }
 
   if (parsed.processableLines > 0 && parsed.parsedEntries.length === 0) {
@@ -436,7 +696,11 @@ export async function extractImportedConversation(
   for (const parsedEntry of parsed.parsedEntries) {
     const finalized = finalizeEntry(parsedEntry.entry, {
       sessionId: options.sessionId,
-      timestamp: parsedEntry.timestampHint ?? historicalTimestamp,
+      timestamp: resolveEntryTimestampHint(
+        parsedEntry.timestampHint,
+        options.conversation,
+        historicalTimestamp,
+      ),
     });
 
     if (finalized.subject && options.ensureSubjects !== false) {
