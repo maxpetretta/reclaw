@@ -1,118 +1,25 @@
+import { isObject } from "../../lib/guards";
 import type { ImportedConversation, ImportedMessage, ImportedRole } from "../types";
+import {
+  extractText,
+  normalizeRole,
+  readConversationList,
+  readString,
+  toIso,
+} from "./shared";
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+const CLAUDE_ROLES: Record<string, ImportedRole> = {
+  human: "user",
+  user: "user",
+  assistant: "assistant",
+  claude: "assistant",
+  ai: "assistant",
+  model: "assistant",
+  system: "system",
+};
 
-function readString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function parseTimestampMs(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const magnitude = Math.abs(value);
-
-    // Treat >=11-digit unix values as milliseconds and >=10-digit values as seconds.
-    if (magnitude >= 1e11) {
-      return Math.floor(value);
-    }
-
-    if (magnitude >= 1e9) {
-      return Math.floor(value * 1000);
-    }
-  }
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-
-    const numeric = Number(trimmed);
-    if (Number.isFinite(numeric)) {
-      return parseTimestampMs(numeric);
-    }
-
-    const parsed = Date.parse(trimmed);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return undefined;
-}
-
-function toIso(value: unknown, fallbackMs: number): string {
-  return new Date(parseTimestampMs(value) ?? fallbackMs).toISOString();
-}
-
-function extractText(value: unknown): string {
-  if (typeof value === "string") {
-    return value.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  if (Array.isArray(value)) {
-    const parts = value.map((part) => extractText(part)).filter((part) => part.length > 0);
-    return parts.join("\n").trim();
-  }
-
-  if (!isObject(value)) {
-    return "";
-  }
-
-  if (Array.isArray(value.parts)) {
-    const parts = value.parts.map((part) => extractText(part)).filter((part) => part.length > 0);
-    if (parts.length > 0) {
-      return parts.join("\n").trim();
-    }
-  }
-
-  if (Array.isArray(value.content)) {
-    const parts = value.content.map((part) => extractText(part)).filter((part) => part.length > 0);
-    if (parts.length > 0) {
-      return parts.join("\n").trim();
-    }
-  }
-
-  if (typeof value.text === "string") {
-    return value.text.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  if (typeof value.input_text === "string") {
-    return value.input_text.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  if (typeof value.value === "string") {
-    return value.value.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  return "";
-}
-
-function normalizeRole(value: unknown): ImportedRole | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const role = value.trim().toLowerCase();
-  if (role === "human" || role === "user") {
-    return "user";
-  }
-
-  if (role === "assistant" || role === "claude" || role === "ai" || role === "model") {
-    return "assistant";
-  }
-
-  if (role === "system") {
-    return "system";
-  }
-
-  return null;
+function claudeNormalizeRole(value: unknown): ImportedRole | null {
+  return normalizeRole(value, CLAUDE_ROLES);
 }
 
 function readMessages(raw: Record<string, unknown>, fallbackMs: number): ImportedMessage[] {
@@ -130,7 +37,7 @@ function readMessages(raw: Record<string, unknown>, fallbackMs: number): Importe
       continue;
     }
 
-    const role = normalizeRole(
+    const role = claudeNormalizeRole(
       messageRaw.sender ??
         messageRaw.role ??
         (isObject(messageRaw.author) ? messageRaw.author.role : undefined),
@@ -202,26 +109,6 @@ function parseConversation(raw: unknown, index: number): ImportedConversation | 
     updatedAt,
     messages,
   };
-}
-
-function readConversationList(raw: unknown): unknown[] {
-  if (Array.isArray(raw)) {
-    return raw;
-  }
-
-  if (!isObject(raw)) {
-    return [];
-  }
-
-  if (Array.isArray(raw.conversations)) {
-    return raw.conversations;
-  }
-
-  if (Array.isArray(raw.data)) {
-    return raw.data;
-  }
-
-  return [];
 }
 
 export function parseClaudeConversations(raw: unknown): ImportedConversation[] {

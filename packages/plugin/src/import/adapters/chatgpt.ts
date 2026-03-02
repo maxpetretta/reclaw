@@ -1,110 +1,24 @@
+import { isObject } from "../../lib/guards";
 import type { ImportedConversation, ImportedMessage, ImportedRole } from "../types";
+import {
+  extractText,
+  normalizeRole,
+  readConversationList,
+  readString,
+  toIso,
+} from "./shared";
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+const CHATGPT_ROLES: Record<string, ImportedRole> = {
+  user: "user",
+  human: "user",
+  assistant: "assistant",
+  ai: "assistant",
+  model: "assistant",
+  system: "system",
+};
 
-function readString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function parseTimestampMs(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const magnitude = Math.abs(value);
-
-    // Treat >=11-digit unix values as milliseconds and >=10-digit values as seconds.
-    if (magnitude >= 1e11) {
-      return Math.floor(value);
-    }
-
-    if (magnitude >= 1e9) {
-      return Math.floor(value * 1000);
-    }
-  }
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-
-    const numeric = Number(trimmed);
-    if (Number.isFinite(numeric)) {
-      return parseTimestampMs(numeric);
-    }
-
-    const parsed = Date.parse(trimmed);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return undefined;
-}
-
-function toIso(value: unknown, fallbackMs: number): string {
-  const resolved = parseTimestampMs(value) ?? fallbackMs;
-  return new Date(resolved).toISOString();
-}
-
-function extractText(value: unknown): string {
-  if (typeof value === "string") {
-    return value.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  if (Array.isArray(value)) {
-    const parts = value.map((item) => extractText(item)).filter((part) => part.length > 0);
-    return parts.join("\n").trim();
-  }
-
-  if (!isObject(value)) {
-    return "";
-  }
-
-  if (Array.isArray(value.parts)) {
-    const parts = value.parts
-      .map((part) => extractText(part))
-      .filter((part): part is string => part.length > 0);
-    if (parts.length > 0) {
-      return parts.join("\n").trim();
-    }
-  }
-
-  if (typeof value.text === "string") {
-    return value.text.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  if (typeof value.result === "string") {
-    return value.result.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  return "";
-}
-
-function normalizeRole(value: unknown): ImportedRole | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const role = value.trim().toLowerCase();
-  if (role === "user" || role === "human") {
-    return "user";
-  }
-
-  if (role === "assistant" || role === "ai" || role === "model") {
-    return "assistant";
-  }
-
-  if (role === "system") {
-    return "system";
-  }
-
-  return null;
+function chatgptNormalizeRole(value: unknown): ImportedRole | null {
+  return normalizeRole(value, CHATGPT_ROLES);
 }
 
 function extractMessageFromNode(node: Record<string, unknown>, fallbackMs: number): ImportedMessage | null {
@@ -114,7 +28,7 @@ function extractMessageFromNode(node: Record<string, unknown>, fallbackMs: numbe
   }
 
   const author = isObject(message.author) ? message.author : null;
-  const role = normalizeRole(author?.role ?? node.role);
+  const role = chatgptNormalizeRole(author?.role ?? node.role);
   if (!role) {
     return null;
   }
@@ -286,7 +200,7 @@ function parseMessagesFallback(messagesRaw: unknown, fallbackMs: number): Import
       continue;
     }
 
-    const role = normalizeRole(raw.role ?? raw.author);
+    const role = chatgptNormalizeRole(raw.role ?? raw.author);
     if (!role) {
       continue;
     }
@@ -343,25 +257,6 @@ function parseConversation(raw: unknown, index: number): ImportedConversation | 
   };
 }
 
-function readConversationList(raw: unknown): unknown[] {
-  if (Array.isArray(raw)) {
-    return raw;
-  }
-
-  if (!isObject(raw)) {
-    return [];
-  }
-
-  if (Array.isArray(raw.conversations)) {
-    return raw.conversations;
-  }
-
-  if (Array.isArray(raw.data)) {
-    return raw.data;
-  }
-
-  return [];
-}
 
 export function parseChatGptConversations(raw: unknown): ImportedConversation[] {
   const conversations: ImportedConversation[] = [];

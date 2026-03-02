@@ -1,16 +1,27 @@
+import { isObject } from "../../lib/guards";
 import type { ImportedConversation, ImportedMessage, ImportedRole } from "../types";
+import {
+  extractText,
+  normalizeRole,
+  parseTimestampMs,
+  readConversationList,
+  readString,
+  toIso as baseToIso,
+} from "./shared";
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+const GROK_ROLES: Record<string, ImportedRole> = {
+  user: "user",
+  human: "user",
+  prompt: "user",
+  assistant: "assistant",
+  grok: "assistant",
+  ai: "assistant",
+  model: "assistant",
+  system: "system",
+};
 
-function readString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+function grokNormalizeRole(value: unknown): ImportedRole | null {
+  return normalizeRole(value, GROK_ROLES);
 }
 
 function readId(value: unknown): string | undefined {
@@ -33,35 +44,10 @@ function readId(value: unknown): string | undefined {
   return undefined;
 }
 
-function parseTimestampMs(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const magnitude = Math.abs(value);
-
-    // Treat >=11-digit unix values as milliseconds and >=10-digit values as seconds.
-    if (magnitude >= 1e11) {
-      return Math.floor(value);
-    }
-
-    if (magnitude >= 1e9) {
-      return Math.floor(value * 1000);
-    }
-  }
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-
-    const numeric = Number(trimmed);
-    if (Number.isFinite(numeric)) {
-      return parseTimestampMs(numeric);
-    }
-
-    const parsed = Date.parse(trimmed);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
+function parseGrokTimestampMs(value: unknown): number | undefined {
+  const base = parseTimestampMs(value);
+  if (base !== undefined) {
+    return base;
   }
 
   if (!isObject(value)) {
@@ -69,15 +55,15 @@ function parseTimestampMs(value: unknown): number | undefined {
   }
 
   if (Object.hasOwn(value, "$date")) {
-    return parseTimestampMs(value.$date);
+    return parseGrokTimestampMs(value.$date);
   }
 
   if (Object.hasOwn(value, "$numberLong")) {
-    return parseTimestampMs(value.$numberLong);
+    return parseGrokTimestampMs(value.$numberLong);
   }
 
   if (Object.hasOwn(value, "value")) {
-    return parseTimestampMs(value.value);
+    return parseGrokTimestampMs(value.value);
   }
 
   if (typeof value.seconds === "number" && Number.isFinite(value.seconds)) {
@@ -93,67 +79,7 @@ function parseTimestampMs(value: unknown): number | undefined {
 }
 
 function toIso(value: unknown, fallbackMs: number): string {
-  return new Date(parseTimestampMs(value) ?? fallbackMs).toISOString();
-}
-
-function extractText(value: unknown): string {
-  if (typeof value === "string") {
-    return value.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  if (Array.isArray(value)) {
-    const parts = value.map((part) => extractText(part)).filter((part) => part.length > 0);
-    return parts.join("\n").trim();
-  }
-
-  if (!isObject(value)) {
-    return "";
-  }
-
-  if (Array.isArray(value.parts)) {
-    const parts = value.parts.map((part) => extractText(part)).filter((part) => part.length > 0);
-    if (parts.length > 0) {
-      return parts.join("\n").trim();
-    }
-  }
-
-  if (Array.isArray(value.content)) {
-    const parts = value.content.map((part) => extractText(part)).filter((part) => part.length > 0);
-    if (parts.length > 0) {
-      return parts.join("\n").trim();
-    }
-  }
-
-  if (typeof value.text === "string") {
-    return value.text.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  if (typeof value.value === "string") {
-    return value.value.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  return "";
-}
-
-function normalizeRole(value: unknown): ImportedRole | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const role = value.trim().toLowerCase();
-  if (role === "user" || role === "human" || role === "prompt") {
-    return "user";
-  }
-
-  if (role === "assistant" || role === "grok" || role === "ai" || role === "model") {
-    return "assistant";
-  }
-
-  if (role === "system") {
-    return "system";
-  }
-
-  return null;
+  return new Date(parseGrokTimestampMs(value) ?? fallbackMs).toISOString();
 }
 
 function readMessageArray(raw: Record<string, unknown>): unknown[] {
@@ -201,7 +127,7 @@ function readMessages(raw: Record<string, unknown>, fallbackMs: number): Importe
       continue;
     }
 
-    const role = normalizeRole(
+    const role = grokNormalizeRole(
       messageRaw.role ??
         messageRaw.sender ??
         (isObject(messageRaw.author) ? messageRaw.author.role : undefined),
@@ -298,26 +224,6 @@ function parseConversation(raw: unknown, index: number): ImportedConversation | 
     updatedAt,
     messages,
   };
-}
-
-function readConversationList(raw: unknown): unknown[] {
-  if (Array.isArray(raw)) {
-    return raw;
-  }
-
-  if (!isObject(raw)) {
-    return [];
-  }
-
-  if (Array.isArray(raw.conversations)) {
-    return raw.conversations;
-  }
-
-  if (Array.isArray(raw.data)) {
-    return raw.data;
-  }
-
-  return [];
 }
 
 export function parseGrokConversations(raw: unknown): ImportedConversation[] {
