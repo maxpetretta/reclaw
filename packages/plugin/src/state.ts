@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { isEnoent, isObject } from "./lib/guards";
 
 export interface ExtractedSession {
   at: string;
@@ -55,8 +56,18 @@ export interface ImportJobSummaryState {
   imported: number;
   failed: number;
   entriesWritten: number;
+  subjectsCreated: number;
   transcriptsWritten: number;
   dryRun: boolean;
+}
+
+export interface ImportJobProgressState {
+  total: number;
+  completed: number;
+  imported: number;
+  failed: number;
+  entriesWritten: number;
+  subjectsCreated: number;
 }
 
 export interface ImportJobState {
@@ -72,8 +83,10 @@ export interface ImportJobState {
   workspaceDir?: string;
   startedAt?: string;
   finishedAt?: string;
+  stopRequestedAt?: string;
   error?: string;
   summary?: ImportJobSummaryState;
+  progress?: ImportJobProgressState;
   cronJobId?: string;
   cronJobName?: string;
 }
@@ -96,18 +109,6 @@ function createEmptyState(): ZettelclawState {
   };
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isEnoent(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ENOENT"
-  );
-}
 
 const IMPORTED_PLATFORM_SET = new Set(["chatgpt", "claude", "grok", "openclaw"]);
 const IMPORT_JOB_STATUS_SET: ReadonlySet<ImportJobStatus> = new Set([
@@ -117,8 +118,30 @@ const IMPORT_JOB_STATUS_SET: ReadonlySet<ImportJobStatus> = new Set([
   "failed",
 ]);
 
-function isValidTimestamp(value: unknown): value is string {
-  return typeof value === "string" && Number.isFinite(Date.parse(value));
+function readFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readNonNegativeInt(value: unknown): number | undefined {
+  const n = readFiniteNumber(value);
+  return n !== undefined && n >= 0 ? Math.floor(n) : undefined;
+}
+
+function readTimestamp(value: unknown): string | undefined {
+  return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : undefined;
+}
+
+function readTrimmedString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readPositiveInt(value: unknown): number | undefined {
+  const n = readFiniteNumber(value);
+  return n !== undefined && n > 0 ? Math.floor(n) : undefined;
 }
 
 function normalizeImportJobOptions(raw: unknown): ImportJobOptionsState {
@@ -128,45 +151,35 @@ function normalizeImportJobOptions(raw: unknown): ImportJobOptionsState {
 
   const options: ImportJobOptionsState = {};
 
-  if (typeof raw.after === "string" && Number.isFinite(Date.parse(raw.after))) {
-    options.after = raw.after;
-  }
+  const after = readTimestamp(raw.after);
+  if (after !== undefined) options.after = after;
 
-  if (typeof raw.before === "string" && Number.isFinite(Date.parse(raw.before))) {
-    options.before = raw.before;
-  }
+  const before = readTimestamp(raw.before);
+  if (before !== undefined) options.before = before;
 
-  if (typeof raw.minMessages === "number" && Number.isFinite(raw.minMessages) && raw.minMessages > 0) {
-    options.minMessages = Math.floor(raw.minMessages);
-  }
+  const minMessages = readPositiveInt(raw.minMessages);
+  if (minMessages !== undefined) options.minMessages = minMessages;
 
-  if (typeof raw.jobs === "number" && Number.isFinite(raw.jobs) && raw.jobs > 0) {
-    options.jobs = Math.floor(raw.jobs);
-  }
+  const jobs = readPositiveInt(raw.jobs);
+  if (jobs !== undefined) options.jobs = jobs;
 
-  if (typeof raw.model === "string" && raw.model.trim().length > 0) {
-    options.model = raw.model.trim();
-  }
+  const model = readTrimmedString(raw.model);
+  if (model !== undefined) options.model = model;
 
-  if (typeof raw.force === "boolean") {
-    options.force = raw.force;
-  }
+  const force = readBoolean(raw.force);
+  if (force !== undefined) options.force = force;
 
-  if (typeof raw.transcripts === "boolean") {
-    options.transcripts = raw.transcripts;
-  }
+  const transcripts = readBoolean(raw.transcripts);
+  if (transcripts !== undefined) options.transcripts = transcripts;
 
-  if (typeof raw.verbose === "boolean") {
-    options.verbose = raw.verbose;
-  }
+  const verbose = readBoolean(raw.verbose);
+  if (verbose !== undefined) options.verbose = verbose;
 
-  if (typeof raw.keepSource === "boolean") {
-    options.keepSource = raw.keepSource;
-  }
+  const keepSource = readBoolean(raw.keepSource);
+  if (keepSource !== undefined) options.keepSource = keepSource;
 
-  if (typeof raw.backupMemoryDocs === "boolean") {
-    options.backupMemoryDocs = raw.backupMemoryDocs;
-  }
+  const backupMemoryDocs = readBoolean(raw.backupMemoryDocs);
+  if (backupMemoryDocs !== undefined) options.backupMemoryDocs = backupMemoryDocs;
 
   return options;
 }
@@ -203,6 +216,12 @@ function normalizeImportJobSummary(raw: unknown): ImportJobSummaryState | undefi
     return undefined;
   }
 
+  const subjectsCreatedRaw = raw.subjectsCreated;
+  const subjectsCreated =
+    typeof subjectsCreatedRaw === "number" && Number.isFinite(subjectsCreatedRaw) && subjectsCreatedRaw >= 0
+      ? subjectsCreatedRaw
+      : 0;
+
   return {
     platform: raw.platform,
     parsed: raw.parsed,
@@ -214,9 +233,36 @@ function normalizeImportJobSummary(raw: unknown): ImportJobSummaryState | undefi
     imported: raw.imported,
     failed: raw.failed,
     entriesWritten: raw.entriesWritten,
+    subjectsCreated,
     transcriptsWritten: raw.transcriptsWritten,
     dryRun: raw.dryRun,
   };
+}
+
+function normalizeImportJobProgress(raw: unknown): ImportJobProgressState | undefined {
+  if (!isObject(raw)) {
+    return undefined;
+  }
+
+  const total = readNonNegativeInt(raw.total);
+  const completed = readNonNegativeInt(raw.completed);
+  const imported = readNonNegativeInt(raw.imported);
+  const failed = readNonNegativeInt(raw.failed);
+  const entriesWritten = readNonNegativeInt(raw.entriesWritten);
+  const subjectsCreated = readNonNegativeInt(raw.subjectsCreated);
+
+  if (
+    total === undefined ||
+    completed === undefined ||
+    imported === undefined ||
+    failed === undefined ||
+    entriesWritten === undefined ||
+    subjectsCreated === undefined
+  ) {
+    return undefined;
+  }
+
+  return { total, completed, imported, failed, entriesWritten, subjectsCreated };
 }
 
 function parseConversationKey(value: string): { platform: string; conversationId: string } | null {
@@ -258,136 +304,91 @@ function normalizeState(raw: unknown): ZettelclawState {
   const importJobsRaw = isObject(raw.importJobs) ? raw.importJobs : {};
 
   for (const [sessionId, sessionValue] of Object.entries(extractedRaw)) {
-    if (!isObject(sessionValue)) {
-      continue;
-    }
+    if (!isObject(sessionValue)) continue;
 
-    if (
-      typeof sessionValue.at !== "string" ||
-      !Number.isFinite(Date.parse(sessionValue.at)) ||
-      typeof sessionValue.entries !== "number"
-    ) {
-      continue;
-    }
+    const at = readTimestamp(sessionValue.at);
+    const entries = readFiniteNumber(sessionValue.entries);
+    if (at === undefined || entries === undefined) continue;
 
-    extractedSessions[sessionId] = {
-      at: sessionValue.at,
-      entries: sessionValue.entries,
-    };
+    extractedSessions[sessionId] = { at, entries };
   }
 
   for (const [sessionId, sessionValue] of Object.entries(failedRaw)) {
-    if (!isObject(sessionValue)) {
-      continue;
-    }
+    if (!isObject(sessionValue)) continue;
 
-    if (
-      typeof sessionValue.at !== "string" ||
-      !Number.isFinite(Date.parse(sessionValue.at)) ||
-      typeof sessionValue.error !== "string" ||
-      typeof sessionValue.retries !== "number"
-    ) {
-      continue;
-    }
+    const at = readTimestamp(sessionValue.at);
+    if (at === undefined || typeof sessionValue.error !== "string" || typeof sessionValue.retries !== "number") continue;
 
     failedSessions[sessionId] = {
-      at: sessionValue.at,
+      at,
       error: sessionValue.error,
       retries: sessionValue.retries,
     };
   }
 
   for (const [conversationKey, conversationValue] of Object.entries(importedRaw)) {
-    if (!isObject(conversationValue)) {
-      continue;
-    }
+    if (!isObject(conversationValue)) continue;
 
-    const sessionId =
-      typeof conversationValue.sessionId === "string" ? conversationValue.sessionId.trim() : "";
+    const at = readTimestamp(conversationValue.at);
+    const updatedAt = readTimestamp(conversationValue.updatedAt);
+    const sessionId = readTrimmedString(conversationValue.sessionId);
+    const entries = readFiniteNumber(conversationValue.entries);
 
     if (
-      typeof conversationValue.at !== "string" ||
-      !Number.isFinite(Date.parse(conversationValue.at)) ||
-      typeof conversationValue.updatedAt !== "string" ||
-      !Number.isFinite(Date.parse(conversationValue.updatedAt)) ||
-      sessionId.length === 0 ||
-      !hasValidImportedSessionId(conversationKey, sessionId) ||
-      typeof conversationValue.entries !== "number"
+      at === undefined ||
+      updatedAt === undefined ||
+      sessionId === undefined ||
+      entries === undefined ||
+      !hasValidImportedSessionId(conversationKey, sessionId)
     ) {
       continue;
     }
 
+    const title = readTrimmedString(conversationValue.title);
     importedConversations[conversationKey] = {
-      at: conversationValue.at,
-      updatedAt: conversationValue.updatedAt,
+      at,
+      updatedAt,
       sessionId,
-      entries: conversationValue.entries,
-      ...(typeof conversationValue.title === "string" && conversationValue.title.trim().length > 0
-        ? { title: conversationValue.title }
-        : {}),
+      entries,
+      ...(title !== undefined ? { title } : {}),
     };
   }
 
   for (const [entryId, usageValue] of Object.entries(eventUsageRaw)) {
-    if (!isObject(usageValue)) {
-      continue;
-    }
+    if (!isObject(usageValue)) continue;
 
-    const memorySearchCountRaw = usageValue.memorySearchCount;
-    const memorySearchCount =
-      memorySearchCountRaw === undefined ? 0 : memorySearchCountRaw;
+    const memoryGetCount = readNonNegativeInt(usageValue.memoryGetCount);
+    const memorySearchCount = readNonNegativeInt(usageValue.memorySearchCount ?? 0);
+    const citationCount = readNonNegativeInt(usageValue.citationCount);
+    const lastAccessAt = readTimestamp(usageValue.lastAccessAt);
 
     if (
-      typeof usageValue.memoryGetCount !== "number" ||
-      usageValue.memoryGetCount < 0 ||
-      !Number.isFinite(usageValue.memoryGetCount) ||
-      typeof memorySearchCount !== "number" ||
-      memorySearchCount < 0 ||
-      !Number.isFinite(memorySearchCount) ||
-      typeof usageValue.citationCount !== "number" ||
-      usageValue.citationCount < 0 ||
-      !Number.isFinite(usageValue.citationCount) ||
-      typeof usageValue.lastAccessAt !== "string" ||
-      !Number.isFinite(Date.parse(usageValue.lastAccessAt))
+      memoryGetCount === undefined ||
+      memorySearchCount === undefined ||
+      citationCount === undefined ||
+      lastAccessAt === undefined
     ) {
       continue;
     }
 
-    eventUsage[entryId] = {
-      memoryGetCount: usageValue.memoryGetCount,
-      memorySearchCount,
-      citationCount: usageValue.citationCount,
-      lastAccessAt: usageValue.lastAccessAt,
-    };
+    eventUsage[entryId] = { memoryGetCount, memorySearchCount, citationCount, lastAccessAt };
   }
 
   for (const [jobId, jobValue] of Object.entries(importJobsRaw)) {
-    if (!isObject(jobValue)) {
-      continue;
-    }
+    if (!isObject(jobValue)) continue;
 
     const status =
       typeof jobValue.status === "string" && IMPORT_JOB_STATUS_SET.has(jobValue.status as ImportJobStatus)
         ? (jobValue.status as ImportJobStatus)
         : null;
     const platform = isValidPlatform(jobValue.platform) ? jobValue.platform : null;
-    const filePath = typeof jobValue.filePath === "string" ? jobValue.filePath.trim() : "";
-    const createdAt = jobValue.createdAt;
-    const updatedAt = jobValue.updatedAt;
-    const queuedAt = jobValue.queuedAt;
-    const attempts = jobValue.attempts;
+    const filePath = readTrimmedString(jobValue.filePath);
+    const createdAt = readTimestamp(jobValue.createdAt);
+    const updatedAt = readTimestamp(jobValue.updatedAt);
+    const queuedAt = readTimestamp(jobValue.queuedAt);
+    const attempts = readNonNegativeInt(jobValue.attempts);
 
-    if (
-      !status ||
-      !platform ||
-      filePath.length === 0 ||
-      !isValidTimestamp(createdAt) ||
-      !isValidTimestamp(updatedAt) ||
-      !isValidTimestamp(queuedAt) ||
-      typeof attempts !== "number" ||
-      !Number.isFinite(attempts) ||
-      attempts < 0
-    ) {
+    if (!status || !platform || !filePath || !createdAt || !updatedAt || !queuedAt || attempts === undefined) {
       continue;
     }
 
@@ -400,37 +401,35 @@ function normalizeState(raw: unknown): ZettelclawState {
       createdAt,
       updatedAt,
       queuedAt,
-      attempts: Math.floor(attempts),
+      attempts,
     };
 
-    if (typeof jobValue.workspaceDir === "string" && jobValue.workspaceDir.trim().length > 0) {
-      normalized.workspaceDir = jobValue.workspaceDir.trim();
-    }
+    const workspaceDir = readTrimmedString(jobValue.workspaceDir);
+    if (workspaceDir !== undefined) normalized.workspaceDir = workspaceDir;
 
-    if (isValidTimestamp(jobValue.startedAt)) {
-      normalized.startedAt = jobValue.startedAt;
-    }
+    const startedAt = readTimestamp(jobValue.startedAt);
+    if (startedAt !== undefined) normalized.startedAt = startedAt;
 
-    if (isValidTimestamp(jobValue.finishedAt)) {
-      normalized.finishedAt = jobValue.finishedAt;
-    }
+    const finishedAt = readTimestamp(jobValue.finishedAt);
+    if (finishedAt !== undefined) normalized.finishedAt = finishedAt;
 
-    if (typeof jobValue.error === "string" && jobValue.error.trim().length > 0) {
-      normalized.error = jobValue.error;
-    }
+    const stopRequestedAt = readTimestamp(jobValue.stopRequestedAt);
+    if (stopRequestedAt !== undefined) normalized.stopRequestedAt = stopRequestedAt;
+
+    const error = readTrimmedString(jobValue.error);
+    if (error !== undefined) normalized.error = error;
 
     const summary = normalizeImportJobSummary(jobValue.summary);
-    if (summary) {
-      normalized.summary = summary;
-    }
+    if (summary) normalized.summary = summary;
 
-    if (typeof jobValue.cronJobId === "string" && jobValue.cronJobId.trim().length > 0) {
-      normalized.cronJobId = jobValue.cronJobId.trim();
-    }
+    const progress = normalizeImportJobProgress(jobValue.progress);
+    if (progress) normalized.progress = progress;
 
-    if (typeof jobValue.cronJobName === "string" && jobValue.cronJobName.trim().length > 0) {
-      normalized.cronJobName = jobValue.cronJobName.trim();
-    }
+    const cronJobId = readTrimmedString(jobValue.cronJobId);
+    if (cronJobId !== undefined) normalized.cronJobId = cronJobId;
+
+    const cronJobName = readTrimmedString(jobValue.cronJobName);
+    if (cronJobName !== undefined) normalized.cronJobName = cronJobName;
 
     importJobs[jobId] = normalized;
   }
