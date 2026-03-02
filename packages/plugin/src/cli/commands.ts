@@ -213,8 +213,12 @@ export async function removeGeneratedBriefingBlock(memoryMdPath: string): Promis
   await writeFile(memoryMdPath, next, "utf8");
 }
 
-const BRIEFING_CRON_NAME = "zettelclaw-briefing";
-const LEGACY_CRON_NAMES = ["zettelclaw-reset", "zettelclaw-nightly"] as const;
+const BRIEFING_CRON_NAME = "zettelclaw-memory-snapshot";
+const LEGACY_CRON_NAMES = [
+  "zettelclaw-briefing",
+  "zettelclaw-reset",
+  "zettelclaw-nightly",
+] as const;
 
 function buildBriefingCronJob(config: PluginConfig, existing?: Record<string, unknown>): Record<string, unknown> {
   const now = Date.now();
@@ -243,7 +247,7 @@ function buildBriefingCronJob(config: PluginConfig, existing?: Record<string, un
     wakeMode: "now",
     payload: {
       kind: "agentTurn",
-      message: "Run: openclaw zettelclaw briefing generate",
+      message: "Run: openclaw zettelclaw snapshot generate",
       timeoutSeconds: 300,
     },
     delivery: {
@@ -286,7 +290,7 @@ async function ensureBriefingCron(paths: InitPaths, config: PluginConfig): Promi
 }
 
 async function removeBriefingCron(paths: InitPaths): Promise<void> {
-  await removeCronJobsByName(paths.cronJobsPath, [BRIEFING_CRON_NAME]);
+  await removeCronJobsByName(paths.cronJobsPath, [BRIEFING_CRON_NAME, ...LEGACY_CRON_NAMES]);
 }
 
 export async function runInit(
@@ -461,7 +465,7 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
         issues.push("missing generated memory snapshot markers");
       }
       if (!hasHandoffMarkers) {
-        issues.push("missing last handoff markers");
+        issues.push("missing zettelclaw session handoff markers");
       }
       if (!hasNoticeMarkers) {
         issues.push("missing zettelclaw memory notice");

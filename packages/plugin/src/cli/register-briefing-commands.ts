@@ -1,9 +1,81 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { generateBriefing } from "../briefing/generate";
 import type { PluginConfig } from "../config";
-import { isObject } from "../lib/guards";
+import { isEnoent, isObject } from "../lib/guards";
+import { getLastHandoff } from "../log/query";
+import { applyLastHandoffBlock } from "../memory/handoff";
 import { resolvePaths } from "./paths";
 import type { CommandLike } from "./command-like";
+
+interface SnapshotGenerateParams {
+  config: PluginConfig;
+  api: OpenClawPluginApi;
+  workspaceDir?: string;
+}
+
+interface SessionHandoffRefreshParams {
+  config: PluginConfig;
+  workspaceDir?: string;
+}
+
+interface SessionHandoffRefreshResult {
+  updated: boolean;
+  memoryMdPath: string;
+}
+
+export async function runSnapshotGenerate(params: SnapshotGenerateParams): Promise<string> {
+  const paths = resolvePaths(params.config, params.workspaceDir);
+  const apiToken =
+    isObject(params.api.config) &&
+    isObject(params.api.config.gateway) &&
+    isObject(params.api.config.gateway.auth) &&
+    typeof params.api.config.gateway.auth.token === "string" &&
+    params.api.config.gateway.auth.token.trim().length > 0
+      ? params.api.config.gateway.auth.token
+      : undefined;
+
+  await generateBriefing({
+    logPath: paths.logPath,
+    memoryMdPath: paths.memoryMdPath,
+    config: params.config,
+    apiToken,
+  });
+
+  return paths.memoryMdPath;
+}
+
+export async function runSessionHandoffRefresh(
+  params: SessionHandoffRefreshParams,
+): Promise<SessionHandoffRefreshResult> {
+  const paths = resolvePaths(params.config, params.workspaceDir);
+  const latestHandoff = await getLastHandoff(paths.logPath);
+  if (!latestHandoff) {
+    return {
+      updated: false,
+      memoryMdPath: paths.memoryMdPath,
+    };
+  }
+
+  let memoryContent = "";
+  try {
+    memoryContent = await readFile(paths.memoryMdPath, "utf8");
+  } catch (error) {
+    if (!isEnoent(error)) {
+      throw error;
+    }
+  }
+
+  const updatedMemory = applyLastHandoffBlock(memoryContent, latestHandoff);
+  await mkdir(dirname(paths.memoryMdPath), { recursive: true });
+  await writeFile(paths.memoryMdPath, updatedMemory, "utf8");
+
+  return {
+    updated: true,
+    memoryMdPath: paths.memoryMdPath,
+  };
+}
 
 export function registerBriefingCommands(
   zettelclaw: CommandLike,
@@ -13,36 +85,39 @@ export function registerBriefingCommands(
     workspaceDir?: string;
   },
 ): void {
-  const runSnapshotGenerate = async (): Promise<void> => {
-    const paths = resolvePaths(params.config, params.workspaceDir);
-    const apiToken =
-      isObject(params.api.config) &&
-      isObject(params.api.config.gateway) &&
-      isObject(params.api.config.gateway.auth) &&
-      typeof params.api.config.gateway.auth.token === "string" &&
-      params.api.config.gateway.auth.token.trim().length > 0
-        ? params.api.config.gateway.auth.token
-        : undefined;
-
-    await generateBriefing({
-      logPath: paths.logPath,
-      memoryMdPath: paths.memoryMdPath,
+  const runSnapshotGenerateAction = async (): Promise<void> => {
+    const memoryMdPath = await runSnapshotGenerate({
       config: params.config,
-      apiToken,
+      api: params.api,
+      workspaceDir: params.workspaceDir,
     });
 
-    console.log(`Memory snapshot updated: ${paths.memoryMdPath}`);
+    console.log(`Memory snapshot updated: ${memoryMdPath}`);
   };
 
-  const briefing = zettelclaw.command("briefing").description("Memory snapshot generation helpers");
-  briefing
-    .command("generate")
-    .description("Generate and write MEMORY.md memory snapshot block")
-    .action(runSnapshotGenerate);
+  const runHandoffRefresh = async (): Promise<void> => {
+    const result = await runSessionHandoffRefresh({
+      config: params.config,
+      workspaceDir: params.workspaceDir,
+    });
+
+    if (result.updated) {
+      console.log(`Session handoff refreshed: ${result.memoryMdPath}`);
+      return;
+    }
+
+    console.log(`No handoff entries found in log: ${result.memoryMdPath} unchanged`);
+  };
 
   const snapshot = zettelclaw.command("snapshot").description("Memory snapshot generation helpers");
   snapshot
     .command("generate")
     .description("Generate and write MEMORY.md memory snapshot block")
-    .action(runSnapshotGenerate);
+    .action(runSnapshotGenerateAction);
+
+  const handoff = zettelclaw.command("handoff").description("Zettelclaw session handoff helpers");
+  handoff
+    .command("refresh")
+    .description("Force-refresh MEMORY.md session handoff block from latest handoff event")
+    .action(runHandoffRefresh);
 }
