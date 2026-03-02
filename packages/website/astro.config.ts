@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite"
 import { defineConfig } from "astro/config"
 
 export default defineConfig({
-  site: "https://reclaw.com",
+  site: "https://reclaw.sh",
   integrations: [sitemap()],
   vite: {
     plugins: [tailwindcss()],

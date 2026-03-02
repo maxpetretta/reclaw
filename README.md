@@ -104,7 +104,7 @@ openclaw reclaw import resume     # resume an import job
 |---|---|
 | [`reclaw`](packages/plugin) | OpenClaw memory slot plugin (npm) |
 | [`@reclaw/skill`](packages/skill) | Agent skill instructions (ClawHub) |
-| [`@reclaw/website`](packages/website) | Landing page — [reclaw.com](https://reclaw.com) |
+| [`@reclaw/website`](packages/website) | Landing page — [reclaw.sh](https://reclaw.sh) |
 
 ## Architecture
 
