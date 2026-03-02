@@ -1,3 +1,4 @@
+import { log as clackLog } from "@clack/prompts";
 import type { PluginConfig } from "../config";
 import { ensureSubject, readRegistry, renameSubject, writeRegistry } from "../subjects/registry";
 import { resolvePaths } from "./paths";
@@ -30,8 +31,10 @@ export function registerSubjectCommands(
         return;
       }
 
+      const slugWidth = Math.max(...items.map(([slug]) => slug.length));
+      const displayWidth = Math.max(...items.map(([, subject]) => subject.display.length));
       for (const [slug, subject] of items) {
-        console.log(`${slug}\t${subject.display}\t(${subject.type})`);
+        console.log(`${slug.padEnd(slugWidth)}  ${subject.display.padEnd(displayWidth)}  ${subject.type}`);
       }
     });
 
@@ -64,7 +67,7 @@ export function registerSubjectCommands(
         }
       }
 
-      console.log(`Added subject: ${normalizedSlug}`);
+      clackLog.success(`Added subject: ${normalizedSlug} (${inferredType})`);
     });
 
   subjects
@@ -82,6 +85,6 @@ export function registerSubjectCommands(
 
       const paths = resolvePaths(params.config, params.workspaceDir);
       await renameSubject(paths.subjectsPath, paths.logPath, oldSlug.trim(), newSlug.trim());
-      console.log(`Renamed subject: ${oldSlug.trim()} -> ${newSlug.trim()}`);
+      clackLog.success(`Renamed subject: ${oldSlug.trim()} → ${newSlug.trim()}`);
     });
 }
