@@ -1,65 +1,13 @@
 import { access, readdir, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveOpenClawHome } from "./runtime-env";
+import { extractTextContent } from "./text";
 
 export interface TranscriptMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
-}
-
-function resolveOpenClawHome(): string {
-  const override = process.env.OPENCLAW_HOME?.trim();
-  if (override) {
-    return override;
-  }
-
-  return join(homedir(), ".openclaw");
-}
-
-function normalizeText(value: string): string {
-  return value.replaceAll(/\s+/gu, " ").trim();
-}
-
-function extractTextFromContent(content: unknown): string {
-  if (typeof content === "string") {
-    return normalizeText(content);
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  const parts: string[] = [];
-
-  for (const item of content) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-
-    const block = item as Record<string, unknown>;
-    const type = typeof block.type === "string" ? block.type : "";
-    const textValue = block.text;
-    const inputTextValue = block.input_text;
-
-    if ((type === "text" || type === "input_text") && typeof textValue === "string") {
-      const normalized = normalizeText(textValue);
-      if (normalized) {
-        parts.push(normalized);
-      }
-      continue;
-    }
-
-    if (typeof inputTextValue === "string") {
-      const normalized = normalizeText(inputTextValue);
-      if (normalized) {
-        parts.push(normalized);
-      }
-    }
-  }
-
-  return parts.join("\n");
 }
 
 function isUserAssistantRole(value: unknown): value is "user" | "assistant" {
@@ -93,7 +41,7 @@ function parseMessageLine(line: string): TranscriptMessage | null {
     return null;
   }
 
-  const content = extractTextFromContent(message.content);
+  const content = extractTextContent(message.content);
   if (!content) {
     return null;
   }
@@ -121,11 +69,33 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-function isResetVariant(name: string, sessionId: string): boolean {
+export function isResetVariantSessionFile(name: string, sessionId: string): boolean {
   return (
     (name.startsWith(`${sessionId}.reset.`) && name.endsWith(".jsonl")) ||
     name.startsWith(`${sessionId}.jsonl.reset.`)
   );
+}
+
+export function parseSessionIdFromTranscriptFileName(fileName: string): string | null {
+  if (!fileName.endsWith(".jsonl") && !fileName.includes(".jsonl.reset.")) {
+    return null;
+  }
+
+  const jsonlResetIndex = fileName.indexOf(".jsonl.reset.");
+  if (jsonlResetIndex > 0) {
+    return fileName.slice(0, jsonlResetIndex);
+  }
+
+  const resetIndex = fileName.indexOf(".reset.");
+  if (resetIndex > 0 && fileName.endsWith(".jsonl")) {
+    return fileName.slice(0, resetIndex);
+  }
+
+  if (fileName.endsWith(".jsonl") && !fileName.includes(".reset.")) {
+    return fileName.slice(0, -6);
+  }
+
+  return null;
 }
 
 export async function readTranscript(sessionFile: string): Promise<TranscriptMessage[]> {
@@ -152,7 +122,19 @@ export async function findTranscriptFile(agentId: string, sessionId: string): Pr
     return null;
   }
 
-  const sessionsDir = join(resolveOpenClawHome(), "agents", agentId, "sessions");
+  return await findTranscriptFileForHome(resolveOpenClawHome(), agentId, sessionId);
+}
+
+export async function findTranscriptFileForHome(
+  openClawHome: string,
+  agentId: string,
+  sessionId: string,
+): Promise<string | null> {
+  if (!openClawHome || !agentId || !sessionId) {
+    return null;
+  }
+
+  const sessionsDir = join(openClawHome, "agents", agentId, "sessions");
   const primaryPath = join(sessionsDir, `${sessionId}.jsonl`);
 
   if (await pathExists(primaryPath)) {
@@ -166,7 +148,7 @@ export async function findTranscriptFile(agentId: string, sessionId: string): Pr
     return null;
   }
 
-  const candidates = files.filter((name) => isResetVariant(name, sessionId));
+  const candidates = files.filter((name) => isResetVariantSessionFile(name, sessionId));
   if (candidates.length === 0) {
     return null;
   }

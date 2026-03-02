@@ -2,9 +2,10 @@ import { join } from "node:path";
 import type { AnyAgentTool, OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { isObject } from "../lib/guards";
-import { queryLog } from "../log/query";
+import { queryById, queryLog } from "../log/query";
 import { findTranscriptFile, readTranscript } from "../lib/transcript";
 import { incrementEventUsage } from "../state";
+import { textResult } from "./shared";
 
 interface MemoryGetParams {
   path?: string;
@@ -13,7 +14,8 @@ interface MemoryGetParams {
 }
 
 interface MemoryGetDeps {
-  queryLog: typeof queryLog;
+  queryById: typeof queryById;
+  queryLog?: typeof queryLog;
   findTranscriptFile: typeof findTranscriptFile;
   readTranscript: typeof readTranscript;
   incrementEventUsage: typeof incrementEventUsage;
@@ -22,19 +24,12 @@ interface MemoryGetDeps {
 const ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
 const DEFAULT_DEPS: MemoryGetDeps = {
+  queryById,
   queryLog,
   findTranscriptFile,
   readTranscript,
   incrementEventUsage,
 };
-
-
-function textResult(text: string, details?: unknown): { content: Array<{ type: string; text: string }>; details?: unknown } {
-  return {
-    content: [{ type: "text", text }],
-    ...(details === undefined ? {} : { details }),
-  };
-}
 
 function buildParametersSchema(baseParameters: unknown): Record<string, unknown> {
   if (!isObject(baseParameters)) {
@@ -84,6 +79,12 @@ export function createWrappedMemoryGetTool(
     ...DEFAULT_DEPS,
     ...deps,
   };
+  if (!deps.queryById && deps.queryLog) {
+    resolvedDeps.queryById = async (logPath, id) => {
+      const entries = await deps.queryLog!(logPath, {});
+      return entries.find((entry) => entry.id === id);
+    };
+  }
 
   const builtin = api.runtime.tools.createMemoryGetTool({
     config: ctx.config,
@@ -118,8 +119,7 @@ export function createWrappedMemoryGetTool(
       }
 
       if (ID_PATTERN.test(path)) {
-        const entries = await resolvedDeps.queryLog(logPath, {});
-        const entry = entries.find((candidate) => candidate.id === path);
+        const entry = await resolvedDeps.queryById(logPath, path);
 
         if (!entry) {
           return textResult(`Entry not found: ${path}`);

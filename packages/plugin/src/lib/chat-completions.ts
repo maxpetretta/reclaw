@@ -1,3 +1,5 @@
+import { extractTextContent } from "./text";
+
 export interface GatewayChatCompletionOptions {
   baseUrl: string;
   model: string;
@@ -8,42 +10,6 @@ export interface GatewayChatCompletionOptions {
 }
 
 const CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
-
-function extractTextFromContentParts(content: unknown): string {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  const textParts: string[] = [];
-  for (const part of content) {
-    if (!part || typeof part !== "object") {
-      continue;
-    }
-
-    const record = part as Record<string, unknown>;
-    const type = typeof record.type === "string" ? record.type : "";
-
-    if ((type === "text" || type === "input_text" || type === "output_text") && typeof record.text === "string") {
-      textParts.push(record.text);
-      continue;
-    }
-
-    if (typeof record.output_text === "string") {
-      textParts.push(record.output_text);
-      continue;
-    }
-
-    if (typeof record.input_text === "string") {
-      textParts.push(record.input_text);
-    }
-  }
-
-  return textParts.join("\n");
-}
 
 function extractCompletionText(raw: unknown): string {
   if (!raw || typeof raw !== "object") {
@@ -67,7 +33,7 @@ function extractCompletionText(raw: unknown): string {
   }
 
   const content = (message as Record<string, unknown>).content;
-  const text = extractTextFromContentParts(content).trim();
+  const text = extractTextContent(content).trim();
   if (!text) {
     throw new Error("LLM response did not include text content");
   }

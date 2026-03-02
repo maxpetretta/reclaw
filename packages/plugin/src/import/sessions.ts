@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { isObject } from "../lib/guards";
+import { resolveOpenClawHome } from "../lib/runtime-env";
 import type { ImportedConversation } from "./types";
 
 const OPENCLAW_SESSION_VERSION = 3;
@@ -30,20 +30,6 @@ export interface WriteImportedSessionResult {
   sessionFile: string;
   sessionsPath: string;
   sessionKey: string;
-}
-
-
-function resolveOpenClawHome(openClawHome?: string): string {
-  if (openClawHome && openClawHome.trim()) {
-    return openClawHome.trim();
-  }
-
-  const envOverride = process.env.OPENCLAW_HOME?.trim();
-  if (envOverride) {
-    return envOverride;
-  }
-
-  return join(homedir(), ".openclaw");
 }
 
 function resolveUpdatedAtMs(value: string): number {

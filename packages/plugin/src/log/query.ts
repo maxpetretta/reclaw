@@ -1,4 +1,4 @@
-import { open } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { runPluginCommandWithTimeout } from "openclaw/plugin-sdk";
 import { isEnoent } from "../lib/guards";
 import { readLog, type EntryType, type LogEntry, validateEntry } from "./schema";
@@ -221,6 +221,35 @@ function parseLine(line: string): LogEntry | undefined {
 export async function queryLog(logPath: string, filter: LogQueryFilter): Promise<LogEntry[]> {
   const allEntries = await readLog(logPath);
   return applyFilterAndResolution(allEntries, null, filter);
+}
+
+export async function queryById(logPath: string, id: string): Promise<LogEntry | undefined> {
+  if (!id.trim()) {
+    return undefined;
+  }
+
+  let content: string;
+  try {
+    content = await readFile(logPath, "utf8");
+  } catch (error) {
+    if (isEnoent(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+
+  for (const line of content.split("\n")) {
+    const entry = parseLine(line);
+    if (!entry) {
+      continue;
+    }
+
+    if (entry.id === id) {
+      return entry;
+    }
+  }
+
+  return undefined;
 }
 
 export async function queryBySubjects(logPath: string, subjects: string[]): Promise<LogEntry[]> {

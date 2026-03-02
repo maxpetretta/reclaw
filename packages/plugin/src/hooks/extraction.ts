@@ -1,23 +1,32 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
-import { escapeRegex, isObject } from "../lib/guards";
+import {
+  DEFAULT_EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
+  findMentionedSubjects,
+  parseExtractionJsonl,
+  type ParsedExtractionEntry,
+} from "../extraction/shared";
+import { isObject } from "../lib/guards";
+import { extractTextContent } from "../lib/text";
 import { queryExtractionContext, queryLog } from "../log/query";
 import {
   appendEntry,
   finalizeEntry,
-  GENERAL_SUBJECT_SLUG,
-  parseSubjectType,
-  validateLlmOutput,
   type LogEntry,
 } from "../log/schema";
 import { extractFromTranscript } from "../lib/llm";
+import {
+  readGatewayToken,
+  resolveApiBaseUrlFromConfig,
+  resolveOpenClawHome,
+} from "../lib/runtime-env";
 import { applyLastHandoffBlock } from "../memory/handoff";
 import {
   findTranscriptFile,
   formatTranscript,
+  parseSessionIdFromTranscriptFileName,
   readTranscript,
   type TranscriptMessage,
 } from "../lib/transcript";
@@ -33,7 +42,6 @@ import {
 import {
   readRegistry,
   upsertSubjectFromExtraction,
-  type SubjectRegistry,
 } from "../subjects/registry";
 
 interface ZettelclawPaths {
@@ -78,41 +86,6 @@ const DEFAULT_DEPS: ExtractionHookDeps = {
   },
 };
 
-const EXTRACTION_CONTEXT_MAX_PER_SUBJECT = 50;
-
-
-function findMentionedSubjects(transcript: string, subjects: SubjectRegistry): string[] {
-  if (!transcript.trim()) {
-    return [];
-  }
-
-  const transcriptLower = transcript.toLowerCase();
-  const slugs = Object.keys(subjects);
-  const matched: string[] = [];
-
-  for (const slug of slugs) {
-    const normalizedSlug = slug.trim().toLowerCase();
-    if (!normalizedSlug) {
-      continue;
-    }
-
-    const pattern = new RegExp(`(^|[^a-z0-9-])${escapeRegex(normalizedSlug)}([^a-z0-9-]|$)`, "u");
-    if (pattern.test(transcriptLower)) {
-      matched.push(slug);
-    }
-  }
-
-  return matched;
-}
-
-function readSubjectTypeHint(raw: unknown): string | undefined {
-  if (!isObject(raw)) {
-    return undefined;
-  }
-
-  return parseSubjectType(raw.subjectType ?? raw.subject_type);
-}
-
 function readWorkspaceDir(ctx: unknown): string | undefined {
   if (!isObject(ctx)) {
     return undefined;
@@ -138,75 +111,12 @@ function resolveMemoryMdPath(
   return join(process.cwd(), "MEMORY.md");
 }
 
-function stripSubjectTypeHint(raw: unknown): unknown {
-  if (!isObject(raw)) {
-    return raw;
-  }
-
-  const candidate = { ...raw };
-  delete candidate.subjectType;
-  delete candidate.subject_type;
-  return candidate;
-}
-
-function applyRequiredSubjectFallback(raw: unknown): unknown {
-  if (!isObject(raw)) {
-    return raw;
-  }
-
-  const candidate: Record<string, unknown> = { ...raw };
-  const type = typeof candidate.type === "string" ? candidate.type : undefined;
-  const subject = typeof candidate.subject === "string" ? candidate.subject.trim() : "";
-
-  if (type !== "handoff" && subject.length === 0) {
-    candidate.subject = GENERAL_SUBJECT_SLUG;
-    return candidate;
-  }
-
-  if (subject.length > 0) {
-    candidate.subject = subject;
-  }
-
-  return candidate;
-}
-
 function normalizeError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
 
   return String(error);
-}
-
-function resolveOpenClawHome(): string {
-  const override = process.env.OPENCLAW_HOME?.trim();
-  if (override) {
-    return override;
-  }
-
-  return join(homedir(), ".openclaw");
-}
-
-function parseSessionIdFromFileName(fileName: string): string | null {
-  if (!fileName.endsWith(".jsonl") && !fileName.includes(".jsonl.reset.")) {
-    return null;
-  }
-
-  const jsonlResetIndex = fileName.indexOf(".jsonl.reset.");
-  if (jsonlResetIndex > 0) {
-    return fileName.slice(0, jsonlResetIndex);
-  }
-
-  const resetIndex = fileName.indexOf(".reset.");
-  if (resetIndex > 0 && fileName.endsWith(".jsonl")) {
-    return fileName.slice(0, resetIndex);
-  }
-
-  if (fileName.endsWith(".jsonl") && !fileName.includes(".reset.")) {
-    return fileName.slice(0, -6);
-  }
-
-  return null;
 }
 
 function parseSessionStoreCandidates(
@@ -295,7 +205,7 @@ export async function listSessionCandidates(
     }
 
     for (const fileName of files) {
-      const sessionId = parseSessionIdFromFileName(fileName);
+      const sessionId = parseSessionIdFromTranscriptFileName(fileName);
       if (!sessionId) {
         continue;
       }
@@ -437,13 +347,6 @@ function hasUserMessage(messages: TranscriptMessage[]): boolean {
   return messages.some((message) => message.role === "user");
 }
 
-type LlmEntry = Omit<LogEntry, "id" | "timestamp" | "session">;
-
-interface ParsedLlmEntry {
-  entry: LlmEntry;
-  subjectTypeHint?: string;
-}
-
 const EVENT_ID_LENGTH = 12;
 const TRANSCRIPT_EVENT_ID_PATTERN = /\[([A-Za-z0-9_-]{12})\]/gu;
 
@@ -470,77 +373,6 @@ function extractReferencedEventIds(transcript: string): string[] {
   }
 
   return ids;
-}
-
-function readGatewayPort(config: unknown): number | null {
-  if (!isObject(config)) {
-    return null;
-  }
-
-  const gateway = config.gateway;
-  if (!isObject(gateway)) {
-    return null;
-  }
-
-  return typeof gateway.port === "number" && Number.isFinite(gateway.port) ? gateway.port : null;
-}
-
-function readGatewayToken(config: unknown): string | undefined {
-  if (!isObject(config)) {
-    return undefined;
-  }
-
-  const gateway = config.gateway;
-  if (!isObject(gateway)) {
-    return undefined;
-  }
-
-  const auth = gateway.auth;
-  if (!isObject(auth)) {
-    return undefined;
-  }
-
-  return typeof auth.token === "string" && auth.token.trim().length > 0 ? auth.token : undefined;
-}
-
-function resolveApiBaseUrl(config: unknown, portOverride?: number): string {
-  const port = portOverride ?? readGatewayPort(config) ?? 18789;
-  return `http://127.0.0.1:${port}`;
-}
-
-function extractTextContent(content: unknown): string {
-  if (typeof content === "string") {
-    return content.replaceAll(/\s+/gu, " ").trim();
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  const parts: string[] = [];
-  for (const item of content) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-
-    const record = item as Record<string, unknown>;
-    if ((record.type === "text" || record.type === "input_text") && typeof record.text === "string") {
-      const normalized = record.text.replaceAll(/\s+/gu, " ").trim();
-      if (normalized) {
-        parts.push(normalized);
-      }
-      continue;
-    }
-
-    if (typeof record.input_text === "string") {
-      const normalized = record.input_text.replaceAll(/\s+/gu, " ").trim();
-      if (normalized) {
-        parts.push(normalized);
-      }
-    }
-  }
-
-  return parts.join("\n");
 }
 
 function extractBeforeResetMessages(rawMessages: unknown[] | undefined): TranscriptMessage[] {
@@ -675,7 +507,7 @@ async function runExtractionPipeline(params: {
     const subjects = await readRegistry(params.paths.subjectsPath);
     const transcriptSubjects = findMentionedSubjects(transcript, subjects);
     const existingEntries = await queryExtractionContext(params.paths.logPath, transcriptSubjects, {
-      maxPerSubject: EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
+      maxPerSubject: DEFAULT_EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
     });
     const rawOutput = await params.deps.extractFromTranscript({
       transcript,
@@ -687,42 +519,11 @@ async function runExtractionPipeline(params: {
     });
 
     let appendedCount = 0;
-    let nonEmptyLines = 0;
-    let invalidLineCount = 0;
     const appendedEntries: Array<ReturnType<typeof finalizeEntry>> = [];
-    const parsedEntries: ParsedLlmEntry[] = [];
-    const lines = rawOutput.split("\n");
+    const parsed = parseExtractionJsonl(rawOutput);
+    const parsedEntries: ParsedExtractionEntry[] = parsed.entries;
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-      nonEmptyLines += 1;
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch {
-        invalidLineCount += 1;
-        continue;
-      }
-
-      const subjectTypeHint = readSubjectTypeHint(parsed);
-      const normalizedCandidate = applyRequiredSubjectFallback(stripSubjectTypeHint(parsed));
-      const validation = validateLlmOutput(normalizedCandidate);
-      if (!validation.ok) {
-        invalidLineCount += 1;
-        continue;
-      }
-
-      parsedEntries.push({
-        entry: validation.entry,
-        ...(subjectTypeHint ? { subjectTypeHint } : {}),
-      });
-    }
-
-    if (nonEmptyLines > 0 && parsedEntries.length === 0) {
+    if (parsed.nonEmptyLines > 0 && parsedEntries.length === 0) {
       throw new Error("extraction model returned non-empty output but no valid entries");
     }
 
@@ -737,9 +538,9 @@ async function runExtractionPipeline(params: {
       appendedCount += 1;
     }
 
-    if (invalidLineCount > 0) {
+    if (parsed.invalidLineCount > 0) {
       params.logger.warn(
-        `zettelclaw extraction for ${params.sessionId}: ignored ${invalidLineCount} invalid entry line(s)`,
+        `zettelclaw extraction for ${params.sessionId}: ignored ${parsed.invalidLineCount} invalid entry line(s)`,
       );
     }
 
@@ -814,7 +615,7 @@ export function registerExtractionHooks(
       config,
       deps: runtimeDeps,
       logger: api.logger,
-      apiBaseUrl: resolveApiBaseUrl(api.config),
+      apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
       apiToken,
     });
   });
@@ -844,7 +645,7 @@ export function registerExtractionHooks(
       config,
       deps: runtimeDeps,
       logger: api.logger,
-      apiBaseUrl: resolveApiBaseUrl(api.config),
+      apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
       apiToken,
     });
   });
@@ -885,7 +686,7 @@ export function registerExtractionHooks(
         config,
         deps: runtimeDeps,
         logger: api.logger,
-        apiBaseUrl: resolveApiBaseUrl(api.config, event.port),
+        apiBaseUrl: resolveApiBaseUrlFromConfig(api.config, event.port),
         apiToken,
       });
     }

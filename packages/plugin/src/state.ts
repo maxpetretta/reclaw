@@ -99,7 +99,7 @@ export interface ZettelclawState {
   importJobs: Record<string, ImportJobState>;
 }
 
-function createEmptyState(): ZettelclawState {
+export function createEmptyState(): ZettelclawState {
   return {
     extractedSessions: {},
     failedSessions: {},
@@ -265,25 +265,22 @@ function normalizeImportJobProgress(raw: unknown): ImportJobProgressState | unde
   return { total, completed, imported, failed, entriesWritten, subjectsCreated };
 }
 
-function parseConversationKey(value: string): { platform: string; conversationId: string } | null {
-  const delimiterIndex = value.indexOf(":");
-  if (delimiterIndex <= 0 || delimiterIndex >= value.length - 1) {
-    return null;
+function normalizeRecord<T>(
+  raw: unknown,
+  parse: (value: unknown, key: string) => T | undefined,
+): Record<string, T> {
+  if (!isObject(raw)) {
+    return {};
   }
 
-  return {
-    platform: value.slice(0, delimiterIndex),
-    conversationId: value.slice(delimiterIndex + 1),
-  };
-}
-
-function hasValidImportedSessionId(conversationKey: string, sessionId: string): boolean {
-  const parsedKey = parseConversationKey(conversationKey);
-  if (!parsedKey || !IMPORTED_PLATFORM_SET.has(parsedKey.platform)) {
-    return false;
+  const normalized: Record<string, T> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const parsed = parse(value, key);
+    if (parsed !== undefined) {
+      normalized[key] = parsed;
+    }
   }
-
-  return sessionId === `reclaw:${parsedKey.platform}:${parsedKey.conversationId}`;
+  return normalized;
 }
 
 function normalizeState(raw: unknown): ZettelclawState {
@@ -291,43 +288,41 @@ function normalizeState(raw: unknown): ZettelclawState {
     return createEmptyState();
   }
 
-  const extractedSessions: Record<string, ExtractedSession> = {};
-  const failedSessions: Record<string, FailedSession> = {};
-  const importedConversations: Record<string, ImportedConversationState> = {};
-  const eventUsage: Record<string, EventUsageState> = {};
-  const importJobs: Record<string, ImportJobState> = {};
-
-  const extractedRaw = isObject(raw.extractedSessions) ? raw.extractedSessions : {};
-  const failedRaw = isObject(raw.failedSessions) ? raw.failedSessions : {};
-  const importedRaw = isObject(raw.importedConversations) ? raw.importedConversations : {};
-  const eventUsageRaw = isObject(raw.eventUsage) ? raw.eventUsage : {};
-  const importJobsRaw = isObject(raw.importJobs) ? raw.importJobs : {};
-
-  for (const [sessionId, sessionValue] of Object.entries(extractedRaw)) {
-    if (!isObject(sessionValue)) continue;
+  const extractedSessions = normalizeRecord(raw.extractedSessions, (sessionValue) => {
+    if (!isObject(sessionValue)) {
+      return undefined;
+    }
 
     const at = readTimestamp(sessionValue.at);
     const entries = readFiniteNumber(sessionValue.entries);
-    if (at === undefined || entries === undefined) continue;
+    if (at === undefined || entries === undefined) {
+      return undefined;
+    }
 
-    extractedSessions[sessionId] = { at, entries };
-  }
+    return { at, entries };
+  });
 
-  for (const [sessionId, sessionValue] of Object.entries(failedRaw)) {
-    if (!isObject(sessionValue)) continue;
+  const failedSessions = normalizeRecord(raw.failedSessions, (sessionValue) => {
+    if (!isObject(sessionValue)) {
+      return undefined;
+    }
 
     const at = readTimestamp(sessionValue.at);
-    if (at === undefined || typeof sessionValue.error !== "string" || typeof sessionValue.retries !== "number") continue;
+    if (at === undefined || typeof sessionValue.error !== "string" || typeof sessionValue.retries !== "number") {
+      return undefined;
+    }
 
-    failedSessions[sessionId] = {
+    return {
       at,
       error: sessionValue.error,
       retries: sessionValue.retries,
     };
-  }
+  });
 
-  for (const [conversationKey, conversationValue] of Object.entries(importedRaw)) {
-    if (!isObject(conversationValue)) continue;
+  const importedConversations = normalizeRecord(raw.importedConversations, (conversationValue) => {
+    if (!isObject(conversationValue)) {
+      return undefined;
+    }
 
     const at = readTimestamp(conversationValue.at);
     const updatedAt = readTimestamp(conversationValue.updatedAt);
@@ -338,24 +333,25 @@ function normalizeState(raw: unknown): ZettelclawState {
       at === undefined ||
       updatedAt === undefined ||
       sessionId === undefined ||
-      entries === undefined ||
-      !hasValidImportedSessionId(conversationKey, sessionId)
+      entries === undefined
     ) {
-      continue;
+      return undefined;
     }
 
     const title = readTrimmedString(conversationValue.title);
-    importedConversations[conversationKey] = {
+    return {
       at,
       updatedAt,
       sessionId,
       entries,
       ...(title !== undefined ? { title } : {}),
     };
-  }
+  });
 
-  for (const [entryId, usageValue] of Object.entries(eventUsageRaw)) {
-    if (!isObject(usageValue)) continue;
+  const eventUsage = normalizeRecord(raw.eventUsage, (usageValue) => {
+    if (!isObject(usageValue)) {
+      return undefined;
+    }
 
     const memoryGetCount = readNonNegativeInt(usageValue.memoryGetCount);
     const memorySearchCount = readNonNegativeInt(usageValue.memorySearchCount ?? 0);
@@ -368,11 +364,14 @@ function normalizeState(raw: unknown): ZettelclawState {
       citationCount === undefined ||
       lastAccessAt === undefined
     ) {
-      continue;
+      return undefined;
     }
 
-    eventUsage[entryId] = { memoryGetCount, memorySearchCount, citationCount, lastAccessAt };
-  }
+    return { memoryGetCount, memorySearchCount, citationCount, lastAccessAt };
+  });
+
+  const importJobs: Record<string, ImportJobState> = {};
+  const importJobsRaw = isObject(raw.importJobs) ? raw.importJobs : {};
 
   for (const [jobId, jobValue] of Object.entries(importJobsRaw)) {
     if (!isObject(jobValue)) continue;

@@ -2,9 +2,11 @@ import { join } from "node:path";
 import type { AnyAgentTool, OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { isObject } from "../lib/guards";
+import { extractTextContent } from "../lib/text";
 import { queryLog, searchLog, type LogQueryFilter } from "../log/query";
 import type { EntryType, LogEntry } from "../log/schema";
 import { incrementEventUsage } from "../state";
+import { textResult } from "./shared";
 
 interface SearchParams {
   query?: string;
@@ -67,36 +69,14 @@ function normalizeSubject(value: unknown): string | undefined {
 
 function extractTextFromToolResult(result: unknown): string {
   if (typeof result === "string") {
-    return result;
+    return result.trim();
   }
 
-  if (!isObject(result)) {
-    return "";
-  }
-
-  const content = result.content;
-  if (Array.isArray(content)) {
-    const parts = content
-      .map((item) => {
-        if (!isObject(item)) {
-          return "";
-        }
-
-        return typeof item.text === "string" ? item.text : "";
-      })
-      .filter((text) => text.length > 0);
-
-    return parts.join("\n").trim();
+  if (isObject(result) && Array.isArray(result.content)) {
+    return extractTextContent(result.content).trim();
   }
 
   return "";
-}
-
-function textResult(text: string, details?: unknown): { content: Array<{ type: string; text: string }>; details?: unknown } {
-  return {
-    content: [{ type: "text", text }],
-    ...(details === undefined ? {} : { details }),
-  };
 }
 
 function formatLogEntry(entry: LogEntry): string {
@@ -119,23 +99,6 @@ function dedupeEntries(entries: LogEntry[]): LogEntry[] {
 
     seen.add(entry.id);
     output.push(entry);
-  }
-
-  return output;
-}
-
-function dedupeLines(lines: string[]): string[] {
-  const seen = new Set<string>();
-  const output: string[] = [];
-
-  for (const line of lines) {
-    const normalized = line.trim();
-    if (!normalized || seen.has(normalized)) {
-      continue;
-    }
-
-    seen.add(normalized);
-    output.push(normalized);
   }
 
   return output;
@@ -278,19 +241,24 @@ export function createWrappedMemorySearchTool(
       const logLines = logEntries.map(formatLogEntry);
       const builtinText = extractTextFromToolResult(builtinResult);
 
-      const mergedLines = dedupeLines([
-        ...logLines,
-        ...builtinText.split("\n"),
-      ]);
-
-      if (mergedLines.length === 0) {
+      if (logLines.length === 0 && !builtinText) {
         return textResult("No results.", {
           logMatches: logEntries.length,
           semanticMatches: builtinText ? 1 : 0,
         });
       }
 
-      return textResult(mergedLines.join("\n"), {
+      if (logLines.length === 0) {
+        return textResult(builtinText, {
+          logEntries,
+        });
+      }
+
+      const combined = builtinText
+        ? `${logLines.join("\n")}\n\nSemantic matches:\n${builtinText}`
+        : logLines.join("\n");
+
+      return textResult(combined, {
         logEntries,
       });
     },

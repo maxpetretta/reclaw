@@ -1,7 +1,13 @@
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { escapeRegex, isObject } from "../lib/guards";
+import {
+  buildExtractionUserPrompt,
+  loadExtractionPrompt,
+} from "../extraction/prompt";
+import {
+  DEFAULT_EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
+  findMentionedSubjects,
+  parseExtractionJsonl,
+  type ParsedExtractionEntry,
+} from "../extraction/shared";
 import {
   OpenClawCronError,
   removeCronJob,
@@ -12,9 +18,6 @@ import {
 import { queryExtractionContext } from "../log/query";
 import {
   finalizeEntry,
-  GENERAL_SUBJECT_SLUG,
-  parseSubjectType,
-  validateLlmOutput,
   type LogEntry,
 } from "../log/schema";
 import {
@@ -22,10 +25,8 @@ import {
   upsertSubjectFromExtraction,
   type SubjectRegistry,
 } from "../subjects/registry";
+import { normalizeWhitespace } from "../lib/text";
 import type { ImportedConversation } from "./types";
-
-const THIS_DIR = dirname(fileURLToPath(import.meta.url));
-const EXTRACTION_PROMPT_PATH = join(THIS_DIR, "../../prompts/extraction.md");
 const HISTORICAL_SYSTEM_PREFIX = [
   "Historical import mode:",
   "- The transcript is archived historical data imported from another platform.",
@@ -50,10 +51,6 @@ const HISTORICAL_SYSTEM_PREFIX = [
 const IMPORT_CRON_SESSION_NAME = "zettelclaw-import-extract";
 const IMPORT_CRON_TIMEOUT_SECONDS = 1_800;
 const IMPORT_CRON_WAIT_TIMEOUT_MS = 1_900_000;
-const EXTRACTION_CONTEXT_MAX_PER_SUBJECT = 50;
-
-let extractionPromptCache: string | null = null;
-
 export interface ImportExtractionOptions {
   conversation: ImportedConversation;
   sessionId: string;
@@ -71,12 +68,6 @@ interface CallModelParams {
   userPrompt: string;
   apiBaseUrl?: string;
   apiToken?: string;
-}
-
-interface ParsedLlmEntry {
-  entry: Omit<LogEntry, "id" | "timestamp" | "session">;
-  subjectTypeHint?: string;
-  timestampHint?: ImportTimestampHint;
 }
 
 export interface ExtractedImportedEntry {
@@ -101,63 +92,6 @@ interface QualityIssue {
 }
 
 
-function normalizeText(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/gu, " ");
-}
-
-function findMentionedSubjects(transcript: string, subjects: SubjectRegistry): string[] {
-  if (!transcript.trim()) {
-    return [];
-  }
-
-  const transcriptLower = transcript.toLowerCase();
-  const slugs = Object.keys(subjects);
-  const matched: string[] = [];
-
-  for (const slug of slugs) {
-    const normalizedSlug = slug.trim().toLowerCase();
-    if (!normalizedSlug) {
-      continue;
-    }
-
-    const pattern = new RegExp(`(^|[^a-z0-9-])${escapeRegex(normalizedSlug)}([^a-z0-9-]|$)`, "u");
-    if (pattern.test(transcriptLower)) {
-      matched.push(slug);
-    }
-  }
-
-  return matched;
-}
-
-function formatSubjects(subjects: SubjectRegistry): string {
-  const sortedEntries = Object.entries(subjects).sort(([left], [right]) => left.localeCompare(right));
-  const sortedSubjects = Object.fromEntries(sortedEntries);
-  return JSON.stringify(sortedSubjects, null, 2);
-}
-
-function formatExistingEntries(entries: LogEntry[] | undefined): string {
-  if (!entries || entries.length === 0) {
-    return "- n/a";
-  }
-
-  const sorted = [...entries].sort((left, right) => {
-    const leftTime = Date.parse(left.timestamp);
-    const rightTime = Date.parse(right.timestamp);
-    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
-      return leftTime - rightTime;
-    }
-    return left.id.localeCompare(right.id);
-  });
-
-  return sorted
-    .map((entry) => {
-      const detailText = entry.detail ?? "-";
-      const statusText = entry.type === "task" ? ` status=${entry.status};` : "";
-      return `[id=${entry.id}] ${entry.type} | subject=${entry.subject ?? "n/a"} | ${entry.content} |${statusText} detail=${detailText}`;
-    })
-    .join("\n");
-}
-
 function formatConversationMetadata(conversation: ImportedConversation): string {
   return [
     `platform: ${conversation.platform}`,
@@ -175,7 +109,7 @@ function formatTranscript(conversation: ImportedConversation): string {
     .join("\n");
 }
 
-function resolveHistoricalTimestamp(conversation: ImportedConversation): string {
+export function resolveHistoricalTimestamp(conversation: ImportedConversation): string {
   const parsed = Date.parse(conversation.updatedAt);
   if (!Number.isFinite(parsed)) {
     throw new Error(`conversation ${conversation.conversationId} is missing a valid updatedAt timestamp`);
@@ -184,56 +118,9 @@ function resolveHistoricalTimestamp(conversation: ImportedConversation): string 
   return new Date(parsed).toISOString();
 }
 
-function readSubjectTypeHint(raw: unknown): string | undefined {
-  if (!isObject(raw)) {
-    return undefined;
-  }
-
-  return parseSubjectType(raw.subjectType ?? raw.subject_type);
-}
-
-function stripSubjectTypeHint(raw: unknown): unknown {
-  if (!isObject(raw)) {
-    return raw;
-  }
-
-  const candidate = { ...raw };
-  delete candidate.subjectType;
-  delete candidate.subject_type;
-  delete candidate.timestamp;
-  delete candidate.date;
-  delete candidate.dateHint;
-  delete candidate.date_hint;
-  return candidate;
-}
-
-function applyRequiredSubjectFallback(raw: unknown): unknown {
-  if (!isObject(raw)) {
-    return raw;
-  }
-
-  const candidate: Record<string, unknown> = { ...raw };
-  const type = typeof candidate.type === "string" ? candidate.type : undefined;
-  const subject = typeof candidate.subject === "string" ? candidate.subject.trim() : "";
-
-  if (type !== "handoff" && subject.length === 0) {
-    candidate.subject = GENERAL_SUBJECT_SLUG;
-    return candidate;
-  }
-
-  if (subject.length > 0) {
-    candidate.subject = subject;
-  }
-
-  return candidate;
-}
 
 function parseImportTimestampHint(raw: unknown): ImportTimestampHint | undefined {
-  if (!isObject(raw)) {
-    return undefined;
-  }
-
-  const candidate = typeof raw.timestamp === "string" ? raw.timestamp.trim() : "";
+  const candidate = typeof raw === "string" ? raw.trim() : "";
   if (!candidate) {
     return undefined;
   }
@@ -262,64 +149,6 @@ function parseImportTimestampHint(raw: unknown): ImportTimestampHint | undefined
   };
 }
 
-function parseLlmOutput(rawOutput: string): {
-  parsedEntries: ParsedLlmEntry[];
-  nonEmptyLines: number;
-  invalidLineCount: number;
-  processableLines: number;
-} {
-  const parsedEntries: ParsedLlmEntry[] = [];
-  let nonEmptyLines = 0;
-  let invalidLineCount = 0;
-  let processableLines = 0;
-
-  for (const line of rawOutput.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      continue;
-    }
-    nonEmptyLines += 1;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      invalidLineCount += 1;
-      processableLines += 1;
-      continue;
-    }
-
-    const subjectTypeHint = readSubjectTypeHint(parsed);
-    const timestampHint = parseImportTimestampHint(parsed);
-    const normalizedCandidate = applyRequiredSubjectFallback(stripSubjectTypeHint(parsed));
-    const validated = validateLlmOutput(normalizedCandidate);
-    if (!validated.ok) {
-      invalidLineCount += 1;
-      processableLines += 1;
-      continue;
-    }
-
-    // Imports should not create handoff entries; they are session-bound runtime state.
-    if (validated.entry.type === "handoff") {
-      continue;
-    }
-
-    processableLines += 1;
-
-    parsedEntries.push({
-      entry: validated.entry,
-      ...(subjectTypeHint ? { subjectTypeHint } : {}),
-      ...(timestampHint ? { timestampHint } : {}),
-    });
-  }
-
-  return {
-    parsedEntries,
-    nonEmptyLines,
-    invalidLineCount,
-    processableLines,
-  };
-}
 
 function resolveDateOnlyTimestampHint(
   dateOnly: string,
@@ -370,9 +199,9 @@ function resolveEntryTimestampHint(
   return resolveDateOnlyTimestampHint(hint.dateOnly, conversation) ?? hint.iso;
 }
 
-function dedupeParsedEntries(entries: ParsedLlmEntry[]): ParsedLlmEntry[] {
+function dedupeParsedEntries(entries: ParsedExtractionEntry[]): ParsedExtractionEntry[] {
   const seen = new Set<string>();
-  const deduped: ParsedLlmEntry[] = [];
+  const deduped: ParsedExtractionEntry[] = [];
 
   for (const parsedEntry of entries) {
     const statusText =
@@ -382,9 +211,9 @@ function dedupeParsedEntries(entries: ParsedLlmEntry[]): ParsedLlmEntry[] {
     const key = [
       parsedEntry.entry.type,
       statusText,
-      normalizeText(subjectText),
-      normalizeText(parsedEntry.entry.content),
-      normalizeText(detailText),
+      normalizeWhitespace(subjectText).toLowerCase(),
+      normalizeWhitespace(parsedEntry.entry.content).toLowerCase(),
+      normalizeWhitespace(detailText).toLowerCase(),
     ].join("|");
 
     if (seen.has(key)) {
@@ -407,26 +236,18 @@ function estimateCoverageTarget(conversation: ImportedConversation): number {
     return message.content.trim().length >= 24;
   }).length;
 
-  if (substantiveMessageCount >= 40) {
-    return 8;
-  }
-  if (substantiveMessageCount >= 28) {
-    return 6;
-  }
-  if (substantiveMessageCount >= 18) {
+  if (substantiveMessageCount >= 20) {
     return 4;
   }
-  if (substantiveMessageCount >= 10) {
-    return 3;
-  }
-  if (substantiveMessageCount >= 6) {
+  if (substantiveMessageCount >= 8) {
     return 2;
   }
+
   return 1;
 }
 
 function evaluateQualityIssues(params: {
-  parsedEntries: ParsedLlmEntry[];
+  parsedEntries: ParsedExtractionEntry[];
   conversation: ImportedConversation;
   subjects: SubjectRegistry;
 }): QualityIssue[] {
@@ -439,12 +260,12 @@ function evaluateQualityIssues(params: {
 
   const coverageTarget = estimateCoverageTarget(conversation);
   const coverageDeficit = coverageTarget - parsedEntries.length;
-  if (coverageDeficit >= 2) {
+  if (coverageDeficit >= 2 || (coverageDeficit >= 1 && coverageTarget >= 4)) {
     issues.push({
       severity: "severe",
       message: `Coverage is too sparse for this transcript. Produce around ${coverageTarget} durable entries when justified.`,
     });
-  } else if (coverageDeficit === 1 && coverageTarget >= 3) {
+  } else if (coverageDeficit === 1 && coverageTarget >= 2) {
     issues.push({
       severity: "moderate",
       message: `Coverage is slightly sparse. Target about ${coverageTarget} durable entries when supported by transcript evidence.`,
@@ -497,27 +318,6 @@ function evaluateQualityIssues(params: {
 
 function shouldRunQualityRepair(issues: QualityIssue[]): boolean {
   return issues.some((issue) => issue.severity === "severe");
-}
-
-function buildExtractionUserPrompt(opts: {
-  conversation: ImportedConversation;
-  transcript: string;
-  subjects: SubjectRegistry;
-  existingEntries: LogEntry[];
-}): string {
-  return [
-    "## Conversation Metadata",
-    formatConversationMetadata(opts.conversation),
-    "",
-    "## Known subjects",
-    formatSubjects(opts.subjects),
-    "",
-    "## Existing Entries",
-    formatExistingEntries(opts.existingEntries),
-    "",
-    "## Transcript",
-    opts.transcript,
-  ].join("\n");
 }
 
 function buildRepairUserPrompt(baseUserPrompt: string, invalidOutput: string): string {
@@ -599,15 +399,6 @@ const DEFAULT_DEPS: ImportExtractionDeps = {
   callModel: defaultCallModel,
 };
 
-async function loadExtractionPrompt(): Promise<string> {
-  if (extractionPromptCache !== null) {
-    return extractionPromptCache;
-  }
-
-  extractionPromptCache = await readFile(EXTRACTION_PROMPT_PATH, "utf8");
-  return extractionPromptCache;
-}
-
 export async function extractImportedConversation(
   options: ImportExtractionOptions,
   deps: Partial<ImportExtractionDeps> = {},
@@ -622,15 +413,20 @@ export async function extractImportedConversation(
   const transcript = formatTranscript(options.conversation);
   const transcriptSubjects = findMentionedSubjects(transcript, subjects);
   const existingEntries = await queryExtractionContext(options.logPath, transcriptSubjects, {
-    maxPerSubject: EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
+    maxPerSubject: DEFAULT_EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
   });
 
   const systemPrompt = `${HISTORICAL_SYSTEM_PREFIX}\n\n${prompt.trim()}`;
   const userPrompt = buildExtractionUserPrompt({
-    conversation: options.conversation,
     transcript,
     subjects,
     existingEntries,
+    sections: [
+      {
+        heading: "Conversation Metadata",
+        body: formatConversationMetadata(options.conversation),
+      },
+    ],
   });
 
   const firstOutput = await runtimeDeps.callModel({
@@ -642,8 +438,11 @@ export async function extractImportedConversation(
   });
 
   let latestOutput = firstOutput;
-  let parsed = parseLlmOutput(latestOutput);
-  if (parsed.processableLines > 0 && parsed.parsedEntries.length === 0) {
+  let parsed = parseExtractionJsonl(latestOutput, {
+    includeTimestampHint: true,
+    dropHandoff: true,
+  });
+  if (parsed.processableLines > 0 && parsed.entries.length === 0) {
     const repairedOutput = await runtimeDeps.callModel({
       model: options.model,
       systemPrompt,
@@ -652,23 +451,26 @@ export async function extractImportedConversation(
       apiToken: options.apiToken,
     });
     latestOutput = repairedOutput;
-    parsed = parseLlmOutput(latestOutput);
+    parsed = parseExtractionJsonl(latestOutput, {
+      includeTimestampHint: true,
+      dropHandoff: true,
+    });
   }
 
-  if (parsed.parsedEntries.length > 0) {
+  if (parsed.entries.length > 0) {
     parsed = {
       ...parsed,
-      parsedEntries: dedupeParsedEntries(parsed.parsedEntries),
+      entries: dedupeParsedEntries(parsed.entries),
     };
   }
 
   const qualityIssues = evaluateQualityIssues({
-    parsedEntries: parsed.parsedEntries,
+    parsedEntries: parsed.entries,
     conversation: options.conversation,
     subjects,
   });
 
-  if (parsed.parsedEntries.length > 0 && shouldRunQualityRepair(qualityIssues)) {
+  if (parsed.entries.length > 0 && shouldRunQualityRepair(qualityIssues)) {
     const qualityOutput = await runtimeDeps.callModel({
       model: options.model,
       systemPrompt,
@@ -676,28 +478,32 @@ export async function extractImportedConversation(
       apiBaseUrl: options.apiBaseUrl,
       apiToken: options.apiToken,
     });
-    const qualityParsed = parseLlmOutput(qualityOutput);
-    if (qualityParsed.parsedEntries.length > 0) {
+    const qualityParsed = parseExtractionJsonl(qualityOutput, {
+      includeTimestampHint: true,
+      dropHandoff: true,
+    });
+    if (qualityParsed.entries.length > 0) {
       parsed = {
         ...qualityParsed,
-        parsedEntries: dedupeParsedEntries(qualityParsed.parsedEntries),
+        entries: dedupeParsedEntries(qualityParsed.entries),
       };
       latestOutput = qualityOutput;
     }
   }
 
-  if (parsed.processableLines > 0 && parsed.parsedEntries.length === 0) {
+  if (parsed.processableLines > 0 && parsed.entries.length === 0) {
     throw new Error("extraction output did not contain any valid JSONL entries");
   }
 
   const historicalTimestamp = resolveHistoricalTimestamp(options.conversation);
   const entries: ExtractedImportedEntry[] = [];
 
-  for (const parsedEntry of parsed.parsedEntries) {
+  for (const parsedEntry of parsed.entries) {
+    const timestampHint = parseImportTimestampHint(parsedEntry.timestampHint);
     const finalized = finalizeEntry(parsedEntry.entry, {
       sessionId: options.sessionId,
       timestamp: resolveEntryTimestampHint(
-        parsedEntry.timestampHint,
+        timestampHint,
         options.conversation,
         historicalTimestamp,
       ),

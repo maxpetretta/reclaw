@@ -72,7 +72,6 @@ export interface ScheduleSubagentParams {
 
 export interface ScheduledSubagent {
   jobId: string;
-  mode: "legacy" | "compatible";
 }
 
 export function runOpenClaw(
@@ -123,80 +122,49 @@ export async function scheduleSubagentCronJob(
   const sessionName = params.sessionName?.trim() || "zettelclaw-import-extract";
   const timeoutSeconds = params.timeoutSeconds ?? 1_800;
 
-  const legacyArgs = [
-    "cron",
-    "add",
-    "--at",
-    "+0s",
-    "--session",
-    sessionName,
-    "--name",
-    sessionName,
-    "--message",
-    params.message,
-    "--no-deliver",
-    "--delete-after-run",
-    "--timeout-seconds",
-    String(timeoutSeconds),
-    "--json",
-  ];
-  if (params.disabled === true) {
-    legacyArgs.push("--disabled");
-  }
-  if (params.model?.trim()) {
-    legacyArgs.push("--model", params.model.trim());
-  }
-
-  const legacyResult = await runOpenClawWithRetries(legacyArgs, {
-    allowFailure: true,
-    timeoutMs: 60_000,
-    retries: {
-      attempts: 3,
-      baseDelayMs: 900,
-      maxDelayMs: 6_000,
+  const legacyResult = await runOpenClawWithRetries(
+    buildCronAddArgs({
+      at: "+0s",
+      session: sessionName,
+      sessionName,
+      timeoutSeconds,
+      params,
+    }),
+    {
+      allowFailure: true,
+      timeoutMs: 60_000,
+      retries: {
+        attempts: 3,
+        baseDelayMs: 900,
+        maxDelayMs: 6_000,
+      },
     },
-  });
+  );
 
   if (legacyResult.status === 0) {
     return {
       jobId: parseCronAddJobId(legacyResult.stdout),
-      mode: "legacy",
     };
   }
 
-  const compatibleArgs = [
-    "cron",
-    "add",
-    "--at",
-    new Date(Date.now() + 3_000).toISOString(),
-    "--session",
-    "isolated",
-    "--name",
-    sessionName,
-    "--message",
-    params.message,
-    "--no-deliver",
-    "--delete-after-run",
-    "--timeout-seconds",
-    String(timeoutSeconds),
-    "--json",
-  ];
-  if (params.disabled === true) {
-    compatibleArgs.push("--disabled");
-  }
-  if (params.model?.trim()) {
-    compatibleArgs.push("--model", params.model.trim());
-  }
-
-  const compatibleResult = await runOpenClawWithRetries(compatibleArgs, {
-    allowFailure: true,
-    timeoutMs: 60_000,
-    retries: {
-      attempts: 3,
-      baseDelayMs: 900,
-      maxDelayMs: 6_000,
+  const compatibleResult = await runOpenClawWithRetries(
+    buildCronAddArgs({
+      at: new Date(Date.now() + 3_000).toISOString(),
+      session: "isolated",
+      sessionName,
+      timeoutSeconds,
+      params,
+    }),
+    {
+      allowFailure: true,
+      timeoutMs: 60_000,
+      retries: {
+        attempts: 3,
+        baseDelayMs: 900,
+        maxDelayMs: 6_000,
+      },
     },
-  });
+  );
 
   if (compatibleResult.status !== 0) {
     const legacyError =
@@ -214,8 +182,42 @@ export async function scheduleSubagentCronJob(
 
   return {
     jobId: parseCronAddJobId(compatibleResult.stdout),
-    mode: "compatible",
   };
+}
+
+function buildCronAddArgs(input: {
+  at: string;
+  session: string;
+  sessionName: string;
+  timeoutSeconds: number;
+  params: ScheduleSubagentParams;
+}): string[] {
+  const args = [
+    "cron",
+    "add",
+    "--at",
+    input.at,
+    "--session",
+    input.session,
+    "--name",
+    input.sessionName,
+    "--message",
+    input.params.message,
+    "--no-deliver",
+    "--delete-after-run",
+    "--timeout-seconds",
+    String(input.timeoutSeconds),
+    "--json",
+  ];
+
+  if (input.params.disabled === true) {
+    args.push("--disabled");
+  }
+  if (input.params.model?.trim()) {
+    args.push("--model", input.params.model.trim());
+  }
+
+  return args;
 }
 
 export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): Promise<string> {

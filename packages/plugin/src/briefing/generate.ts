@@ -6,11 +6,9 @@ import { isEnoent } from "../lib/guards";
 import { callGatewayChatCompletion } from "../lib/chat-completions";
 import { resolveGatewayBaseUrl } from "../lib/gateway";
 import { replaceManagedBlock } from "../memory/managed-block";
+import { BRIEFING_BEGIN_MARKER, BRIEFING_END_MARKER } from "../memory/markers";
 import { readLog, type LogEntry } from "../log/schema";
 import { readState, type EventUsageState } from "../state";
-
-export const BRIEFING_BEGIN_MARKER = "<!-- BEGIN GENERATED BRIEFING -->";
-export const BRIEFING_END_MARKER = "<!-- END GENERATED BRIEFING -->";
 
 const THIS_DIR = dirname(fileURLToPath(import.meta.url));
 const BRIEFING_PROMPT_PATH = join(THIS_DIR, "../../prompts/briefing.md");

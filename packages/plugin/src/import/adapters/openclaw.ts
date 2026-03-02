@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
-import { readTranscript } from "../../lib/transcript";
+import { findTranscriptFileForHome, readTranscript } from "../../lib/transcript";
+import { resolveOpenClawHome } from "../../lib/runtime-env";
+import { normalizeWhitespace } from "../../lib/text";
 import type { ImportedConversation, ImportedMessage } from "../types";
 
 export interface OpenClawTranscriptSource {
@@ -29,23 +30,6 @@ export interface OpenClawImportSource {
 export interface LoadOpenClawImportSourceOptions {
   openClawHome?: string;
   preferredAgentId?: string;
-}
-
-function resolveOpenClawHome(override?: string): string {
-  if (typeof override === "string" && override.trim().length > 0) {
-    return override.trim();
-  }
-
-  const envOverride = process.env.OPENCLAW_HOME?.trim();
-  if (envOverride) {
-    return envOverride;
-  }
-
-  return join(homedir(), ".openclaw");
-}
-
-function normalizeText(value: string): string {
-  return value.replaceAll(/\s+/gu, " ").trim();
 }
 
 function toIso(value: number, fallback: string): string {
@@ -168,60 +152,6 @@ async function listAgentIds(openClawHome: string): Promise<string[]> {
   }
 }
 
-function isResetVariant(name: string, sessionId: string): boolean {
-  return (
-    (name.startsWith(`${sessionId}.reset.`) && name.endsWith(".jsonl")) ||
-    name.startsWith(`${sessionId}.jsonl.reset.`)
-  );
-}
-
-async function findTranscriptAtOpenClawHome(
-  openClawHome: string,
-  agentId: string,
-  sessionId: string,
-): Promise<string | null> {
-  const sessionsDir = join(openClawHome, "agents", agentId, "sessions");
-  const primaryPath = join(sessionsDir, `${sessionId}.jsonl`);
-
-  try {
-    const primaryStat = await stat(primaryPath);
-    if (primaryStat.isFile()) {
-      return primaryPath;
-    }
-  } catch {
-    // Continue searching reset variants.
-  }
-
-  let files: string[];
-  try {
-    files = await readdir(sessionsDir);
-  } catch {
-    return null;
-  }
-
-  const candidates = files.filter((name) => isResetVariant(name, sessionId));
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  let latestPath: string | null = null;
-  let latestMtime = Number.NEGATIVE_INFINITY;
-  for (const candidate of candidates) {
-    const candidatePath = join(sessionsDir, candidate);
-    try {
-      const candidateStat = await stat(candidatePath);
-      if (candidateStat.mtimeMs > latestMtime) {
-        latestMtime = candidateStat.mtimeMs;
-        latestPath = candidatePath;
-      }
-    } catch {
-      // Ignore candidate errors and keep scanning.
-    }
-  }
-
-  return latestPath;
-}
-
 function toImportedMessages(
   sessionId: string,
   fallbackIso: string,
@@ -229,7 +159,7 @@ function toImportedMessages(
 ): ImportedMessage[] {
   const messages: ImportedMessage[] = [];
   for (const [index, message] of transcript.entries()) {
-    const content = normalizeText(message.content);
+    const content = normalizeWhitespace(message.content);
     if (!content) {
       continue;
     }
@@ -264,7 +194,7 @@ async function findPreferredTranscript(
 
   for (const sessionId of sessionCandidates) {
     for (const agentId of agentOrder) {
-      const transcriptPath = await findTranscriptAtOpenClawHome(openClawHome, agentId, sessionId);
+      const transcriptPath = await findTranscriptFileForHome(openClawHome, agentId, sessionId);
       if (!transcriptPath) {
         continue;
       }

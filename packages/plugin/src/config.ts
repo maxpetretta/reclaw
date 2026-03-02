@@ -1,4 +1,5 @@
 import { isObject } from "./lib/guards";
+import { expandHomePath } from "./lib/path";
 
 export interface PluginConfig {
   logDir: string;
@@ -56,19 +57,6 @@ function readStringArray(value: unknown, fallback: string[]): string[] {
     .filter((entry) => entry.length > 0);
 
   return normalized.length > 0 ? normalized : fallback;
-}
-
-function expandHomePath(input: string): string {
-  if (input === "~") {
-    return `${process.env.HOME ?? ""}`;
-  }
-
-  if (input.startsWith("~/")) {
-    const home = process.env.HOME ?? "";
-    return `${home}${input.slice(1)}`;
-  }
-
-  return input;
 }
 
 export function resolveConfig(

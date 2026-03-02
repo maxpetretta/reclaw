@@ -1,8 +1,6 @@
 import type { LogEntry } from "../log/schema";
 import { replaceManagedBlock } from "./managed-block";
-
-export const LAST_HANDOFF_BEGIN_MARKER = "<!-- BEGIN LAST HANDOFF -->";
-export const LAST_HANDOFF_END_MARKER = "<!-- END LAST HANDOFF -->";
+import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "./markers";
 
 export function formatLastHandoff(entry: LogEntry): string {
   const lines = [

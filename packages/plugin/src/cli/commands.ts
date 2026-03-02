@@ -1,13 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, dirname, join, resolve as resolvePath } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isEnoent, isObject } from "../lib/guards";
 import {
   confirm as clackConfirm,
-  intro as clackIntro,
-  isCancel as clackIsCancel,
   log as clackLog,
   outro as clackOutro,
   select as clackSelect,
@@ -17,20 +14,47 @@ import {
 import { runPluginCommandWithTimeout, type OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { generateBriefing } from "../briefing/generate";
-import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/handoff";
+import { readGatewayToken, resolveApiBaseUrlFromConfig, resolveOpenClawHome } from "../lib/runtime-env";
+import { isDailyMemoryFile, normalizeCliInputPath } from "../lib/path";
 import { ensureManagedBlock } from "../memory/managed-block";
+import {
+  AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
+  AGENTS_MEMORY_GUIDANCE_END_MARKER,
+  BRIEFING_BEGIN_MARKER,
+  BRIEFING_END_MARKER,
+  LAST_HANDOFF_BEGIN_MARKER,
+  LAST_HANDOFF_END_MARKER,
+  MEMORY_NOTICE_BEGIN_MARKER,
+  MEMORY_NOTICE_END_MARKER,
+} from "../memory/markers";
 import {
   DEFAULT_IMPORT_JOBS,
   DEFAULT_IMPORT_MIN_MESSAGES,
   DEFAULT_IMPORT_MODEL,
   IMPORT_STOP_REQUESTED_ERROR,
+  type ReclawImportProgress,
   type ReclawImportSummary,
   runReclawImport,
 } from "../import/run";
+import {
+  detectImportSources,
+  resolveImportPathForPlatform,
+} from "./import-detect";
+import {
+  INTERACTIVE_IMPORT_JOBS_MAX,
+  INTERACTIVE_IMPORT_JOBS_MIN,
+  formatBytes,
+  formatImportModelLabel,
+  isInteractiveTerminal,
+  listImportModels,
+  normalizeModelOption,
+  parseInteractiveImportJobs,
+  platformLabel,
+  readOpenClawMemoryPreflight,
+  resolveImportSelection,
+  resolveModelByQuery,
+} from "./import-ui";
 import type { ImportPlatform } from "../import/types";
-import { parseChatGptConversations } from "../import/adapters/chatgpt";
-import { parseClaudeConversations } from "../import/adapters/claude";
-import { parseGrokConversations } from "../import/adapters/grok";
 import { queryLog, searchLog } from "../log/query";
 import type { EntryType, LogEntry } from "../log/schema";
 import { ensureSubject, readRegistry, renameSubject, writeRegistry } from "../subjects/registry";
@@ -42,14 +66,7 @@ import {
   type ImportJobState,
   type ImportJobStatus,
 } from "../state";
-
-export const BRIEFING_BEGIN_MARKER = "<!-- BEGIN GENERATED BRIEFING -->";
-export const BRIEFING_END_MARKER = "<!-- END GENERATED BRIEFING -->";
-export { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER };
-export const AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER = "<!-- BEGIN ZETTELCLAW MEMORY GUIDANCE -->";
-export const AGENTS_MEMORY_GUIDANCE_END_MARKER = "<!-- END ZETTELCLAW MEMORY GUIDANCE -->";
-export const MEMORY_NOTICE_BEGIN_MARKER = "<!-- BEGIN ZETTELCLAW MEMORY NOTICE -->";
-export const MEMORY_NOTICE_END_MARKER = "<!-- END ZETTELCLAW MEMORY NOTICE -->";
+import { ensureStoreFiles } from "../store/files";
 
 const POST_INIT_EVENT_PROMPT = "post-init-system-event.md";
 const AGENTS_MEMORY_PROMPT = "agents-memory-guidance.md";
@@ -100,33 +117,18 @@ interface VerifyResult {
   paths: InitPaths;
 }
 
-interface TraceIssue {
-  kind: "info";
-  id: string;
-  detail: string;
-}
-
 interface TraceChain {
+  subject: string;
   ids: string[];
 }
 
 interface TraceReport {
   chains: TraceChain[];
-  issues: TraceIssue[];
 }
 
 
 function toObject(value: unknown): Record<string, unknown> {
   return isObject(value) ? value : {};
-}
-
-function resolveOpenClawHome(): string {
-  const override = process.env.OPENCLAW_HOME?.trim();
-  if (override) {
-    return override;
-  }
-
-  return join(homedir(), ".openclaw");
 }
 
 function resolvePaths(config: PluginConfig, workspaceDir?: string): InitPaths {
@@ -179,50 +181,6 @@ function parseIsoDateInput(raw: unknown): string | undefined {
   return new Date(parsed).toISOString();
 }
 
-function parseImportPlatform(raw: unknown): ImportPlatform | undefined {
-  if (raw === "chatgpt" || raw === "claude" || raw === "grok" || raw === "openclaw") {
-    return raw;
-  }
-
-  return undefined;
-}
-
-function readGatewayPort(config: unknown): number | null {
-  if (!isObject(config)) {
-    return null;
-  }
-
-  const gateway = config.gateway;
-  if (!isObject(gateway)) {
-    return null;
-  }
-
-  return typeof gateway.port === "number" && Number.isFinite(gateway.port) ? gateway.port : null;
-}
-
-function readGatewayToken(config: unknown): string | undefined {
-  if (!isObject(config)) {
-    return undefined;
-  }
-
-  const gateway = config.gateway;
-  if (!isObject(gateway)) {
-    return undefined;
-  }
-
-  const auth = gateway.auth;
-  if (!isObject(auth)) {
-    return undefined;
-  }
-
-  return typeof auth.token === "string" && auth.token.trim().length > 0 ? auth.token : undefined;
-}
-
-function resolveApiBaseUrl(config: unknown): string {
-  const port = readGatewayPort(config) ?? 18789;
-  return `http://127.0.0.1:${port}`;
-}
-
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
@@ -258,7 +216,7 @@ function buildTraceReport(entries: LogEntry[]): TraceReport {
   }
 
   const chains: TraceChain[] = [];
-  for (const group of bySubject.values()) {
+  for (const [subject, group] of bySubject.entries()) {
     const ids = [...group]
       .sort((left, right) => {
         const leftTs = Date.parse(left.timestamp);
@@ -269,12 +227,11 @@ function buildTraceReport(entries: LogEntry[]): TraceReport {
         return left.id.localeCompare(right.id);
       })
       .map((entry) => entry.id);
-    chains.push({ ids });
+    chains.push({ subject, ids });
   }
 
   return {
     chains: chains.filter((chain) => chain.ids.length > 0),
-    issues: [],
   };
 }
 
@@ -291,7 +248,8 @@ function printTraceReport(entries: LogEntry[], report: TraceReport, focusId?: st
   }
 
   chainsToPrint.forEach((chain, chainIndex) => {
-    console.log(`Chain ${chainIndex + 1}:`);
+    const subjectLabel = chain.subject === "__unscoped__" ? "unscoped" : chain.subject;
+    console.log(`Chain ${chainIndex + 1} (${subjectLabel}):`);
     chain.ids.forEach((id, index) => {
       const entry = byId.get(id);
       const prefix = index === 0 ? "  " : "  -> ";
@@ -302,16 +260,6 @@ function printTraceReport(entries: LogEntry[], report: TraceReport, focusId?: st
       console.log(`${prefix}${formatEntry(entry)}`);
     });
   });
-
-  if (report.issues.length === 0) {
-    console.log("Irregularities: none");
-    return;
-  }
-
-  console.log("Irregularities:");
-  for (const issue of report.issues) {
-    console.log(`- [${issue.kind}] ${issue.id}: ${issue.detail}`);
-  }
 }
 
 function readNumberOption(value: unknown, fallback: number): number {
@@ -413,31 +361,12 @@ async function backupFileIfExists(filePath: string): Promise<string | undefined>
 }
 
 export async function ensureImportStoreFiles(paths: InitPaths, statePath: string): Promise<void> {
-  await mkdir(paths.logDir, { recursive: true });
-
-  try {
-    await readFile(paths.logPath, "utf8");
-  } catch {
-    await writeFile(paths.logPath, "", "utf8");
-  }
-
-  try {
-    await readFile(paths.subjectsPath, "utf8");
-  } catch {
-    await writeFile(paths.subjectsPath, "{}\n", "utf8");
-  }
-
-  try {
-    await readFile(statePath, "utf8");
-  } catch {
-    await writeState(statePath, {
-      extractedSessions: {},
-      failedSessions: {},
-      importedConversations: {},
-      eventUsage: {},
-      importJobs: {},
-    });
-  }
+  await ensureStoreFiles({
+    logDir: paths.logDir,
+    logPath: paths.logPath,
+    subjectsPath: paths.subjectsPath,
+    statePath,
+  });
 }
 
 function shouldClearLegacyMemoryDir(summary: ReclawImportSummary): boolean {
@@ -470,6 +399,7 @@ export interface RunImportCommandOptions {
   opts: unknown;
   logger?: ImportProgressLogger;
   shouldStop?: () => Promise<boolean>;
+  onProgress?: (progress: ReclawImportProgress) => void | Promise<void>;
 }
 
 export interface RunImportCommandResult {
@@ -493,8 +423,6 @@ const IMPORT_WORKER_NAME_PREFIX = "zettelclaw-import-worker-";
 const IMPORT_WORKER_TIMEOUT_SECONDS = 60 * 60;
 const IMPORT_WORKER_EXEC_TIMEOUT_SECONDS = 2 * 60 * 60;
 const IMPORT_WORKER_SCHEDULE_DELAY_MS = 2_000;
-const INTERACTIVE_IMPORT_JOBS_MIN = 1;
-const INTERACTIVE_IMPORT_JOBS_MAX = 10;
 const IMPORT_STOP_REQUESTED_DISPLAY = "Stop requested by user";
 const IMPORT_STOPPED_DISPLAY = "Stopped by user";
 
@@ -570,29 +498,6 @@ function readPositiveIntOption(value: unknown): number | undefined {
   }
 
   return undefined;
-}
-
-function parseInteractiveImportJobs(value: unknown): number | undefined {
-  let parsed: number | undefined;
-
-  if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value)) {
-    parsed = value;
-  } else if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!/^\d+$/u.test(trimmed)) {
-      return undefined;
-    }
-
-    parsed = Number.parseInt(trimmed, 10);
-  } else {
-    return undefined;
-  }
-
-  if (parsed < INTERACTIVE_IMPORT_JOBS_MIN || parsed > INTERACTIVE_IMPORT_JOBS_MAX) {
-    return undefined;
-  }
-
-  return parsed;
 }
 
 function sanitizeImportOptionsForJob(raw: Record<string, unknown>): ImportJobOptionsState {
@@ -927,14 +832,18 @@ export async function runImportWorker(
     latestState.importJobs[jobId] = latestJob;
     await writeState(paths.statePath, latestState);
   };
+  const normalizeProgress = (next: ReclawImportProgress): ImportJobProgressState => ({
+    total: Math.max(0, Math.floor(next.total)),
+    completed: Math.max(0, Math.floor(next.completed)),
+    imported: Math.max(0, Math.floor(next.imported)),
+    failed: Math.max(0, Math.floor(next.failed)),
+    entriesWritten: Math.max(0, Math.floor(next.entriesWritten)),
+    subjectsCreated: Math.max(0, Math.floor(next.subjectsCreated)),
+  });
   let progressPersistQueue: Promise<void> = Promise.resolve();
-  const enqueueProgressPersist = (message: string): void => {
+  const enqueueProgressPersist = (next: ImportJobProgressState): void => {
     progressPersistQueue = progressPersistQueue
       .then(async () => {
-        if (!applyImportProgressMessage(progress, message)) {
-          return;
-        }
-
         const latestState = await readState(paths.statePath);
         const latestJob = latestState.importJobs[jobId];
         if (!latestJob || latestJob.status !== "running") {
@@ -945,7 +854,7 @@ export async function runImportWorker(
           return;
         }
 
-        latestJob.progress = { ...progress };
+        latestJob.progress = { ...next };
         latestJob.updatedAt = new Date().toISOString();
         latestState.importJobs[jobId] = latestJob;
         await writeState(paths.statePath, latestState);
@@ -971,14 +880,22 @@ export async function runImportWorker(
         dryRun: false,
       },
       shouldStop,
+      onProgress(nextProgress) {
+        const normalizedProgress = normalizeProgress(nextProgress);
+        progress.total = normalizedProgress.total;
+        progress.completed = normalizedProgress.completed;
+        progress.imported = normalizedProgress.imported;
+        progress.failed = normalizedProgress.failed;
+        progress.entriesWritten = normalizedProgress.entriesWritten;
+        progress.subjectsCreated = normalizedProgress.subjectsCreated;
+        enqueueProgressPersist(normalizedProgress);
+      },
       logger: {
         info(message) {
           console.log(message);
-          enqueueProgressPersist(message);
         },
         warn(message) {
           console.warn(message);
-          enqueueProgressPersist(message);
         },
       },
     });
@@ -1279,59 +1196,6 @@ function formatImportJobLine(job: ImportJobState): string {
   return pieces.join(" | ");
 }
 
-const IMPORT_PROGRESS_SELECTION_RE = /parsed=\d+,\s*selected=(\d+),\s*dryRun=/u;
-const IMPORT_PROGRESS_STEP_RE =
-  /^\[(\d+)\/(\d+)\]\s+(imported|failed)\s+.*?(?:\((?:entries=(\d+),\s*subjectsCreated=(\d+))\))?$/u;
-
-function applyImportProgressMessage(
-  progress: ImportJobProgressState,
-  message: string,
-): boolean {
-  const selectionMatch = message.match(IMPORT_PROGRESS_SELECTION_RE);
-  if (selectionMatch) {
-    const total = Number.parseInt(selectionMatch[1] ?? "", 10);
-    if (Number.isFinite(total) && total >= 0) {
-      progress.total = Math.max(progress.total, total);
-      progress.completed = clampProgress(progress.completed, progress.total);
-      return true;
-    }
-  }
-
-  const stepMatch = message.match(IMPORT_PROGRESS_STEP_RE);
-  if (!stepMatch) {
-    return false;
-  }
-
-  const completed = Number.parseInt(stepMatch[1] ?? "", 10);
-  const total = Number.parseInt(stepMatch[2] ?? "", 10);
-  const action = stepMatch[3];
-  const entries = stepMatch[4] ? Number.parseInt(stepMatch[4], 10) : NaN;
-  const subjects = stepMatch[5] ? Number.parseInt(stepMatch[5], 10) : NaN;
-
-  if (!Number.isFinite(completed) || !Number.isFinite(total) || completed < 0 || total < 0) {
-    return false;
-  }
-
-  if (total > progress.total) {
-    progress.total = total;
-  }
-  progress.completed = clampProgress(completed, progress.total);
-
-  if (action === "imported") {
-    progress.imported += 1;
-    if (Number.isFinite(entries) && entries > 0) {
-      progress.entriesWritten += entries;
-    }
-    if (Number.isFinite(subjects) && subjects > 0) {
-      progress.subjectsCreated += subjects;
-    }
-  } else if (action === "failed") {
-    progress.failed += 1;
-  }
-
-  return true;
-}
-
 function formatImportJobStatusDetail(job: ImportJobState): string {
   const lines = [
     `status=${job.status}`,
@@ -1416,9 +1280,10 @@ export async function runImportCommand(
       transcripts: options.transcripts !== false,
       verbose: options.verbose === true,
       shouldStop: input.shouldStop,
-      apiBaseUrl: resolveApiBaseUrl(input.apiConfig),
+      apiBaseUrl: resolveApiBaseUrlFromConfig(input.apiConfig),
       apiToken: readGatewayToken(input.apiConfig),
       openClawHome: resolveOpenClawHome(),
+      onProgress: input.onProgress,
     },
     {},
     input.logger,
@@ -1437,982 +1302,6 @@ export async function runImportCommand(
     ...(memoryDocBackupPath ? { memoryDocBackupPath } : {}),
     ...(userDocBackupPath ? { userDocBackupPath } : {}),
     legacyMemoryCleared,
-  };
-}
-
-interface ImportDetection {
-  platform: ImportPlatform;
-  path: string;
-  detail: string;
-  score: number;
-}
-
-export interface ImportDetections {
-  chatgpt: ImportDetection[];
-  claude: ImportDetection[];
-  grok: ImportDetection[];
-  openclaw: ImportDetection[];
-}
-
-interface ImportSelection {
-  platform: ImportPlatform;
-  filePath: string;
-  interactive: boolean;
-}
-
-interface ImportModelInfo {
-  key: string;
-  name: string;
-  alias?: string;
-  isDefault: boolean;
-}
-
-function isInteractiveTerminal(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
-}
-
-function normalizePathList(values: Array<string | undefined>): string[] {
-  const seen = new Set<string>();
-  const output: string[] = [];
-  for (const value of values) {
-    if (!value) {
-      continue;
-    }
-
-    const trimmed = value.trim();
-    if (!trimmed || seen.has(trimmed)) {
-      continue;
-    }
-
-    seen.add(trimmed);
-    output.push(trimmed);
-  }
-  return output;
-}
-
-function expandHomePath(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed === "~") {
-    return homedir();
-  }
-
-  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
-    return join(homedir(), trimmed.slice(2));
-  }
-
-  return trimmed;
-}
-
-function normalizeCliInputPath(value: string): string {
-  return resolvePath(expandHomePath(value));
-}
-
-function normalizeModelOption(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function isDailyMemoryFile(fileName: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}\.md$/u.test(fileName);
-}
-
-function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) {
-    return "0 B";
-  }
-
-  const units = ["B", "KB", "MB", "GB"] as const;
-  let remaining = value;
-  let unitIndex = 0;
-  while (remaining >= 1024 && unitIndex < units.length - 1) {
-    remaining /= 1024;
-    unitIndex += 1;
-  }
-
-  const formatted = unitIndex === 0 ? `${Math.floor(remaining)}` : remaining.toFixed(1);
-  return `${formatted} ${units[unitIndex]}`;
-}
-
-interface OpenClawMemoryPreflight {
-  markdownFiles: number;
-  dailyFiles: number;
-  otherFiles: number;
-  dateRange: string;
-  sourceSizeBytes: number;
-}
-
-async function readOpenClawMemoryPreflight(memoryPath: string): Promise<OpenClawMemoryPreflight> {
-  const stack = [memoryPath];
-  let markdownFiles = 0;
-  let dailyFiles = 0;
-  let sourceSizeBytes = 0;
-  const dailyDates: string[] = [];
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) {
-      continue;
-    }
-
-    const entries = await readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const absolutePath = join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(absolutePath);
-        continue;
-      }
-
-      if (!(entry.isFile() && entry.name.toLowerCase().endsWith(".md"))) {
-        continue;
-      }
-
-      markdownFiles += 1;
-      const metadata = await stat(absolutePath);
-      sourceSizeBytes += metadata.size;
-
-      if (isDailyMemoryFile(entry.name)) {
-        dailyFiles += 1;
-        dailyDates.push(entry.name.slice(0, 10));
-      }
-    }
-  }
-
-  dailyDates.sort((left, right) => left.localeCompare(right));
-  const dateRange =
-    dailyDates.length > 0 ? `${dailyDates[0]} -> ${dailyDates[dailyDates.length - 1]}` : "n/a";
-  const otherFiles = markdownFiles - dailyFiles;
-
-  return {
-    markdownFiles,
-    dailyFiles,
-    otherFiles,
-    dateRange,
-    sourceSizeBytes,
-  };
-}
-
-function parseImportModelsJson(json: string): ImportModelInfo[] {
-  let parsedValue: unknown;
-  try {
-    parsedValue = JSON.parse(json) as unknown;
-  } catch {
-    return [];
-  }
-
-  const root = toObject(parsedValue);
-  const rawModels = Array.isArray(root.models) ? root.models : [];
-  const models: ImportModelInfo[] = [];
-
-  for (const rawModel of rawModels) {
-    const model = toObject(rawModel);
-    const key = typeof model.key === "string" ? model.key.trim() : "";
-    if (!key) {
-      continue;
-    }
-
-    const name = typeof model.name === "string" && model.name.trim().length > 0 ? model.name.trim() : key;
-    const tags = Array.isArray(model.tags)
-      ? model.tags
-          .filter((entry): entry is string => typeof entry === "string")
-          .map((entry) => entry.trim())
-          .filter((entry) => entry.length > 0)
-      : [];
-    const aliasTag = tags.find((tag) => tag.startsWith("alias:"));
-
-    models.push({
-      key,
-      name,
-      isDefault: tags.includes("default"),
-      ...(typeof aliasTag === "string" && aliasTag.slice(6).trim().length > 0
-        ? { alias: aliasTag.slice(6).trim() }
-        : {}),
-    });
-  }
-
-  return models;
-}
-
-async function listImportModels(): Promise<ImportModelInfo[]> {
-  let result;
-  try {
-    result = await runPluginCommandWithTimeout({
-      argv: ["openclaw", "models", "list", "--json"],
-      timeoutMs: 10_000,
-    });
-  } catch {
-    return [];
-  }
-
-  if (result.code !== 0 || result.stdout.trim().length === 0) {
-    return [];
-  }
-
-  return parseImportModelsJson(result.stdout);
-}
-
-function formatImportModelLabel(model: ImportModelInfo): string {
-  return model.alias ? `${model.name} (${model.alias})` : `${model.name} (${model.key})`;
-}
-
-function resolveModelByQuery(models: ImportModelInfo[], query: string): ImportModelInfo | undefined {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return undefined;
-  }
-
-  return models.find((model) => {
-    const candidates = [model.key, model.name, model.alias]
-      .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
-      .map((entry) => entry.toLowerCase());
-    return candidates.includes(normalizedQuery);
-  });
-}
-
-function createEmptyDetections(): ImportDetections {
-  return {
-    chatgpt: [],
-    claude: [],
-    grok: [],
-    openclaw: [],
-  };
-}
-
-const MAX_IMPORT_SCAN_JSON_BYTES = 250 * 1024 * 1024;
-const IMPORT_CANDIDATE_SAMPLE_LIMIT = 5;
-const IMPORT_PLATFORM_DISFAVORED_FILES: Record<Exclude<ImportPlatform, "openclaw">, string[]> = {
-  chatgpt: [
-    "shared_conversations.json",
-    "group_chats.json",
-    "message_feedback.json",
-    "basispoints.json",
-    "shopping.json",
-    "sora.json",
-    "user.json",
-    "users.json",
-    "projects.json",
-    "memories.json",
-    "prod-mc-auth-mgmt-api.json",
-    "prod-mc-billing.json",
-  ],
-  claude: [
-    "users.json",
-    "projects.json",
-    "memories.json",
-    "user.json",
-    "shared_conversations.json",
-    "group_chats.json",
-    "prod-mc-auth-mgmt-api.json",
-    "prod-mc-billing.json",
-  ],
-  grok: [
-    "prod-mc-auth-mgmt-api.json",
-    "prod-mc-billing.json",
-    "user.json",
-    "users.json",
-    "projects.json",
-    "memories.json",
-    "shared_conversations.json",
-  ],
-};
-
-function scorePathHint(platform: ImportPlatform, filePath: string): number {
-  const normalizedPath = filePath.replaceAll("\\", "/").toLowerCase();
-  const lowerName = basename(normalizedPath).toLowerCase();
-  const hasSegment = (segment: string): boolean =>
-    normalizedPath.includes(`/${segment}/`) || normalizedPath.endsWith(`/${segment}`);
-
-  if (platform === "openclaw") {
-    return normalizedPath.endsWith("/memory") ? 30 : normalizedPath.includes("/memory/") ? 20 : 0;
-  }
-
-  if (platform === "chatgpt") {
-    let score = 0;
-    if (hasSegment("chatgpt") || normalizedPath.includes("chatgpt")) {
-      score += 100;
-    }
-    if (hasSegment("openai") || normalizedPath.includes("openai")) {
-      score += 90;
-    }
-    if (lowerName === "conversations.json" || lowerName === "conversation.json") {
-      score += 70;
-    }
-    if (IMPORT_PLATFORM_DISFAVORED_FILES.chatgpt.includes(lowerName)) {
-      score -= 240;
-    }
-    if (
-      hasSegment("claude") ||
-      normalizedPath.includes("anthropic") ||
-      hasSegment("grok") ||
-      normalizedPath.includes("xai")
-    ) {
-      score -= 120;
-    }
-    return score;
-  }
-
-  if (platform === "claude") {
-    let score = 0;
-    if (hasSegment("claude") || normalizedPath.includes("claude")) {
-      score += 110;
-    }
-    if (hasSegment("anthropic") || normalizedPath.includes("anthropic")) {
-      score += 100;
-    }
-    if (lowerName === "conversations.json" || lowerName === "conversation.json") {
-      score += 70;
-    }
-    if (IMPORT_PLATFORM_DISFAVORED_FILES.claude.includes(lowerName)) {
-      score -= 220;
-    }
-    if (
-      hasSegment("chatgpt") ||
-      normalizedPath.includes("openai") ||
-      hasSegment("grok") ||
-      normalizedPath.includes("xai")
-    ) {
-      score -= 120;
-    }
-    return score;
-  }
-
-  let score = 0;
-  if (hasSegment("grok") || normalizedPath.includes("grok")) {
-    score += 110;
-  }
-  if (hasSegment("xai") || normalizedPath.includes("xai")) {
-    score += 100;
-  }
-  if (lowerName === "prod-grok-backend.json") {
-    score += 220;
-  }
-  if (lowerName === "conversations.json" || lowerName === "conversation.json") {
-    score += 40;
-  }
-  if (IMPORT_PLATFORM_DISFAVORED_FILES.grok.includes(lowerName)) {
-    score -= 220;
-  }
-  if (
-    hasSegment("chatgpt") ||
-    normalizedPath.includes("openai") ||
-    hasSegment("claude") ||
-    normalizedPath.includes("anthropic")
-  ) {
-    score -= 120;
-  }
-  return score;
-}
-
-function readImportConversationSample(raw: unknown): Record<string, unknown>[] {
-  let source: unknown[] = [];
-  if (Array.isArray(raw)) {
-    source = raw;
-  } else if (isObject(raw)) {
-    if (Array.isArray(raw.conversations)) {
-      source = raw.conversations;
-    } else if (Array.isArray(raw.data)) {
-      source = raw.data;
-    }
-  }
-
-  const sampled = source.filter(isObject).slice(0, IMPORT_CANDIDATE_SAMPLE_LIMIT);
-  return sampled;
-}
-
-function readFirstObjectFromArray(value: unknown): Record<string, unknown> | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  for (const item of value) {
-    if (isObject(item)) {
-      return item;
-    }
-  }
-
-  return null;
-}
-
-function scoreRawStructureHint(platform: Exclude<ImportPlatform, "openclaw">, raw: unknown): number {
-  const sample = readImportConversationSample(raw);
-  if (sample.length === 0) {
-    return 0;
-  }
-
-  if (platform === "chatgpt") {
-    let score = 0;
-    for (const conversation of sample) {
-      if (isObject(conversation.mapping)) {
-        score += 90;
-      }
-      if (typeof conversation.current_node === "string") {
-        score += 70;
-      }
-      if (typeof conversation.create_time === "number" || typeof conversation.update_time === "number") {
-        score += 25;
-      }
-      if (Array.isArray(conversation.chat_messages)) {
-        score -= 40;
-      }
-      if (isObject(conversation.conversation) && Array.isArray(conversation.responses)) {
-        score -= 70;
-      }
-      if (conversation.is_anonymous === true) {
-        score -= 90;
-      }
-    }
-    return score;
-  }
-
-  if (platform === "claude") {
-    let score = 0;
-    for (const conversation of sample) {
-      if (Array.isArray(conversation.chat_messages)) {
-        score += 90;
-      }
-      if (typeof conversation.uuid === "string" || typeof conversation.conversation_uuid === "string") {
-        score += 40;
-      }
-      if (typeof conversation.name === "string") {
-        score += 25;
-      }
-      if (isObject(conversation.account)) {
-        score += 10;
-      }
-      const firstMessage = readFirstObjectFromArray(conversation.chat_messages ?? conversation.messages);
-      if (
-        firstMessage &&
-        (typeof firstMessage.sender === "string" || typeof firstMessage.role === "string")
-      ) {
-        score += 20;
-      }
-      if (isObject(conversation.mapping) || typeof conversation.current_node === "string") {
-        score -= 60;
-      }
-      if (isObject(conversation.conversation) && Array.isArray(conversation.responses)) {
-        score -= 80;
-      }
-    }
-    return score;
-  }
-
-  let score = 0;
-  if (isObject(raw)) {
-    if (Array.isArray(raw.projects)) {
-      score += 20;
-    }
-    if (Array.isArray(raw.tasks)) {
-      score += 20;
-    }
-    if (Array.isArray(raw.media_posts)) {
-      score += 20;
-    }
-  }
-
-  for (const conversation of sample) {
-    if (isObject(conversation.conversation) && Array.isArray(conversation.responses)) {
-      score += 140;
-    }
-    if (Array.isArray(conversation.responses)) {
-      score += 40;
-      const firstResponse = readFirstObjectFromArray(conversation.responses);
-      if (firstResponse && isObject(firstResponse.response)) {
-        score += 25;
-      }
-    }
-    if (isObject(conversation.messagesById)) {
-      score += 70;
-    }
-    if (Array.isArray(conversation.turns) || Array.isArray(conversation.messages)) {
-      score += 20;
-    }
-    if (Array.isArray(conversation.chat_messages) && typeof conversation.uuid === "string") {
-      score -= 90;
-    }
-    if (isObject(conversation.mapping) || typeof conversation.current_node === "string") {
-      score -= 80;
-    }
-  }
-
-  return score;
-}
-
-function selectParsedConversations(platform: Exclude<ImportPlatform, "openclaw">, raw: unknown) {
-  if (platform === "chatgpt") {
-    return parseChatGptConversations(raw);
-  }
-  if (platform === "claude") {
-    return parseClaudeConversations(raw);
-  }
-  return parseGrokConversations(raw);
-}
-
-function countExtractableConversations(platform: Exclude<ImportPlatform, "openclaw">, raw: unknown): number {
-  const parsed = selectParsedConversations(platform, raw);
-  return parsed.filter((conversation) => conversation.messages.length > 0).length;
-}
-
-interface ImportJsonCandidateScore {
-  platform: Exclude<ImportPlatform, "openclaw">;
-  extractableConversations: number;
-  score: number;
-}
-
-function scoreImportJsonCandidate(
-  platform: Exclude<ImportPlatform, "openclaw">,
-  filePath: string,
-  parsed: unknown,
-): ImportJsonCandidateScore | null {
-  const extractableCount = countExtractableConversations(platform, parsed);
-  if (extractableCount <= 0) {
-    return null;
-  }
-
-  const pathScore = scorePathHint(platform, filePath);
-  const structureScore = scoreRawStructureHint(platform, parsed);
-  const confidenceScore = pathScore + structureScore;
-  if (confidenceScore < 0) {
-    return null;
-  }
-
-  return {
-    platform,
-    extractableConversations: extractableCount,
-    score: extractableCount * 100 + confidenceScore,
-  };
-}
-
-function isPreferredImportFileName(platform: Exclude<ImportPlatform, "openclaw">, filePath: string): boolean {
-  const lowerName = basename(filePath).toLowerCase();
-  if (platform === "grok") {
-    return (
-      lowerName === "prod-grok-backend.json" ||
-      lowerName === "conversations.json" ||
-      lowerName === "conversation.json"
-    );
-  }
-
-  return lowerName === "conversations.json" || lowerName === "conversation.json";
-}
-
-function shouldSkipDirectory(name: string): boolean {
-  const lower = name.toLowerCase();
-  return (
-    lower === "node_modules" ||
-    lower === ".git" ||
-    lower === "dist" ||
-    lower === "build" ||
-    lower === ".next" ||
-    lower === ".cache"
-  );
-}
-
-async function pathType(path: string): Promise<"file" | "dir" | null> {
-  try {
-    const metadata = await stat(path);
-    if (metadata.isDirectory()) {
-      return "dir";
-    }
-    if (metadata.isFile()) {
-      return "file";
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function readJsonFile(path: string): Promise<unknown | null> {
-  try {
-    const metadata = await stat(path);
-    if (!metadata.isFile() || metadata.size > MAX_IMPORT_SCAN_JSON_BYTES) {
-      return null;
-    }
-
-    const rawText = await readFile(path, "utf8");
-    return JSON.parse(rawText) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-async function resolveImportJsonPathFromDirectory(
-  directory: string,
-  platform: Exclude<ImportPlatform, "openclaw">,
-): Promise<string | null> {
-  const candidates = await listJsonCandidates(directory, 6, 500);
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const sortedCandidates = [...candidates].sort((left, right) => left.localeCompare(right));
-  const nonDisfavored = sortedCandidates.filter((candidatePath) => {
-    const lowerName = basename(candidatePath).toLowerCase();
-    return !IMPORT_PLATFORM_DISFAVORED_FILES[platform].includes(lowerName);
-  });
-
-  let bestParsedCandidate: { path: string; score: number } | null = null;
-  for (const candidatePath of nonDisfavored) {
-    const parsed = await readJsonFile(candidatePath);
-    if (parsed === null) {
-      continue;
-    }
-
-    const candidateScore = scoreImportJsonCandidate(platform, candidatePath, parsed);
-    if (!candidateScore) {
-      continue;
-    }
-
-    if (!bestParsedCandidate || candidateScore.score > bestParsedCandidate.score) {
-      bestParsedCandidate = {
-        path: candidatePath,
-        score: candidateScore.score,
-      };
-    }
-  }
-
-  if (bestParsedCandidate) {
-    return bestParsedCandidate.path;
-  }
-
-  if (nonDisfavored.length === 1) {
-    return nonDisfavored[0] ?? null;
-  }
-
-  const preferredByName = nonDisfavored.filter((candidatePath) =>
-    isPreferredImportFileName(platform, candidatePath),
-  );
-  if (preferredByName.length === 1) {
-    return preferredByName[0] ?? null;
-  }
-
-  const hinted = nonDisfavored.filter((candidatePath) => scorePathHint(platform, candidatePath) > 0);
-  if (hinted.length === 1) {
-    return hinted[0] ?? null;
-  }
-
-  return null;
-}
-
-async function resolveImportPathForPlatform(platform: ImportPlatform, rawPath: string): Promise<string> {
-  const normalizedPath = normalizeCliInputPath(rawPath);
-  const detectedType = await pathType(normalizedPath);
-
-  if (platform === "openclaw") {
-    if (detectedType !== "dir") {
-      throw new Error(isDirectoryErrorMessage(normalizedPath));
-    }
-    return normalizedPath;
-  }
-
-  if (detectedType === "file") {
-    return normalizedPath;
-  }
-
-  if (detectedType === "dir") {
-    const resolvedJson = await resolveImportJsonPathFromDirectory(
-      normalizedPath,
-      platform as Exclude<ImportPlatform, "openclaw">,
-    );
-    if (!resolvedJson) {
-      throw new Error(`No ${platformLabel(platform)} JSON export found under directory: ${normalizedPath}`);
-    }
-    return resolvedJson;
-  }
-
-  throw new Error(`Import file does not exist: ${normalizedPath}`);
-}
-
-async function countMarkdownFiles(root: string, maxDepth = 3, maxFiles = 1_000): Promise<number> {
-  let count = 0;
-  const stack: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
-
-  while (stack.length > 0 && count < maxFiles) {
-    const current = stack.pop();
-    if (!current) {
-      continue;
-    }
-
-    let entries;
-    try {
-      entries = await readdir(current.path, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-        count += 1;
-        if (count >= maxFiles) {
-          break;
-        }
-      } else if (entry.isDirectory() && current.depth < maxDepth && !shouldSkipDirectory(entry.name)) {
-        stack.push({ path: join(current.path, entry.name), depth: current.depth + 1 });
-      }
-    }
-  }
-
-  return count;
-}
-
-async function listJsonCandidates(root: string, maxDepth = 3, maxFiles = 300): Promise<string[]> {
-  const candidates: string[] = [];
-  const stack: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
-
-  while (stack.length > 0 && candidates.length < maxFiles) {
-    const current = stack.pop();
-    if (!current) {
-      continue;
-    }
-
-    let entries;
-    try {
-      entries = await readdir(current.path, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const absolutePath = join(current.path, entry.name);
-
-      if (entry.isDirectory() && current.depth < maxDepth && !shouldSkipDirectory(entry.name)) {
-        stack.push({ path: absolutePath, depth: current.depth + 1 });
-        continue;
-      }
-
-      if (!(entry.isFile() && entry.name.toLowerCase().endsWith(".json"))) {
-        continue;
-      }
-
-      const hint = entry.name.toLowerCase();
-      const hinted =
-        hint.includes("chatgpt") ||
-        hint.includes("claude") ||
-        hint.includes("grok") ||
-        hint.includes("openai") ||
-        hint.includes("conversation") ||
-        hint.includes("export");
-
-      if (!hinted && current.depth > 1) {
-        continue;
-      }
-
-      candidates.push(absolutePath);
-      if (candidates.length >= maxFiles) {
-        break;
-      }
-    }
-  }
-
-  return candidates;
-}
-
-function sortDetections(detections: ImportDetection[]): ImportDetection[] {
-  return detections.sort((left, right) => {
-    if (right.score !== left.score) {
-      return right.score - left.score;
-    }
-    return left.path.localeCompare(right.path);
-  });
-}
-
-export async function detectImportSources(workspaceDir?: string): Promise<ImportDetections> {
-  const detections = createEmptyDetections();
-  const roots = normalizePathList([
-    workspaceDir,
-    process.cwd(),
-    join(resolveOpenClawHome(), "workspace"),
-    join(homedir(), "Downloads"),
-    join(homedir(), "Desktop"),
-  ]);
-
-  const jsonCandidates = new Set<string>();
-  for (const root of roots) {
-    if ((await pathType(root)) !== "dir") {
-      continue;
-    }
-
-    const memoryPath = join(root, "memory");
-    if ((await pathType(memoryPath)) === "dir") {
-      const markdownCount = await countMarkdownFiles(memoryPath);
-      if (markdownCount > 0) {
-        detections.openclaw.push({
-          platform: "openclaw",
-          path: memoryPath,
-          detail: `${markdownCount} markdown file${markdownCount === 1 ? "" : "s"}`,
-          score: 50 + scorePathHint("openclaw", memoryPath) + Math.min(markdownCount, 50),
-        });
-      }
-    }
-
-    const discoveredJson = await listJsonCandidates(root, 6, 600);
-    for (const candidate of discoveredJson) {
-      jsonCandidates.add(candidate);
-    }
-  }
-
-  for (const filePath of jsonCandidates) {
-    const parsed = await readJsonFile(filePath);
-    if (parsed === null) {
-      continue;
-    }
-
-    let bestCandidate: ImportJsonCandidateScore | null = null;
-    for (const platform of ["chatgpt", "claude", "grok"] as const) {
-      const scored = scoreImportJsonCandidate(platform, filePath, parsed);
-      if (!scored) {
-        continue;
-      }
-
-      if (!bestCandidate || scored.score > bestCandidate.score) {
-        bestCandidate = scored;
-      }
-    }
-
-    if (bestCandidate) {
-      detections[bestCandidate.platform].push({
-        platform: bestCandidate.platform,
-        path: filePath,
-        detail: `${bestCandidate.extractableConversations} conversation${
-          bestCandidate.extractableConversations === 1 ? "" : "s"
-        }`,
-        score: bestCandidate.score,
-      });
-    }
-  }
-
-  detections.chatgpt = sortDetections(detections.chatgpt);
-  detections.claude = sortDetections(detections.claude);
-  detections.grok = sortDetections(detections.grok);
-  detections.openclaw = sortDetections(detections.openclaw);
-
-  return detections;
-}
-
-function unwrapPromptValue<T>(value: T | symbol): T {
-  if (clackIsCancel(value)) {
-    throw new Error("Import canceled");
-  }
-  return value;
-}
-
-function platformLabel(platform: ImportPlatform): string {
-  if (platform === "chatgpt") {
-    return "ChatGPT export";
-  }
-  if (platform === "claude") {
-    return "Claude export";
-  }
-  if (platform === "grok") {
-    return "Grok export";
-  }
-  return "OpenClaw legacy memory";
-}
-
-async function resolveImportSelection(input: {
-  platformArg: unknown;
-  fileArg: unknown;
-  workspaceDir?: string;
-}): Promise<ImportSelection> {
-  const parsedPlatform = parseImportPlatform(input.platformArg);
-  const fileArg = typeof input.fileArg === "string" && input.fileArg.trim().length > 0 ? input.fileArg.trim() : null;
-
-  if (parsedPlatform && fileArg) {
-    return {
-      platform: parsedPlatform,
-      filePath: await resolveImportPathForPlatform(parsedPlatform, fileArg),
-      interactive: false,
-    };
-  }
-
-  if (input.platformArg !== undefined && parsedPlatform === undefined) {
-    throw new Error('platform must be one of: "chatgpt", "claude", "grok", "openclaw"');
-  }
-
-  if (!isInteractiveTerminal()) {
-    throw new Error("Import requires interactive TTY when platform/file args are omitted.");
-  }
-
-  clackIntro("🦞 Zettelclaw import");
-  const detectSpin = clackSpinner();
-  detectSpin.start("Auto-detecting import sources");
-  const detections = await detectImportSources(input.workspaceDir);
-  detectSpin.stop("Auto-detection complete");
-
-  const platform =
-    parsedPlatform ??
-    unwrapPromptValue(
-      await clackSelect({
-        message: "Which source do you want to import?",
-        options: (["openclaw", "chatgpt", "claude", "grok"] as const).map((value) => {
-          const top = detections[value][0];
-          return {
-            value,
-            label: top ? `${platformLabel(value)} (detected)` : platformLabel(value),
-            hint: top ? `${top.path} • ${top.detail}` : "No source auto-detected",
-          };
-        }),
-      }),
-    );
-
-  const platformDetections = detections[platform];
-
-  let selectedPath = fileArg;
-  if (!selectedPath) {
-    if (platformDetections.length > 0) {
-      const selectedCandidate = unwrapPromptValue(
-        await clackSelect({
-          message: `Choose ${platformLabel(platform)} source`,
-          options: [
-            ...platformDetections.slice(0, 6).map((detection) => ({
-              value: detection.path,
-              label: detection.path,
-              hint: detection.detail,
-            })),
-            {
-              value: "__manual__",
-              label: "Enter a path manually",
-              hint: "Use this if your source was not auto-detected",
-            },
-          ],
-        }),
-      );
-
-      if (selectedCandidate === "__manual__") {
-        selectedPath = unwrapPromptValue(
-          await clackText({
-            message:
-              platform === "openclaw"
-                ? "Path to legacy OpenClaw memory directory"
-                : `Path to ${platformLabel(platform)} JSON export (file or directory)`,
-            placeholder: platform === "openclaw" ? "./memory" : "./export.json",
-          }),
-        );
-      } else {
-        selectedPath = selectedCandidate;
-      }
-    } else {
-      selectedPath = unwrapPromptValue(
-        await clackText({
-          message:
-            platform === "openclaw"
-              ? "Path to legacy OpenClaw memory directory"
-              : `Path to ${platformLabel(platform)} JSON export (file or directory)`,
-          placeholder: platform === "openclaw" ? "./memory" : "./export.json",
-        }),
-      );
-    }
-  }
-
-  const resolvedPath = await resolveImportPathForPlatform(platform, selectedPath.trim());
-
-  return {
-    platform,
-    filePath: resolvedPath,
-    interactive: true,
   };
 }
 
@@ -2541,31 +1430,12 @@ export async function firePostInitGuidanceEvent(paths: InitPaths): Promise<Guida
 }
 
 export async function ensureLogStoreFiles(paths: InitPaths): Promise<void> {
-  await mkdir(paths.logDir, { recursive: true });
-
-  try {
-    await readFile(paths.logPath, "utf8");
-  } catch {
-    await writeFile(paths.logPath, "", "utf8");
-  }
-
-  try {
-    await readFile(paths.subjectsPath, "utf8");
-  } catch {
-    await writeFile(paths.subjectsPath, "{}\n", "utf8");
-  }
-
-  try {
-    await readFile(paths.statePath, "utf8");
-  } catch {
-    await writeState(paths.statePath, {
-      extractedSessions: {},
-      failedSessions: {},
-      importedConversations: {},
-      eventUsage: {},
-      importJobs: {},
-    });
-  }
+  await ensureStoreFiles({
+    logDir: paths.logDir,
+    logPath: paths.logPath,
+    subjectsPath: paths.subjectsPath,
+    statePath: paths.statePath,
+  });
 }
 
 export async function updateOpenClawConfigForInit(configPath: string): Promise<void> {
@@ -3666,6 +2536,8 @@ export function registerZettelclawCli(
     { commands: ["zettelclaw"] },
   );
 }
+
+export { detectImportSources };
 
 export const __cliTestExports = {
   resolvePaths,
