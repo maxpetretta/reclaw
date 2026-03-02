@@ -252,6 +252,40 @@ export async function queryById(logPath: string, id: string): Promise<LogEntry |
   return undefined;
 }
 
+export async function queryByIds(logPath: string, ids: string[]): Promise<LogEntry[]> {
+  const normalizedIds = [...new Set(
+    ids
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0),
+  )];
+  if (normalizedIds.length === 0) {
+    return [];
+  }
+
+  let content: string;
+  try {
+    content = await readFile(logPath, "utf8");
+  } catch (error) {
+    if (isEnoent(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const idSet = new Set(normalizedIds);
+  const entries: LogEntry[] = [];
+
+  for (const line of content.split("\n")) {
+    const entry = parseLine(line);
+    if (!entry || !idSet.has(entry.id)) {
+      continue;
+    }
+    entries.push(entry);
+  }
+
+  return entries.sort(sortByTimestampDesc);
+}
+
 export async function queryBySubjects(logPath: string, subjects: string[]): Promise<LogEntry[]> {
   const normalizedSubjects = normalizeSubjectList(subjects);
   if (normalizedSubjects.size === 0) {

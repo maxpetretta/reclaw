@@ -17,6 +17,18 @@ interface RetryOptions {
   maxDelayMs?: number;
 }
 
+const CRON_RETRY_SHORT: RetryOptions = {
+  attempts: 3,
+  baseDelayMs: 900,
+  maxDelayMs: 6_000,
+};
+
+const CRON_RETRY_MEDIUM: RetryOptions = {
+  attempts: 3,
+  baseDelayMs: 1_000,
+  maxDelayMs: 8_000,
+};
+
 interface CronAddResponse {
   id?: unknown;
 }
@@ -74,6 +86,13 @@ export interface ScheduledSubagent {
   jobId: string;
 }
 
+async function runOpenClawRetryingCommand(
+  args: string[],
+  options: OpenClawCommandOptions & { retries?: RetryOptions },
+): Promise<OpenClawCommandResult> {
+  return await runOpenClawWithRetries(args, options);
+}
+
 export function runOpenClaw(
   args: string[],
   options: OpenClawCommandOptions = {},
@@ -122,7 +141,7 @@ export async function scheduleSubagentCronJob(
   const sessionName = params.sessionName?.trim() || "zettelclaw-import-extract";
   const timeoutSeconds = params.timeoutSeconds ?? 1_800;
 
-  const legacyResult = await runOpenClawWithRetries(
+  const legacyResult = await runOpenClawRetryingCommand(
     buildCronAddArgs({
       at: "+0s",
       session: sessionName,
@@ -133,11 +152,7 @@ export async function scheduleSubagentCronJob(
     {
       allowFailure: true,
       timeoutMs: 60_000,
-      retries: {
-        attempts: 3,
-        baseDelayMs: 900,
-        maxDelayMs: 6_000,
-      },
+      retries: CRON_RETRY_SHORT,
     },
   );
 
@@ -147,7 +162,7 @@ export async function scheduleSubagentCronJob(
     };
   }
 
-  const compatibleResult = await runOpenClawWithRetries(
+  const compatibleResult = await runOpenClawRetryingCommand(
     buildCronAddArgs({
       at: new Date(Date.now() + 3_000).toISOString(),
       session: "isolated",
@@ -158,11 +173,7 @@ export async function scheduleSubagentCronJob(
     {
       allowFailure: true,
       timeoutMs: 60_000,
-      retries: {
-        attempts: 3,
-        baseDelayMs: 900,
-        maxDelayMs: 6_000,
-      },
+      retries: CRON_RETRY_SHORT,
     },
   );
 
@@ -323,7 +334,7 @@ export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): 
 
 export async function runCronJobNow(jobId: string, timeoutMs = 1_900_000): Promise<void> {
   const boundedTimeoutMs = Math.max(30_000, Math.min(Math.floor(timeoutMs), 2_147_000_000));
-  const result = await runOpenClawWithRetries(
+  const result = await runOpenClawRetryingCommand(
     [
       "cron",
       "run",
@@ -335,11 +346,7 @@ export async function runCronJobNow(jobId: string, timeoutMs = 1_900_000): Promi
     {
       allowFailure: true,
       timeoutMs: boundedTimeoutMs + 30_000,
-      retries: {
-        attempts: 3,
-        baseDelayMs: 1_000,
-        maxDelayMs: 8_000,
-      },
+      retries: CRON_RETRY_MEDIUM,
     },
   );
 

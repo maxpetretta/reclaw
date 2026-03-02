@@ -429,66 +429,68 @@ export async function extractImportedConversation(
     ],
   });
 
-  const firstOutput = await runtimeDeps.callModel({
-    model: options.model,
-    systemPrompt,
-    userPrompt,
-    apiBaseUrl: options.apiBaseUrl,
-    apiToken: options.apiToken,
-  });
-
-  let latestOutput = firstOutput;
-  let parsed = parseExtractionJsonl(latestOutput, {
+  const parseOptions = {
     includeTimestampHint: true,
     dropHandoff: true,
-  });
-  if (parsed.processableLines > 0 && parsed.entries.length === 0) {
-    const repairedOutput = await runtimeDeps.callModel({
-      model: options.model,
-      systemPrompt,
-      userPrompt: buildRepairUserPrompt(userPrompt, latestOutput),
-      apiBaseUrl: options.apiBaseUrl,
-      apiToken: options.apiToken,
-    });
-    latestOutput = repairedOutput;
-    parsed = parseExtractionJsonl(latestOutput, {
-      includeTimestampHint: true,
-      dropHandoff: true,
-    });
-  }
+  } as const;
+  const strategyPrompts: Array<{ stage: "initial" | "repair" | "quality"; prompt: string }> = [
+    { stage: "initial", prompt: userPrompt },
+  ];
+  let parsed = parseExtractionJsonl("", parseOptions);
+  let latestOutput = "";
 
-  if (parsed.entries.length > 0) {
-    parsed = {
-      ...parsed,
-      entries: dedupeParsedEntries(parsed.entries),
-    };
-  }
-
-  const qualityIssues = evaluateQualityIssues({
-    parsedEntries: parsed.entries,
-    conversation: options.conversation,
-    subjects,
-  });
-
-  if (parsed.entries.length > 0 && shouldRunQualityRepair(qualityIssues)) {
-    const qualityOutput = await runtimeDeps.callModel({
-      model: options.model,
-      systemPrompt,
-      userPrompt: buildQualityRepairUserPrompt(userPrompt, latestOutput, qualityIssues),
-      apiBaseUrl: options.apiBaseUrl,
-      apiToken: options.apiToken,
-    });
-    const qualityParsed = parseExtractionJsonl(qualityOutput, {
-      includeTimestampHint: true,
-      dropHandoff: true,
-    });
-    if (qualityParsed.entries.length > 0) {
-      parsed = {
-        ...qualityParsed,
-        entries: dedupeParsedEntries(qualityParsed.entries),
-      };
-      latestOutput = qualityOutput;
+  while (strategyPrompts.length > 0) {
+    const current = strategyPrompts.shift();
+    if (!current) {
+      break;
     }
+
+    latestOutput = await runtimeDeps.callModel({
+      model: options.model,
+      systemPrompt,
+      userPrompt: current.prompt,
+      apiBaseUrl: options.apiBaseUrl,
+      apiToken: options.apiToken,
+    });
+
+    parsed = parseExtractionJsonl(latestOutput, parseOptions);
+    if (parsed.entries.length > 0) {
+      parsed = {
+        ...parsed,
+        entries: dedupeParsedEntries(parsed.entries),
+      };
+    }
+
+    if (parsed.processableLines > 0 && parsed.entries.length === 0) {
+      if (current.stage === "initial") {
+        strategyPrompts.push({
+          stage: "repair",
+          prompt: buildRepairUserPrompt(userPrompt, latestOutput),
+        });
+        continue;
+      }
+      break;
+    }
+
+    const qualityIssues = evaluateQualityIssues({
+      parsedEntries: parsed.entries,
+      conversation: options.conversation,
+      subjects,
+    });
+
+    if (
+      parsed.entries.length > 0 &&
+      shouldRunQualityRepair(qualityIssues) &&
+      current.stage !== "quality"
+    ) {
+      strategyPrompts.push({
+        stage: "quality",
+        prompt: buildQualityRepairUserPrompt(userPrompt, latestOutput, qualityIssues),
+      });
+      continue;
+    }
+
+    break;
   }
 
   if (parsed.processableLines > 0 && parsed.entries.length === 0) {

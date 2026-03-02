@@ -161,6 +161,8 @@ interface ImportJsonCandidateScore {
   score: number;
 }
 
+const IMPORT_JSON_PLATFORMS = ["chatgpt", "claude", "grok"] as const;
+
 function scoreImportJsonCandidate(
   platform: Exclude<ImportPlatform, "openclaw">,
   filePath: string,
@@ -175,6 +177,35 @@ function scoreImportJsonCandidate(
     extractableConversations: extractableCount,
     score: extractableCount * 100 + scorePathHint(platform, filePath),
   };
+}
+
+function scoreBestImportJsonPlatform(filePath: string, parsed: unknown): {
+  platform: Exclude<ImportPlatform, "openclaw">;
+  extractableConversations: number;
+  score: number;
+} | null {
+  let bestCandidate: {
+    platform: Exclude<ImportPlatform, "openclaw">;
+    extractableConversations: number;
+    score: number;
+  } | null = null;
+
+  for (const platform of IMPORT_JSON_PLATFORMS) {
+    const scored = scoreImportJsonCandidate(platform, filePath, parsed);
+    if (!scored) {
+      continue;
+    }
+
+    if (!bestCandidate || scored.score > bestCandidate.score) {
+      bestCandidate = {
+        platform,
+        extractableConversations: scored.extractableConversations,
+        score: scored.score,
+      };
+    }
+  }
+
+  return bestCandidate;
 }
 
 async function countMarkdownFiles(root: string, maxDepth = 3, maxFiles = 1_000): Promise<number> {
@@ -377,25 +408,7 @@ export async function detectImportSources(workspaceDir?: string): Promise<Import
       continue;
     }
 
-    let bestCandidate: {
-      platform: Exclude<ImportPlatform, "openclaw">;
-      extractableConversations: number;
-      score: number;
-    } | null = null;
-    for (const platform of ["chatgpt", "claude", "grok"] as const) {
-      const scored = scoreImportJsonCandidate(platform, filePath, parsed);
-      if (!scored) {
-        continue;
-      }
-
-      if (!bestCandidate || scored.score > bestCandidate.score) {
-        bestCandidate = {
-          platform,
-          extractableConversations: scored.extractableConversations,
-          score: scored.score,
-        };
-      }
-    }
+    const bestCandidate = scoreBestImportJsonPlatform(filePath, parsed);
 
     if (bestCandidate) {
       detections[bestCandidate.platform].push({

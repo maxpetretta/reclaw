@@ -463,33 +463,39 @@ export async function writeState(path: string, state: ZettelclawState): Promise<
   await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
+export async function updateState(
+  path: string,
+  mutator: (state: ZettelclawState) => void | Promise<void>,
+): Promise<ZettelclawState> {
+  const state = await readState(path);
+  await mutator(state);
+  await writeState(path, state);
+  return state;
+}
+
 export async function markExtracted(
   path: string,
   sessionId: string,
   entryCount: number,
 ): Promise<void> {
-  const state = await readState(path);
-
-  state.extractedSessions[sessionId] = {
-    at: new Date().toISOString(),
-    entries: entryCount,
-  };
-
-  delete state.failedSessions[sessionId];
-  await writeState(path, state);
+  await updateState(path, (state) => {
+    state.extractedSessions[sessionId] = {
+      at: new Date().toISOString(),
+      entries: entryCount,
+    };
+    delete state.failedSessions[sessionId];
+  });
 }
 
 export async function markFailed(path: string, sessionId: string, error: string): Promise<void> {
-  const state = await readState(path);
-  const previous = state.failedSessions[sessionId];
-
-  state.failedSessions[sessionId] = {
-    at: new Date().toISOString(),
-    error,
-    retries: (previous?.retries ?? 0) + 1,
-  };
-
-  await writeState(path, state);
+  await updateState(path, (state) => {
+    const previous = state.failedSessions[sessionId];
+    state.failedSessions[sessionId] = {
+      at: new Date().toISOString(),
+      error,
+      retries: (previous?.retries ?? 0) + 1,
+    };
+  });
 }
 
 export function isExtracted(state: ZettelclawState, sessionId: string): boolean {
@@ -522,47 +528,45 @@ export async function incrementEventUsage(
     return;
   }
 
-  const state = await readState(path);
-  const now = new Date().toISOString();
+  await updateState(path, (state) => {
+    const now = new Date().toISOString();
 
-  for (const eventId of normalizedIds) {
-    const existing = state.eventUsage[eventId] ?? {
-      memoryGetCount: 0,
-      memorySearchCount: 0,
-      citationCount: 0,
-      lastAccessAt: now,
-    };
+    for (const eventId of normalizedIds) {
+      const existing = state.eventUsage[eventId] ?? {
+        memoryGetCount: 0,
+        memorySearchCount: 0,
+        citationCount: 0,
+        lastAccessAt: now,
+      };
 
-    if (kind === "memory_get") {
-      existing.memoryGetCount += 1;
-    } else if (kind === "memory_search") {
-      existing.memorySearchCount += 1;
-    } else {
-      existing.citationCount += 1;
+      if (kind === "memory_get") {
+        existing.memoryGetCount += 1;
+      } else if (kind === "memory_search") {
+        existing.memorySearchCount += 1;
+      } else {
+        existing.citationCount += 1;
+      }
+
+      existing.lastAccessAt = now;
+      state.eventUsage[eventId] = existing;
     }
-
-    existing.lastAccessAt = now;
-    state.eventUsage[eventId] = existing;
-  }
-
-  await writeState(path, state);
+  });
 }
 
 export async function pruneState(path: string, maxAgeDays = 30): Promise<void> {
-  const state = await readState(path);
-  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  await updateState(path, (state) => {
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
 
-  for (const [sessionId, extracted] of Object.entries(state.extractedSessions)) {
-    if (!Number.isFinite(Date.parse(extracted.at)) || Date.parse(extracted.at) < cutoff) {
-      delete state.extractedSessions[sessionId];
+    for (const [sessionId, extracted] of Object.entries(state.extractedSessions)) {
+      if (!Number.isFinite(Date.parse(extracted.at)) || Date.parse(extracted.at) < cutoff) {
+        delete state.extractedSessions[sessionId];
+      }
     }
-  }
 
-  for (const [sessionId, failed] of Object.entries(state.failedSessions)) {
-    if (!Number.isFinite(Date.parse(failed.at)) || Date.parse(failed.at) < cutoff) {
-      delete state.failedSessions[sessionId];
+    for (const [sessionId, failed] of Object.entries(state.failedSessions)) {
+      if (!Number.isFinite(Date.parse(failed.at)) || Date.parse(failed.at) < cutoff) {
+        delete state.failedSessions[sessionId];
+      }
     }
-  }
-
-  await writeState(path, state);
+  });
 }
