@@ -1,4 +1,4 @@
-import { readState, updateState, type ImportJobState, type ZettelclawState } from "../state";
+import { readState, updateState, type ImportJobState, type ReclawState } from "../state";
 
 function cloneJob(job: ImportJobState): ImportJobState {
   return {
@@ -25,7 +25,7 @@ export async function createImportJob(statePath: string, job: ImportJobState): P
 export async function updateImportJob(
   statePath: string,
   jobId: string,
-  mutator: (job: ImportJobState, state: ZettelclawState) => void,
+  mutator: (job: ImportJobState, state: ReclawState) => void,
 ): Promise<ImportJobState | undefined> {
   let updated: ImportJobState | undefined;
 

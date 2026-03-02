@@ -3,17 +3,17 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "zettelclaw-codex",
+      "name": "reclaw-codex",
       "devDependencies": {
         "@biomejs/biome": "2.4.3",
         "@typescript/native-preview": "7.0.0-dev.20260219.1",
       },
     },
     "packages/cli": {
-      "name": "@zettelclaw/cli",
+      "name": "@reclaw/cli",
       "version": "2026.2.23",
       "bin": {
-        "zettelclaw": "bin/zettelclaw.js",
+        "reclaw": "bin/reclaw.js",
       },
       "dependencies": {
         "@clack/prompts": "1.0.1",
@@ -23,7 +23,7 @@
       },
     },
     "packages/plugin": {
-      "name": "zettelclaw",
+      "name": "reclaw",
       "version": "3.0.0",
       "dependencies": {
         "@clack/prompts": "1.0.1",
@@ -37,14 +37,14 @@
       },
     },
     "packages/skill": {
-      "name": "@zettelclaw/skill",
+      "name": "@reclaw/skill",
       "version": "2026.2.23",
       "devDependencies": {
         "@types/bun": "1.2.5",
       },
     },
     "packages/website": {
-      "name": "@zettelclaw/website",
+      "name": "@reclaw/website",
       "version": "2026.2.23",
       "dependencies": {
         "@astrojs/sitemap": "3.6.0",
@@ -912,11 +912,11 @@
 
     "@whiskeysockets/baileys": ["@whiskeysockets/baileys@7.0.0-rc.9", "", { "dependencies": { "@cacheable/node-cache": "^1.4.0", "@hapi/boom": "^9.1.3", "async-mutex": "^0.5.0", "libsignal": "git+https://github.com/whiskeysockets/libsignal-node.git", "lru-cache": "^11.1.0", "music-metadata": "^11.7.0", "p-queue": "^9.0.0", "pino": "^9.6", "protobufjs": "^7.2.4", "ws": "^8.13.0" }, "peerDependencies": { "audio-decode": "^2.1.3", "jimp": "^1.6.0", "link-preview-js": "^3.0.0", "sharp": "*" }, "optionalPeers": ["audio-decode", "jimp", "link-preview-js"] }, "sha512-YFm5gKXfDP9byCXCW3OPHKXLzrAKzolzgVUlRosHHgwbnf2YOO3XknkMm6J7+F0ns8OA0uuSBhgkRHTDtqkacw=="],
 
-    "@zettelclaw/cli": ["@zettelclaw/cli@workspace:packages/cli"],
+    "@reclaw/cli": ["@reclaw/cli@workspace:packages/cli"],
 
-    "@zettelclaw/skill": ["@zettelclaw/skill@workspace:packages/skill"],
+    "@reclaw/skill": ["@reclaw/skill@workspace:packages/skill"],
 
-    "@zettelclaw/website": ["@zettelclaw/website@workspace:packages/website"],
+    "@reclaw/website": ["@reclaw/website@workspace:packages/website"],
 
     "abbrev": ["abbrev@3.0.1", "", {}, "sha512-AO2ac6pjRB3SJmGJo+v5/aK6Omggp6fsLrs6wN9bd35ulu4cCwaAU9+7ZhXjeqHVkaHThLuzH0nZr0YpCDhygg=="],
 
@@ -2234,7 +2234,7 @@
 
     "yoctocolors": ["yoctocolors@2.1.2", "", {}, "sha512-CzhO+pFNo8ajLM2d2IW/R93ipy99LWjtwblvC1RsoSUMZgyLbYFr221TnSNT7GjGdYui6P459mw9JH/g/zW2ug=="],
 
-    "zettelclaw": ["zettelclaw@workspace:packages/plugin"],
+    "reclaw": ["reclaw@workspace:packages/plugin"],
 
     "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
@@ -2420,7 +2420,7 @@
 
     "yaml-language-server/yaml": ["yaml@2.7.1", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-10ULxpnOCQXxJvBgxsn9ptjq6uviG/htZKk9veJGhlqn3w/DxQ631zFF+nlQXLwmImeS5amR2dl2U8sg6U9jsQ=="],
 
-    "zettelclaw/@types/bun": ["@types/bun@1.3.9", "", { "dependencies": { "bun-types": "1.3.9" } }, "sha512-KQ571yULOdWJiMH+RIWIOZ7B2RXQGpL1YQrBtLIV3FqDcCu6FsbFUBwhdKUlCKUpS3PJDsHlJ1QKlpxoVR+xtw=="],
+    "reclaw/@types/bun": ["@types/bun@1.3.9", "", { "dependencies": { "bun-types": "1.3.9" } }, "sha512-KQ571yULOdWJiMH+RIWIOZ7B2RXQGpL1YQrBtLIV3FqDcCu6FsbFUBwhdKUlCKUpS3PJDsHlJ1QKlpxoVR+xtw=="],
 
     "@aws-crypto/sha256-browser/@smithy/util-utf8/@smithy/util-buffer-from": ["@smithy/util-buffer-from@2.2.0", "", { "dependencies": { "@smithy/is-array-buffer": "^2.2.0", "tslib": "^2.6.2" } }, "sha512-IJdWBbTcMQ6DA0gdNhh/BwrLkDR+ADW5Kr1aZmd4k3DIF6ezMV4R2NIAmT08wQJ3yUK82thHWmC/TnK/wpMMIA=="],
 
@@ -2708,7 +2708,7 @@
 
     "wrap-ansi/string-width/emoji-regex": ["emoji-regex@10.6.0", "", {}, "sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A=="],
 
-    "zettelclaw/@types/bun/bun-types": ["bun-types@1.3.9", "", { "dependencies": { "@types/node": "*" } }, "sha512-+UBWWOakIP4Tswh0Bt0QD0alpTY8cb5hvgiYeWCMet9YukHbzuruIEeXC2D7nMJPB12kbh8C7XJykSexEqGKJg=="],
+    "reclaw/@types/bun/bun-types": ["bun-types@1.3.9", "", { "dependencies": { "@types/node": "*" } }, "sha512-+UBWWOakIP4Tswh0Bt0QD0alpTY8cb5hvgiYeWCMet9YukHbzuruIEeXC2D7nMJPB12kbh8C7XJykSexEqGKJg=="],
 
     "@aws-crypto/sha256-browser/@smithy/util-utf8/@smithy/util-buffer-from/@smithy/is-array-buffer": ["@smithy/is-array-buffer@2.2.0", "", { "dependencies": { "tslib": "^2.6.2" } }, "sha512-GGP3O9QFD24uGeAXYUjwSTXARoqpZykHadOmA8G5vfJPK0/DC67qa//0qvqrJzL1xc8WQWX7/yc7fwudjPHPhA=="],
 

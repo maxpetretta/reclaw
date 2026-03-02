@@ -33,7 +33,7 @@ import {
 import { resolveHistoricalTimestamp, resolveImportedEntryTimestamp } from "./extract-timestamp";
 export { resolveHistoricalTimestamp } from "./extract-timestamp";
 
-const IMPORT_CRON_SESSION_NAME = "zettelclaw-import-extract";
+const IMPORT_CRON_SESSION_NAME = "reclaw-import-extract";
 const IMPORT_CRON_TIMEOUT_SECONDS = 1_800;
 const IMPORT_CRON_WAIT_TIMEOUT_MS = 1_900_000;
 export interface ImportExtractionOptions {

@@ -78,7 +78,7 @@ export async function runSessionHandoffRefresh(
 }
 
 export function registerBriefingCommands(
-  zettelclaw: CommandLike,
+  reclaw: CommandLike,
   params: {
     config: PluginConfig;
     api: OpenClawPluginApi;
@@ -109,13 +109,13 @@ export function registerBriefingCommands(
     console.log(`No handoff entries found in log: ${result.memoryMdPath} unchanged`);
   };
 
-  const snapshot = zettelclaw.command("snapshot").description("Memory snapshot generation helpers");
+  const snapshot = reclaw.command("snapshot").description("Memory snapshot generation helpers");
   snapshot
     .command("generate")
     .description("Generate and write MEMORY.md memory snapshot block")
     .action(runSnapshotGenerateAction);
 
-  const handoff = zettelclaw.command("handoff").description("Zettelclaw session handoff helpers");
+  const handoff = reclaw.command("handoff").description("Reclaw session handoff helpers");
   handoff
     .command("refresh")
     .description("Force-refresh MEMORY.md session handoff block from latest handoff event")

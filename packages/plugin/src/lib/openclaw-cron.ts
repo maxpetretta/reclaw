@@ -159,7 +159,7 @@ export async function runOpenClaw(
 export async function scheduleSubagentCronJob(
   params: ScheduleSubagentParams,
 ): Promise<ScheduledSubagent> {
-  const sessionName = params.sessionName?.trim() || "zettelclaw-import-extract";
+  const sessionName = params.sessionName?.trim() || "reclaw-import-extract";
   const timeoutSeconds = params.timeoutSeconds ?? 1_800;
 
   const legacyResult = await runOpenClawRetryingCommand(

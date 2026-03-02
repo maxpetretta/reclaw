@@ -55,7 +55,7 @@ jobs:
         run: |
           npm publish --provenance --access public 2>&1 || {
             exit_code=$?
-            if npm view zettelclaw@"$(node -p "require('./package.json').version")" version >/dev/null 2>&1; then
+            if npm view reclaw@"$(node -p "require('./package.json').version")" version >/dev/null 2>&1; then
               echo "Version already published — continuing."
             else
               exit $exit_code
@@ -79,8 +79,8 @@ jobs:
           changelog="$(echo "$RELEASE_BODY" | tr '\n' ' ')"
 
           clawhub --no-input publish packages/skill \
-            --slug zettelclaw \
-            --name "Zettelclaw" \
+            --slug reclaw \
+            --name "Reclaw" \
             --version "$skill_version" \
             --tags latest \
             --changelog "$changelog"

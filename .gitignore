@@ -10,8 +10,8 @@ out
 coverage
 *.tgz
 *.tsbuildinfo
-.zettelclaw/migrate-state.json
-**/.zettelclaw/migrate-state.json
+.reclaw/migrate-state.json
+**/.reclaw/migrate-state.json
 
 # env
 .env

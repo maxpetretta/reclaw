@@ -17,7 +17,7 @@ describe("registry", () => {
   let logPath = "";
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-registry-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-registry-"));
     registryPath = join(tempDir, "subjects.json");
     logPath = join(tempDir, "log.jsonl");
   });

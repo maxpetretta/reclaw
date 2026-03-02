@@ -2,7 +2,7 @@
 
 Status: Draft
 Author: Codex session synthesis
-Scope: Agent memory structure principles for Zettelclaw and Reclaw
+Scope: Agent memory structure principles for Reclaw and Reclaw
 
 ## 1. Research Inputs
 
@@ -132,9 +132,9 @@ Across all sources, the strongest recurring principles were:
    - Surfaces connections the human missed, threads not yet explored.
    - Similar to Vin's "emerge" command but framed as a periodic report rather than an on-demand tool.
 
-## 4. Comparison for Zettelclaw Fit
+## 4. Comparison for Reclaw Fit
 
-Best direct fit for Zettelclaw:
+Best direct fit for Reclaw:
 
 1. Keep markdown-first typed notes and journal flow (already aligned).
 2. Add deterministic read-first views before broad search.
@@ -148,9 +148,9 @@ Lower-fit or defer:
 
 1. Full PARA directory migration (high churn, low immediate ROI).
 2. Mandatory cloud/vector-first architecture (violates local-first goals).
-3. Hard separation of agent-authored vs human-authored notes (Zettelclaw's co-authorship model is intentional, but optional `author` frontmatter field could support filtering).
+3. Hard separation of agent-authored vs human-authored notes (Reclaw's co-authorship model is intentional, but optional `author` frontmatter field could support filtering).
 
-## 5. Recommendations for Zettelclaw
+## 5. Recommendations for Reclaw
 
 ## 5.1 Near-term (high ROI)
 
@@ -201,7 +201,7 @@ Reclaw should emit export artifacts that are memory-ready, not just transcript-r
 
 ## 7. Suggested Validation Benchmarks
 
-After implementing Zettelclaw/Reclaw improvements, track:
+After implementing Reclaw/Reclaw improvements, track:
 
 1. Retrieval preflight cost:
    - files read before correct answer for common tasks.

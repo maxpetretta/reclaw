@@ -63,9 +63,9 @@ describe("snapshot and handoff CLI commands", () => {
   let logDir = "";
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-snapshot-cli-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-snapshot-cli-"));
     workspaceDir = join(tempDir, "workspace");
-    logDir = join(tempDir, "zettelclaw-store");
+    logDir = join(tempDir, "reclaw-store");
 
     await mkdir(workspaceDir, { recursive: true });
     await mkdir(logDir, { recursive: true });
@@ -76,7 +76,7 @@ describe("snapshot and handoff CLI commands", () => {
   });
 
   test("registers snapshot and handoff commands without briefing alias", () => {
-    const root = new MockCommand("zettelclaw");
+    const root = new MockCommand("reclaw");
     registerBriefingCommands(root, {
       config: createConfig(logDir),
       workspaceDir,
@@ -95,9 +95,9 @@ describe("snapshot and handoff CLI commands", () => {
     await writeFile(
       logPath,
       [
-        '{"timestamp":"2026-03-01T00:01:00.000Z","id":"A1b2C3d4E5f6","type":"fact","subject":"zettelclaw","content":"Fact entry","session":"s-1"}',
-        '{"timestamp":"2026-03-01T00:02:00.000Z","id":"G7h8I9j0K1l2","type":"handoff","subject":"zettelclaw","content":"Earlier handoff","session":"s-2"}',
-        '{"timestamp":"2026-03-01T00:03:00.000Z","id":"M3n4O5p6Q7r8","type":"handoff","subject":"zettelclaw","content":"Latest handoff","detail":"Carry this forward","session":"s-3"}',
+        '{"timestamp":"2026-03-01T00:01:00.000Z","id":"A1b2C3d4E5f6","type":"fact","subject":"reclaw","content":"Fact entry","session":"s-1"}',
+        '{"timestamp":"2026-03-01T00:02:00.000Z","id":"G7h8I9j0K1l2","type":"handoff","subject":"reclaw","content":"Earlier handoff","session":"s-2"}',
+        '{"timestamp":"2026-03-01T00:03:00.000Z","id":"M3n4O5p6Q7r8","type":"handoff","subject":"reclaw","content":"Latest handoff","detail":"Carry this forward","session":"s-3"}',
         "",
       ].join("\n"),
       "utf8",
@@ -117,7 +117,7 @@ describe("snapshot and handoff CLI commands", () => {
 
     expect(result.updated).toBe(true);
     const memoryText = await readFile(memoryPath, "utf8");
-    expect(memoryText).toContain("## Zettelclaw Session Handoff");
+    expect(memoryText).toContain("## Reclaw Session Handoff");
     expect(memoryText).toContain("Session: s-3 (2026-03-01T00:03:00.000Z)");
     expect(memoryText).toContain("Latest handoff");
     expect(memoryText).toContain("Detail: Carry this forward");
@@ -128,7 +128,7 @@ describe("snapshot and handoff CLI commands", () => {
     const logPath = join(logDir, "log.jsonl");
     await writeFile(
       logPath,
-      '{"timestamp":"2026-03-01T00:01:00.000Z","id":"A1b2C3d4E5f6","type":"fact","subject":"zettelclaw","content":"Fact entry","session":"s-1"}\n',
+      '{"timestamp":"2026-03-01T00:01:00.000Z","id":"A1b2C3d4E5f6","type":"fact","subject":"reclaw","content":"Fact entry","session":"s-1"}\n',
       "utf8",
     );
 

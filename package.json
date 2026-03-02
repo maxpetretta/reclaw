@@ -1,5 +1,5 @@
 {
-  "name": "zettelclaw-workspace",
+  "name": "reclaw-workspace",
   "private": true,
   "workspaces": ["packages/plugin", "packages/skill", "packages/website"],
   "scripts": {

@@ -104,7 +104,7 @@ export function registerExtractionHooks(
 
   api.registerHook("session_end", async (event, ctx) => {
     if (!ctx.agentId) {
-      api.logger.warn(`zettelclaw extraction skipped ${event.sessionId}: missing agentId`);
+      api.logger.warn(`reclaw extraction skipped ${event.sessionId}: missing agentId`);
       return;
     }
 

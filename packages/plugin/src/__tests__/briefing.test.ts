@@ -41,7 +41,7 @@ describe("briefing generation", () => {
   let memoryPath = "";
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-briefing-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-briefing-"));
     logPath = join(tempDir, "log.jsonl");
     memoryPath = join(tempDir, "MEMORY.md");
 

@@ -1,4 +1,4 @@
-# Zettelclaw 🦞
+# Reclaw 🦞
 
 > Your agent's second brain, built together.
 
@@ -7,7 +7,7 @@ A PKM system for humans and AI agents to co-build a shared knowledge base, power
 ## Quick Start
 
 ```bash
-npx zettelclaw init
+npx reclaw init
 ```
 
 The wizard asks for a vault path and sync method, then configures everything: templates, plugins, and OpenClaw integration (if detected).
@@ -15,13 +15,13 @@ The wizard asks for a vault path and sync method, then configures everything: te
 For a non-interactive setup:
 
 ```bash
-npx zettelclaw init --yes --vault ~/my-vault
+npx reclaw init --yes --vault ~/my-vault
 ```
 
 If you have existing OpenClaw workspace memory files, migrate them once after init:
 
 ```bash
-npx zettelclaw migrate
+npx reclaw migrate
 ```
 
 ## What It Does
@@ -57,10 +57,10 @@ All content passes a hard filter: only user-specific knowledge enters the vault.
 ## CLI Commands
 
 ```bash
-npx zettelclaw init         # Initialize vault + OpenClaw integration
-npx zettelclaw migrate      # Migrate existing workspace memory into the vault
-npx zettelclaw verify       # Programmatically verify setup
-npx zettelclaw uninstall    # Remove OpenClaw integration
+npx reclaw init         # Initialize vault + OpenClaw integration
+npx reclaw migrate      # Migrate existing workspace memory into the vault
+npx reclaw verify       # Programmatically verify setup
+npx reclaw uninstall    # Remove OpenClaw integration
 ```
 
 ## Web Clipper
@@ -69,8 +69,8 @@ The vault includes an Obsidian Web Clipper template at `04 Templates/clipper-inb
 
 ## Links
 
-- [zettelclaw.com](https://zettelclaw.com) (coming soon)
-- [GitHub](https://github.com/maxpetretta/zettelclaw)
+- [reclaw.com](https://reclaw.com) (coming soon)
+- [GitHub](https://github.com/maxpetretta/reclaw)
 
 ## License
 

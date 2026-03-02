@@ -1,15 +1,15 @@
 {
-  "name": "@zettelclaw/skill",
+  "name": "@reclaw/skill",
   "version": "3.0.0",
-  "description": "Zettelclaw memory system skill for OpenClaw — agent instructions for the append-only event log",
+  "description": "Reclaw memory system skill for OpenClaw — agent instructions for the append-only event log",
   "private": false,
   "type": "module",
   "files": [
-    "zettelclaw"
+    "reclaw"
   ],
   "clawhub": {
     "skill": {
-      "entry": "zettelclaw/SKILL.md"
+      "entry": "reclaw/SKILL.md"
     }
   }
 }

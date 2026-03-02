@@ -42,7 +42,7 @@ async function writeConfigObject(configPath: string, root: Record<string, unknow
 function ensurePluginMemorySlot(root: Record<string, unknown>): void {
   const plugins = getOrCreateObject(root, "plugins");
   const slots = getOrCreateObject(plugins, "slots");
-  slots.memory = "zettelclaw";
+  slots.memory = "reclaw";
 
   const allow = Array.isArray(plugins.allow)
     ? plugins.allow
@@ -51,8 +51,8 @@ function ensurePluginMemorySlot(root: Record<string, unknown>): void {
         .filter((entry) => entry.length > 0)
     : [];
 
-  if (!allow.includes("zettelclaw")) {
-    allow.push("zettelclaw");
+  if (!allow.includes("reclaw")) {
+    allow.push("reclaw");
   }
   plugins.allow = allow;
 }

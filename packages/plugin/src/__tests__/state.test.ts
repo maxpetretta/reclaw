@@ -18,7 +18,7 @@ describe("state", () => {
   let statePath = "";
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-state-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-state-"));
     statePath = join(tempDir, "state.json");
   });
 

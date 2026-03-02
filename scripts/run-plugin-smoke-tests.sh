@@ -3,7 +3,7 @@ set -euo pipefail
 
 print_usage() {
   cat <<'EOF'
-Run Zettelclaw v3 plugin smoke tests end-to-end.
+Run Reclaw v3 plugin smoke tests end-to-end.
 
 Tests the full lifecycle: install → init → log write → query → search →
 handoff → briefing → uninstall, all against real files (no gateway needed).
@@ -47,14 +47,14 @@ step() { printf "\n== %s ==\n" "$1"; }
 require_cmd bun
 require_cmd jq
 
-smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/zettelclaw-plugin-smoke-XXXXXX")"
+smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/reclaw-plugin-smoke-XXXXXX")"
 if [[ "$keep_tmp" -eq 0 ]]; then
   trap 'rm -rf "$smoke_root"' EXIT
 fi
 
 echo "Smoke root: $smoke_root"
 
-log_dir="$smoke_root/zettelclaw"
+log_dir="$smoke_root/reclaw"
 log_path="$log_dir/log.jsonl"
 subjects_path="$log_dir/subjects.json"
 state_path="$log_dir/state.json"
@@ -81,7 +81,7 @@ manifest="$plugin_dir/openclaw.plugin.json"
 
 plugin_id=$(jq -r '.id' "$manifest")
 plugin_kind=$(jq -r '.kind' "$manifest")
-[[ "$plugin_id" == "zettelclaw" ]] || fail "plugin id should be 'zettelclaw', got '$plugin_id'"
+[[ "$plugin_id" == "reclaw" ]] || fail "plugin id should be 'reclaw', got '$plugin_id'"
 [[ "$plugin_kind" == "memory" ]] || fail "plugin kind should be 'memory', got '$plugin_kind'"
 pass "Manifest: id=$plugin_id, kind=$plugin_kind"
 
@@ -94,7 +94,7 @@ cat > "$workspace_dir/MEMORY.md" <<'MEMEOF'
 # MEMORY.md - Working Memory
 
 ## Observations
-- Testing zettelclaw v3 plugin
+- Testing reclaw v3 plugin
 
 ## Key Config State
 - Model: test
@@ -119,7 +119,7 @@ console.log('init ok');
 [[ -f "$config_path" ]] || fail "openclaw.json not created"
 
 memory_slot=$(jq -r '.plugins.slots.memory // empty' "$config_path")
-[[ "$memory_slot" == "zettelclaw" ]] || fail "memory slot not set to zettelclaw"
+[[ "$memory_slot" == "reclaw" ]] || fail "memory slot not set to reclaw"
 
 memory_flush=$(jq '.agents.defaults.compaction.memoryFlush' "$config_path")
 [[ "$memory_flush" == "null" ]] || fail "memoryFlush not disabled"
@@ -137,9 +137,9 @@ import { appendEntry, readLog, injectMeta } from '$plugin_dir/src/log/schema';
 
 const entries = [
   { type: 'decision', content: 'Use Bun over yarn for all JS/TS', detail: '3-4x faster, one-way door', subject: 'tooling' },
-  { type: 'fact', content: 'OpenClaw plugin SDK uses registerHook not api.on', subject: 'zettelclaw' },
+  { type: 'fact', content: 'OpenClaw plugin SDK uses registerHook not api.on', subject: 'reclaw' },
   { type: 'task', content: 'Backfill script for 47 failed webhook jobs', status: 'open', subject: 'auth-migration' },
-  { type: 'task', content: 'Set up CI pipeline', status: 'done', subject: 'zettelclaw' },
+  { type: 'task', content: 'Set up CI pipeline', status: 'done', subject: 'reclaw' },
   { type: 'question', content: 'Is retry strategy sufficient for 10k+/min webhook bursts?', subject: 'auth-migration' },
   { type: 'handoff', content: 'Auth migration — retry logic done, backfill pending', detail: 'Exponential backoff working in staging. Need backfill script for 47 failed jobs.' },
 ];
@@ -167,7 +167,7 @@ import { ensureSubject, readRegistry } from '$plugin_dir/src/subjects/registry';
 
 await ensureSubject('$subjects_path', 'auth-migration', 'project');
 await ensureSubject('$subjects_path', 'tooling', 'system');
-await ensureSubject('$subjects_path', 'zettelclaw', 'project');
+await ensureSubject('$subjects_path', 'reclaw', 'project');
 
 const reg = await readRegistry('$subjects_path');
 const count = Object.keys(reg).length;

@@ -1,5 +1,5 @@
 ---
-name: zettelclaw
+name: reclaw
 description: "Use when accessing memory, recording information, searching prior context, or managing subjects."
 read_when:
   - You need to find something from a previous session
@@ -8,14 +8,14 @@ read_when:
   - You need to check or update the subject registry
 ---
 
-# Zettelclaw Memory System
+# Reclaw Memory System
 
-Zettelclaw is an append-only event log that replaces daily memory files. All memory lives in `log.jsonl` as structured entries. Extraction happens automatically at session end — you don't write to the log directly. Your job is to state information clearly in conversation so the extraction hook captures it.
+Reclaw is an append-only event log that replaces daily memory files. All memory lives in `log.jsonl` as structured entries. Extraction happens automatically at session end — you don't write to the log directly. Your job is to state information clearly in conversation so the extraction hook captures it.
 
 ## How Memory Works
 
-1. **MEMORY.md** is auto-loaded into every session. It has a manual section (goals, preferences) and a generated Zettelclaw memory snapshot updated nightly.
-2. **Zettelclaw session handoff** is written into MEMORY.md after each session extraction.
+1. **MEMORY.md** is auto-loaded into every session. It has a manual section (goals, preferences) and a generated Reclaw memory snapshot updated nightly.
+2. **Reclaw session handoff** is written into MEMORY.md after each session extraction.
 3. **`memory_search`** finds entries by keyword, type, subject, or status.
 4. **`memory_get`** retrieves a specific entry by ID, reads MEMORY.md, or fetches a full session transcript.
 
@@ -33,20 +33,20 @@ Start with what's already in context (steps 1-2). Only call tools when you need 
 
 ## Subjects
 
-Every non-handoff entry has a `subject` — a kebab-case slug like `auth-migration` or `zettelclaw`. Subjects are tracked in a registry with a type: `project`, `person`, `system`, or `topic` (default).
+Every non-handoff entry has a `subject` — a kebab-case slug like `auth-migration` or `reclaw`. Subjects are tracked in a registry with a type: `project`, `person`, `system`, or `topic` (default).
 
 When discussing something new, use a clear kebab-case slug. The extraction hook auto-creates subjects it hasn't seen. To explicitly manage subjects:
 
 ```bash
 # List all subjects
-openclaw zettelclaw subjects list
+openclaw reclaw subjects list
 
 # Add a subject with a type
-openclaw zettelclaw subjects add auth-migration --type project
-openclaw zettelclaw subjects add alice-chen --type person
+openclaw reclaw subjects add auth-migration --type project
+openclaw reclaw subjects add alice-chen --type person
 
 # Rename a subject (updates registry and all log entries)
-openclaw zettelclaw subjects rename old-slug new-slug
+openclaw reclaw subjects rename old-slug new-slug
 ```
 
 ## Using `memory_search`
@@ -106,37 +106,37 @@ Only user-specific information belongs in the log. Ask: "Would I need to know th
 
 ```bash
 # Recent log entries
-openclaw zettelclaw log
-openclaw zettelclaw log --type decision --subject auth-migration --limit 10
+openclaw reclaw log
+openclaw reclaw log --type decision --subject auth-migration --limit 10
 
 # Search with filters
-openclaw zettelclaw search "webhook"
-openclaw zettelclaw search --type task --status open
-openclaw zettelclaw search --subject auth-migration --from 2026-02-01 --to 2026-03-01
+openclaw reclaw search "webhook"
+openclaw reclaw search --type task --status open
+openclaw reclaw search --subject auth-migration --from 2026-02-01 --to 2026-03-01
 
 # Trace a subject's chronological history
-openclaw zettelclaw trace
-openclaw zettelclaw trace --subject auth-migration
-openclaw zettelclaw trace <entry-id>
+openclaw reclaw trace
+openclaw reclaw trace --subject auth-migration
+openclaw reclaw trace <entry-id>
 
 # Subject management
-openclaw zettelclaw subjects list
-openclaw zettelclaw subjects add <slug> --type <project|person|system|topic>
-openclaw zettelclaw subjects rename <old-slug> <new-slug>
+openclaw reclaw subjects list
+openclaw reclaw subjects add <slug> --type <project|person|system|topic>
+openclaw reclaw subjects rename <old-slug> <new-slug>
 
 # Regenerate the MEMORY.md memory snapshot now
-openclaw zettelclaw snapshot generate
+openclaw reclaw snapshot generate
 
 # Force-refresh MEMORY.md session handoff block from log
-openclaw zettelclaw handoff refresh
+openclaw reclaw handoff refresh
 
 # Import historical conversations
-openclaw zettelclaw import <chatgpt|claude|grok|openclaw> <file>
-openclaw zettelclaw import status
-openclaw zettelclaw import resume <jobId>
+openclaw reclaw import <chatgpt|claude|grok|openclaw> <file>
+openclaw reclaw import status
+openclaw reclaw import resume <jobId>
 
 # Setup
-openclaw zettelclaw init
-openclaw zettelclaw verify
-openclaw zettelclaw uninstall
+openclaw reclaw init
+openclaw reclaw verify
+openclaw reclaw uninstall
 ```

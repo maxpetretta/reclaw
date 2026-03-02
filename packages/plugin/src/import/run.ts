@@ -3,7 +3,7 @@ import { appendEntry, type LogEntry } from "../log/schema";
 import {
   readState,
   type ImportedConversationState,
-  type ZettelclawState,
+  type ReclawState,
   writeState,
 } from "../state";
 import { readRegistry, upsertSubjectFromExtraction } from "../subjects/registry";
@@ -332,7 +332,7 @@ function createStopGuard(
 async function selectCandidateConversations(params: {
   options: ReclawImportOptions;
   conversations: ImportedConversation[];
-  workingState: ZettelclawState;
+  workingState: ReclawState;
   minMessages: number;
   afterMs?: number;
   beforeMs?: number;

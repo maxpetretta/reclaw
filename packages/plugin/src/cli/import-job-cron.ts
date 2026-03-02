@@ -5,7 +5,7 @@ import { isEnoent, isObject } from "../lib/guards";
 import { removeCronJobByIdOrName, upsertCronJobByName } from "../lib/cron-jobs-store";
 import type { ImportJobState } from "../state";
 
-const IMPORT_WORKER_NAME_PREFIX = "zettelclaw-import-worker-";
+const IMPORT_WORKER_NAME_PREFIX = "reclaw-import-worker-";
 const IMPORT_WORKER_TIMEOUT_SECONDS = 60 * 60;
 const IMPORT_WORKER_EXEC_TIMEOUT_SECONDS = 2 * 60 * 60;
 const IMPORT_WORKER_SCHEDULE_DELAY_MS = 2_000;
@@ -33,7 +33,7 @@ function buildImportWorkerCronJob(
       ...existing,
       id,
       name,
-      description: `Zettelclaw async import worker (${jobId})`,
+      description: `Reclaw async import worker (${jobId})`,
       enabled: true,
       deleteAfterRun: true,
       createdAtMs,
@@ -49,7 +49,7 @@ function buildImportWorkerCronJob(
         message: [
           "Execute exactly one command using the exec tool.",
           `Set exec timeout to ${IMPORT_WORKER_EXEC_TIMEOUT_SECONDS} seconds and wait for completion (do not background it).`,
-          `Command: openclaw zettelclaw import-worker --job ${jobId}`,
+          `Command: openclaw reclaw import-worker --job ${jobId}`,
           "After it completes, return a concise success/failure summary.",
         ].join("\n"),
         timeoutSeconds: IMPORT_WORKER_TIMEOUT_SECONDS,

@@ -1,13 +1,13 @@
 {
-  "id": "zettelclaw",
-  "name": "Zettelclaw",
+  "id": "reclaw",
+  "name": "Reclaw",
   "kind": "memory",
   "skills": ["./skills"],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "logDir": { "type": "string", "default": "~/.openclaw/zettelclaw" },
+      "logDir": { "type": "string", "default": "~/.openclaw/reclaw" },
       "extraction": {
         "type": "object",
         "properties": {

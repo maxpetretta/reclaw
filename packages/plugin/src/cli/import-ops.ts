@@ -279,7 +279,7 @@ export async function runImportWorker(
       })
       .catch((error) => {
         const reason = error instanceof Error ? error.message : String(error);
-        console.warn(`zettelclaw import progress persist failed for ${jobId}: ${reason}`);
+        console.warn(`reclaw import progress persist failed for ${jobId}: ${reason}`);
       });
   };
 

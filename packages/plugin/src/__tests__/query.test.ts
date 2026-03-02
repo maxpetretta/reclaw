@@ -81,7 +81,7 @@ describe("query", () => {
   ];
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-query-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-query-"));
     logPath = join(tempDir, "log.jsonl");
 
     for (const entry of seedEntries) {

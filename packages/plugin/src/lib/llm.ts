@@ -6,7 +6,7 @@ import {
   loadExtractionPrompt,
 } from "../extraction/prompt";
 
-const EXTRACTION_MODEL_SESSION_NAME = "zettelclaw-extraction-model";
+const EXTRACTION_MODEL_SESSION_NAME = "reclaw-extraction-model";
 const EXTRACTION_MODEL_TIMEOUT_SECONDS = 1_800;
 const EXTRACTION_MODEL_WAIT_TIMEOUT_MS = 1_900_000;
 

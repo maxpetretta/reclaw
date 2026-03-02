@@ -48,14 +48,14 @@ function unwrapPromptValue<T>(value: T | symbol): T {
 }
 
 export function registerImportCommands(
-  zettelclaw: CommandLike,
+  reclaw: CommandLike,
   params: {
     config: PluginConfig;
     api: OpenClawPluginApi;
     workspaceDir?: string;
   },
 ): void {
-  const importCommand = zettelclaw
+  const importCommand = reclaw
     .command("import [platform] [file]")
     .description("Import historical data as async worker jobs (interactive if args are omitted)")
     .option("--dry-run", "Preview import without writing files", false)
@@ -212,7 +212,7 @@ export function registerImportCommands(
               `Status: ${queued.job.status}`,
               `Next run: ${queued.nextRunAt}`,
               `State file: ${queued.statePath}`,
-              `Track with: openclaw zettelclaw import status ${queued.job.id}`,
+              `Track with: openclaw reclaw import status ${queued.job.id}`,
             ].join("\n"),
           );
           clackOutro("Async import queued.");
@@ -249,7 +249,7 @@ export function registerImportCommands(
             `Status: ${queued.job.status}`,
             `Next run: ${queued.nextRunAt}`,
             `State file: ${queued.statePath}`,
-            `Track with: openclaw zettelclaw import status ${queued.job.id}`,
+            `Track with: openclaw reclaw import status ${queued.job.id}`,
           ].join("\n"),
         );
       } catch (error) {
@@ -380,7 +380,7 @@ export function registerImportCommands(
       console.log(`State file: ${result.statePath}`);
     });
 
-  zettelclaw
+  reclaw
     .command("import-worker")
     .description("Internal async import worker executor")
     .option("--job <id>", "Import job id")

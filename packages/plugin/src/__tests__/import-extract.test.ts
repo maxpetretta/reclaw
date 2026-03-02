@@ -36,7 +36,7 @@ describe("import extraction", () => {
   let logPath = "";
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-import-extract-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-import-extract-"));
     subjectsPath = join(tempDir, "subjects.json");
     logPath = join(tempDir, "log.jsonl");
   });

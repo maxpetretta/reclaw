@@ -13,7 +13,7 @@ import { readState, type EventUsageState } from "../state";
 const THIS_DIR = dirname(fileURLToPath(import.meta.url));
 const BRIEFING_PROMPT_PATH = join(THIS_DIR, "../../prompts/briefing.md");
 const DAY_MS = 24 * 60 * 60 * 1000;
-const BRIEFING_MODEL_SESSION_NAME = "zettelclaw-memory-snapshot-model";
+const BRIEFING_MODEL_SESSION_NAME = "reclaw-memory-snapshot-model";
 const BRIEFING_MODEL_TIMEOUT_SECONDS = 1_800;
 const BRIEFING_MODEL_WAIT_TIMEOUT_MS = 1_900_000;
 

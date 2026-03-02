@@ -4,103 +4,40 @@ Status: Implementation contract
 Last updated: 2026-03-02
 Scope: `packages/plugin` + `packages/skill` (OpenClaw memory slot plugin + memory skill package)
 
-## 0. Global Rename Spec (`zettelclaw` -> `reclaw`)
+## 0. Global Naming Contract
 
-This section is the canonical v3 naming contract. Until the rename lands in code, legacy `zettelclaw` strings may still appear in examples below; treat the mappings in this section as authoritative.
+All plugin, skill, docs, examples, and test surfaces in v3 use `Reclaw` naming.
 
-### 0.1 Naming and Brand Direction
+### 0.1 Canonical Identifiers
 
-- Canonical product name: `Reclaw`
-- Canonical plugin/skill namespace: `reclaw`
-- Product role line: `Reclaw is the OpenClaw memory system plugin`
-- Primary tagline (from legacy Reclaw): `Reclaim your AI conversations.`
-- Preferred memory framing (from legacy Reclaw): `durable memory`
+- Product/plugin name: `Reclaw`
+- Plugin id: `reclaw`
+- Plugin package: `reclaw`
+- Skill package: `@reclaw/skill`
+- Skill path: `packages/skill/reclaw/SKILL.md`
+- Bundled plugin skill path: `packages/plugin/skills/reclaw/SKILL.md`
+- CLI namespace: `openclaw reclaw`
+- Log directory default: `~/.openclaw/reclaw`
+- Main cron names: `reclaw-memory-snapshot`, `reclaw-import-worker-*`
+- Marker families: `<!-- BEGIN/END RECLAW ... -->`
+
+### 0.2 Branding Language
+
+- Tagline: `Reclaim your AI conversations.`
+- Framing phrase: `durable memory`
 - CLI heading style: `🦞 Reclaw - Reclaim your AI conversations`
-- Deprecated for new user-facing copy: `Zettelclaw` (allowed only in migration warnings and backward-compat notes)
 
-### 0.2 Rename Matrix (Plugin + Skill Packages)
+### 0.3 Scope of This Contract
 
-| Surface | Legacy value | New value | Migration behavior |
-|---|---|---|---|
-| Plugin manifest ID (`openclaw.plugin.json`) | `zettelclaw` | `reclaw` | Register plugin under `reclaw`. Keep temporary alias routing for `zettelclaw` CLI command path. |
-| Plugin manifest display name | `Zettelclaw` | `Reclaw` | Replace all user-facing labels. |
-| Plugin npm package name (`packages/plugin/package.json`) | `zettelclaw` | `reclaw` | Publish new package name; keep compatibility notes in release docs. |
-| Plugin config key in `openclaw.json` | `plugins.entries.zettelclaw` | `plugins.entries.reclaw` | Auto-migrate key on `init`/`verify` when legacy key exists. |
-| Memory slot ownership | `plugins.slots.memory = "zettelclaw"` | `plugins.slots.memory = "reclaw"` | Rewrite slot value during migration. |
-| Plugin allowlist entry | `"zettelclaw"` | `"reclaw"` | Replace allowlist value; dedupe list. |
-| Default log directory | `~/.openclaw/zettelclaw` | `~/.openclaw/reclaw` | Migrate directory path on first `init` (see 0.3). |
-| CLI root command | `openclaw zettelclaw ...` | `openclaw reclaw ...` | `openclaw zettelclaw ...` remains a deprecated alias during transition. |
-| Cron names | `zettelclaw-memory-snapshot`, `zettelclaw-briefing`, `zettelclaw-reset`, `zettelclaw-nightly`, `zettelclaw-import-worker-*` | `reclaw-memory-snapshot`, `reclaw-briefing`, `reclaw-reset`, `reclaw-nightly`, `reclaw-import-worker-*` | `init` removes legacy names and upserts new names. |
-| Model/session labels | `zettelclaw-extraction-model`, `zettelclaw-memory-snapshot-model`, `zettelclaw-import-extract` | `reclaw-extraction-model`, `reclaw-memory-snapshot-model`, `reclaw-import-extract` | Rename for observability consistency. |
-| Prompt filename | `prompts/memory-zettelclaw-notice.md` | `prompts/memory-reclaw-notice.md` | Update references in command wiring. |
-| Managed markers in `AGENTS.md`/`MEMORY.md` | `BEGIN/END ZETTELCLAW ...` | `BEGIN/END RECLAW ...` | Readers accept both marker families; writers emit `RECLAW` markers. |
-| Managed block headings | `## Memory System (Zettelclaw)`, `## Zettelclaw Memory Mode`, `## Zettelclaw Session Handoff` | `## Memory System (Reclaw)`, `## Reclaw Memory Mode`, `## Reclaw Session Handoff` | Rewrite on next managed-block update. |
-| Plugin skill directory | `packages/plugin/skills/zettelclaw/` | `packages/plugin/skills/reclaw/` | Move directory and update manifest references. |
-| Published skill package name | `@zettelclaw/skill` | `@reclaw/skill` | Publish new package and update resolver fallback candidates. |
-| Skill package entry path | `zettelclaw/SKILL.md` | `reclaw/SKILL.md` | Move entry path and `files` array. |
-| Skill frontmatter name | `name: zettelclaw` | `name: reclaw` | Required for runtime skill discovery consistency. |
-| Internal type names | `ZettelclawState`, `registerZettelclawCli`, etc. | `ReclawState`, `registerReclawCli`, etc. | Pure refactor; no behavior change. |
-
-### 0.3 Backward Compatibility and Migration Contract
-
-1. Config migration on first `openclaw reclaw init`:
-   - If `plugins.entries.zettelclaw` exists and `plugins.entries.reclaw` does not, move the object to `plugins.entries.reclaw`.
-   - If `plugins.slots.memory === "zettelclaw"`, rewrite to `"reclaw"`.
-   - Replace any `"zettelclaw"` value in `plugins.allow` with `"reclaw"` and dedupe.
-
-2. Log directory migration:
-   - If `~/.openclaw/reclaw` does not exist and `~/.openclaw/zettelclaw` exists, move `zettelclaw` -> `reclaw`.
-   - If both directories exist and both are non-empty, abort with an actionable conflict message (no automatic merge).
-   - After migration, all reads/writes use `~/.openclaw/reclaw` unless an explicit `logDir` override is configured.
-
-3. Marker migration:
-   - Managed-block readers must detect both `ZETTELCLAW` and `RECLAW` marker sets.
-   - Managed-block writers must emit only `RECLAW` markers and headings.
-   - Existing legacy blocks are replaced in place the next time `init`, `snapshot generate`, or `handoff refresh` runs.
-
-4. CLI compatibility window:
-   - Register `openclaw reclaw` as canonical.
-   - Keep `openclaw zettelclaw` as a deprecated alias for one minor release cycle with warning output on use.
-   - Alias removal target: first v4 release after rename stabilization.
-
-5. Cron migration:
-   - On `init`, remove legacy cron names and create/update only `reclaw-*` names.
-   - Import worker names follow `reclaw-import-worker-<jobId>` immediately after rename.
-
-6. Legacy Reclaw importer continuity:
-   - Keep existing import source support (`chatgpt`, `claude`, `grok`, `openclaw`) under `openclaw reclaw import`.
-   - Position this as the successor to the old standalone Reclaw importer, now integrated directly in the memory plugin workflow.
-
-### 0.4 Implementation Sequence (Scoped to Plugin + Skill)
-
-1. Plugin package:
-   - Rename manifest/package identifiers, command root, config keys, log directory default, cron names, marker constants, prompt filenames, and user-facing copy.
-   - Keep CLI alias and marker dual-read support.
-   - Update plugin tests to assert `reclaw` defaults and migration behavior.
-   - Primary files: `packages/plugin/openclaw.plugin.json`, `packages/plugin/package.json`, `packages/plugin/src/plugin.ts`, `packages/plugin/src/config.ts`, `packages/plugin/src/cli/*.ts`, `packages/plugin/src/memory/markers.ts`, `packages/plugin/prompts/*.md`, `packages/plugin/src/__tests__/*.test.ts`.
-
-2. Skill package:
-   - Rename package name and entry path to `@reclaw/skill` + `reclaw/SKILL.md`.
-   - Rewrite SKILL.md commands/examples to `openclaw reclaw ...`.
-   - Sync plugin bundled skill copy (`packages/plugin/skills/reclaw/SKILL.md`).
-   - Primary files: `packages/skill/package.json`, `packages/skill/reclaw/SKILL.md`, `packages/plugin/skills/reclaw/SKILL.md`, and any resolver logic in `packages/cli/src/lib/skill.ts` that points at `@zettelclaw/skill`.
-
-3. Verification gates:
-   - `rg -n "zettelclaw|Zettelclaw|ZETTELCLAW" packages/plugin packages/skill` returns only intentional compatibility shims/messages.
-   - Fresh install path produces only `reclaw` identifiers in config, cron jobs, markers, and log directory.
-   - Migration path from a live `zettelclaw` install preserves data and command functionality.
-
-### 0.5 Non-Goals of Rename
-
-- No event schema change (`log.jsonl` entry fields stay the same).
-- No behavior change to extraction/snapshot logic.
-- No rollback to legacy daily-memory file workflows.
+- Includes code identifiers, commands, config keys, prompt text, markdown examples, docs, and tests.
+- No event schema change (`log.jsonl` entry fields are unchanged).
+- No behavior change to extraction/snapshot logic beyond naming updates.
 
 ## 1. System Contract
 
-Zettelclaw is the single active memory system when installed and initialized:
+Reclaw is the single active memory system when installed and initialized:
 - Source of truth: append-only event log (`log.jsonl`) + subject registry (`subjects.json`) + plugin state (`state.json`).
-- Memory slot ownership: `plugins.slots.memory = "zettelclaw"` (replaces `memory-core`).
+- Memory slot ownership: `plugins.slots.memory = "reclaw"` (replaces `memory-core`).
 - Persistence path: extraction hooks write structured events from transcripts.
 - Recall path: wrapped `memory_search` and `memory_get`.
 - Curation path: nightly memory snapshot job rewrites only the managed generated block in `MEMORY.md`.
@@ -126,9 +63,9 @@ Legacy memory behaviors are disabled by init:
 ### 3.1 File Layout
 
 ```
-~/.openclaw/zettelclaw/log.jsonl
-~/.openclaw/zettelclaw/subjects.json
-~/.openclaw/zettelclaw/state.json
+~/.openclaw/reclaw/log.jsonl
+~/.openclaw/reclaw/subjects.json
+~/.openclaw/reclaw/state.json
 ```
 
 `log.jsonl` is a single append-only file. The extraction hook appends entries at session end. Ripgrep searches it directly. Git tracks it for history. One file is simpler than one-per-day — no date-based file routing, no glob patterns for queries, no directory to manage. A year of daily use produces a few thousand lines. Ripgrep handles millions.
@@ -168,7 +105,7 @@ Legacy memory behaviors are disabled by init:
 | Type | For | Examples |
 |---|---|---|
 | `person` | People | alice-chen, contacts |
-| `project` | Things being built | zettelclaw, my-saas-app, home-automation |
+| `project` | Things being built | reclaw, my-saas-app, home-automation |
 | `system` | Infrastructure, services, tools | openclaw, telegram, tts |
 | `topic` | Recurring themes that aren't a project, person, or system | ai-wearables, crypto |
 
@@ -181,8 +118,8 @@ Legacy memory behaviors are disabled by init:
 **Creating subjects:** The extraction agent outputs entries with `subject` values. For non-handoff entries, `subject` is required; if omitted, the hook fills `unknown`. The extraction hook reads the registry before writing. If the LLM output references a slug not in the registry, the hook adds it to `subjects.json` with `display` (Title Case of slug) and `type` from the entry's `subjectType` hint (default `topic`). Subjects can also be created manually via CLI:
 
 ```bash
-openclaw zettelclaw subjects add auth-migration
-openclaw zettelclaw subjects add alice-chen --type person
+openclaw reclaw subjects add auth-migration
+openclaw reclaw subjects add alice-chen --type person
 ```
 
 Default subject type is `topic` when no `subjectType` hint is provided or when the hint is invalid. The extraction hook also allows **type correction** for existing subjects: if an entry references an existing slug with a valid `subjectType`, the registry type is updated.
@@ -190,7 +127,7 @@ Default subject type is `topic` when no `subjectType` hint is provided or when t
 **Renaming subjects:** CLI command renames in both the registry and the log:
 
 ```bash
-openclaw zettelclaw subjects rename old-slug new-slug
+openclaw reclaw subjects rename old-slug new-slug
 ```
 
 This updates `subjects.json` and runs `sed` over `log.jsonl` to rewrite all occurrences. The log is a single file — renaming is a one-liner.
@@ -312,7 +249,7 @@ rg '"type":"question"' log.jsonl
 # Entries from a specific session
 rg '"session":"abc12345"' log.jsonl
 
-# Zettelclaw session handoff
+# Reclaw session handoff
 rg '"type":"handoff"' log.jsonl | tail -1
 
 # Full-text search
@@ -356,7 +293,7 @@ Log compaction (merging old daily files into monthly summaries) is an eventual o
 
 ### 4.1 When extraction runs
 
-Zettelclaw uses **OpenClaw plugin hooks** (not internal hooks) for extraction triggers. The plugin hook API provides richer context including `sessionId`, `sessionFile`, and `messages[]`.
+Reclaw uses **OpenClaw plugin hooks** (not internal hooks) for extraction triggers. The plugin hook API provides richer context including `sessionId`, `sessionFile`, and `messages[]`.
 
 | Trigger | Plugin hook | Context available | What happens |
 |---|---|---|---|
@@ -374,7 +311,7 @@ Zettelclaw uses **OpenClaw plugin hooks** (not internal hooks) for extraction tr
 
 ### 4.1.1 Deduplication
 
-The extraction hook maintains a state file at `~/.openclaw/zettelclaw/state.json`:
+The extraction hook maintains a state file at `~/.openclaw/reclaw/state.json`:
 
 ```json
 {
@@ -573,10 +510,10 @@ MEMORY.md has two sections with different authors:
 - TypeScript strict mode everywhere
 - Prefer simple solutions over configurable ones
 
-<!-- BEGIN ZETTELCLAW MEMORY SNAPSHOT -->
+<!-- BEGIN RECLAW MEMORY SNAPSHOT -->
 ## Snapshot
 - Auth migration is active with retry logic in place; delivery hardening and backfill remain.
-- Zettelclaw memory system work is focused on chain quality and snapshot relevance.
+- Reclaw memory system work is focused on chain quality and snapshot relevance.
 
 ## Human Interests
 - Reliable automation that preserves continuity across sessions
@@ -584,7 +521,7 @@ MEMORY.md has two sections with different authors:
 
 ## Active Projects and Systems
 - auth-migration — queue retries enabled, backfill/canary still pending
-- zettelclaw — memory snapshot and event-chain improvements in progress
+- reclaw — memory snapshot and event-chain improvements in progress
 
 ## Conversation Focus
 - Improving event quality and keeping references explicit in transcripts
@@ -603,7 +540,7 @@ MEMORY.md has two sections with different authors:
 
 ## Stale Threads
 - legacy-api — last entry 2026-01-08, referenced in recent session
-<!-- END ZETTELCLAW MEMORY SNAPSHOT -->
+<!-- END RECLAW MEMORY SNAPSHOT -->
 ```
 
 ### 5.2 Generation
@@ -648,14 +585,14 @@ The log is authoritative. The generated snapshot is a cache. When they disagree,
 
 ### 5.4 Retrieval Order
 
-When the agent needs information beyond what MEMORY.md and the handoff provide, it uses the zettelclaw-provided memory tools:
+When the agent needs information beyond what MEMORY.md and the handoff provide, it uses the reclaw-provided memory tools:
 
 1. **MEMORY.md** — auto-loaded by OpenClaw session bootstrap. Already in context.
-2. **Zettelclaw session handoff** — written into MEMORY.md between managed markers on each successful extraction when a handoff entry is produced.
-3. **`memory_search`** — zettelclaw's wrapped tool. Two search paths:
+2. **Reclaw session handoff** — written into MEMORY.md between managed markers on each successful extraction when a handoff entry is produced.
+3. **`memory_search`** — reclaw's wrapped tool. Two search paths:
    - **Log search** (structured filters + ripgrep): precise lookups by type, subject, status. Keyword search over content/detail fields.
    - **MEMORY.md search** (builtin semantic): delegated to OpenClaw's builtin for hybrid BM25+vector search over the manual section.
-4. **`memory_get`** — zettelclaw's wrapped tool. Reads specific log entries by ID, MEMORY.md content, or transcript files by session ID (provenance lookups). ID reads increment usage counters used by durable snapshot selection.
+4. **`memory_get`** — reclaw's wrapped tool. Reads specific log entries by ID, MEMORY.md content, or transcript files by session ID (provenance lookups). ID reads increment usage counters used by durable snapshot selection.
 
 Each step is more expensive than the last. Most sessions should resolve from steps 1-2 (zero tool calls). Step 3 covers specific lookups and exploration. Step 4 is for deep dives into specific entries or original session transcripts when the log entry alone doesn't have enough context.
 
@@ -666,13 +603,13 @@ When the main agent references a prior event in conversation, it should cite the
 ### 6.1 Handoff persistence in MEMORY.md
 
 When extraction appends new entries to `log.jsonl`, it checks the newly appended entries for a handoff.
-If found, zettelclaw rewrites the `<!-- BEGIN ZETTELCLAW SESSION HANDOFF -->` / `<!-- END ZETTELCLAW SESSION HANDOFF -->`
+If found, reclaw rewrites the `<!-- BEGIN RECLAW SESSION HANDOFF -->` / `<!-- END RECLAW SESSION HANDOFF -->`
 managed block in MEMORY.md with the latest handoff content.
 
 The generated handoff block looks like:
 
 ```
-## Zettelclaw Session Handoff
+## Reclaw Session Handoff
 Session: abc12345 (2026-02-20T15:30:00Z)
 Auth migration — retry logic implementation, backfill script not started
 Detail: Exponential backoff working in staging. Still need backfill script for 47 failed jobs, then canary deploy. Load testing not done yet.
@@ -684,8 +621,8 @@ handoff between them.
 ### 6.2 Implementation note
 
 MEMORY.md now has two generated sections:
-- **Nightly snapshot block** (`BEGIN/END ZETTELCLAW MEMORY SNAPSHOT`) written by the cron snapshot job.
-- **Zettelclaw session handoff block** (`BEGIN/END ZETTELCLAW SESSION HANDOFF`) written by extraction when a new handoff is appended.
+- **Nightly snapshot block** (`BEGIN/END RECLAW MEMORY SNAPSHOT`) written by the cron snapshot job.
+- **Reclaw session handoff block** (`BEGIN/END RECLAW SESSION HANDOFF`) written by extraction when a new handoff is appended.
 
 Each writer only edits its own marker block, so the two generated sections do not overwrite each other.
 
@@ -705,14 +642,14 @@ Contract:
 Distributed as a single OpenClaw **memory slot plugin** via npm. Declares `kind: "memory"` in its manifest, replacing `memory-core` when installed:
 
 ```
-zettelclaw/
+reclaw/
   package.json                    # npm package with openclaw.extensions
   openclaw.plugin.json            # Plugin manifest — kind: "memory", configSchema, etc.
   prompts/
     extraction.md                 # Extraction agent prompt (section 4.2)
     briefing.md                   # Memory snapshot generation prompt for nightly cron
     agents-memory-guidance.md     # Managed guidance block inserted into AGENTS.md
-    memory-zettelclaw-notice.md   # Managed notice block inserted into MEMORY.md
+    memory-reclaw-notice.md   # Managed notice block inserted into MEMORY.md
     post-init-system-event.md     # System-event template used by init guidance notification
   src/
     plugin.ts                     # Plugin entry — registers hooks, tools, CLI commands
@@ -726,7 +663,7 @@ zettelclaw/
       session-discovery.ts        # gateway_start sweep — find un-extracted/failed sessions
       transcript-utils.ts         # Locate and read transcript files by session/agent ID
     memory/
-      handoff.ts                  # Format and write ZETTELCLAW SESSION HANDOFF block in MEMORY.md
+      handoff.ts                  # Format and write RECLAW SESSION HANDOFF block in MEMORY.md
       managed-block.ts            # Shared utility for marker-delimited block replacement
       markers.ts                  # All managed-block marker constants (briefing, handoff, guidance, notice)
     tools/
@@ -789,7 +726,7 @@ zettelclaw/
       import-ops.ts               # Import execution logic
       import-ui.ts                # Import CLI user feedback
   skills/
-    zettelclaw/
+    reclaw/
       SKILL.md                    # Teaches the agent about the memory system
 ```
 
@@ -801,19 +738,19 @@ The plugin manifest (`openclaw.plugin.json`) declares the memory slot:
 
 ```json
 {
-  "id": "zettelclaw",
-  "name": "Zettelclaw",
+  "id": "reclaw",
+  "name": "Reclaw",
   "kind": "memory",
   "configSchema": { ... }
 }
 ```
 
-On `init`, the plugin sets `plugins.slots.memory = "zettelclaw"` in the user's config. This:
+On `init`, the plugin sets `plugins.slots.memory = "reclaw"` in the user's config. This:
 - Disables `memory-core` (the default memory plugin)
-- Disables the `session-memory` bundled hook (zettelclaw's extraction replaces it)
-- Makes zettelclaw's `memory_search` and `memory_get` the active memory tools
+- Disables the `session-memory` bundled hook (reclaw's extraction replaces it)
+- Makes reclaw's `memory_search` and `memory_get` the active memory tools
 
-The pre-compaction memory flush (`agents.defaults.compaction.memoryFlush`) is disabled by `init` since zettelclaw extracts from full transcripts at session end — no need for the model to self-save during compaction.
+The pre-compaction memory flush (`agents.defaults.compaction.memoryFlush`) is disabled by `init` since reclaw extracts from full transcripts at session end — no need for the model to self-save during compaction.
 
 ### 8.2 What the plugin registers
 
@@ -824,9 +761,9 @@ The pre-compaction memory flush (`agents.defaults.compaction.memoryFlush`) is di
 | **`memory_get` tool** | Wraps `api.runtime.tools.createMemoryGetTool()` | Builtin file reads + log entry-by-ID + transcript lookups by session ID |
 | Extraction hooks | Plugin hooks: `session_end`, `before_reset` | Primary (`session_end`) and secondary (`before_reset`) triggers route through `hooks/pipeline.ts` |
 | Startup sweep | Plugin hook: `gateway_start` | Sweep for un-extracted and failed sessions via `hooks/session-discovery.ts` |
-| Handoff writer | Extraction post-processing | Rewrites MEMORY.md `ZETTELCLAW SESSION HANDOFF` managed block when new handoff is appended |
+| Handoff writer | Extraction post-processing | Rewrites MEMORY.md `RECLAW SESSION HANDOFF` managed block when new handoff is appended |
 | Nightly cron | `cron/jobs.json` job upsert during init | Rewrite MEMORY.md generated snapshot block (LLM-powered) |
-| Skill | `skills/zettelclaw/SKILL.md` | Agent instructions for the memory system |
+| Skill | `skills/reclaw/SKILL.md` | Agent instructions for the memory system |
 | CLI: init | Plugin-registered command | Create log directory, set memory slot, disable flush, register cron, add generated snapshot + handoff markers to MEMORY.md |
 | CLI: uninstall | Plugin-registered command | Revert init-time OpenClaw config changes and remove generated snapshot block from MEMORY.md (log data preserved) |
 | CLI: verify | Plugin-registered command | Validate setup files/config/markers/cron and print per-check pass/fail |
@@ -837,37 +774,37 @@ The pre-compaction memory flush (`agents.defaults.compaction.memoryFlush`) is di
 | CLI: import status/resume | Plugin-registered command | Inspect async import jobs and re-queue eligible jobs from `state.json.importJobs` |
 | CLI: subjects | Plugin-registered command | `add`, `rename`, `list` — manage subject registry (`add` defaults type to `topic`) |
 | CLI: snapshot generate | Plugin-registered command | Run snapshot generation immediately and rewrite MEMORY.md generated block |
-| CLI: handoff refresh | Plugin-registered command | Force-refresh the MEMORY.md `ZETTELCLAW SESSION HANDOFF` managed block from the latest handoff event in `log.jsonl` |
+| CLI: handoff refresh | Plugin-registered command | Force-refresh the MEMORY.md `RECLAW SESSION HANDOFF` managed block from the latest handoff event in `log.jsonl` |
 
 ### 8.3 Installation
 
 ```bash
-openclaw plugins install zettelclaw
-openclaw zettelclaw init
+openclaw plugins install reclaw
+openclaw reclaw init
 ```
 
 `init` does the following:
-1. Creates the log directory (`~/.openclaw/zettelclaw/`) with empty `log.jsonl`, `subjects.json`, and `state.json`
-2. Sets `plugins.slots.memory = "zettelclaw"` in config (replaces `memory-core`)
-3. Disables `agents.defaults.compaction.memoryFlush` (zettelclaw handles persistence)
+1. Creates the log directory (`~/.openclaw/reclaw/`) with empty `log.jsonl`, `subjects.json`, and `state.json`
+2. Sets `plugins.slots.memory = "reclaw"` in config (replaces `memory-core`)
+3. Disables `agents.defaults.compaction.memoryFlush` (reclaw handles persistence)
 4. Disables the `session-memory` bundled hook if enabled
 5. Registers the nightly cron job for snapshot generation
 6. Adds generated snapshot markers and handoff markers to MEMORY.md:
-   - `<!-- BEGIN ZETTELCLAW MEMORY SNAPSHOT -->` / `<!-- END ZETTELCLAW MEMORY SNAPSHOT -->`
-   - `<!-- BEGIN ZETTELCLAW SESSION HANDOFF -->` / `<!-- END ZETTELCLAW SESSION HANDOFF -->`
-7. Fires a post-init system event that instructs the main session to update managed Zettelclaw guidance blocks in `AGENTS.md` and `MEMORY.md`
+   - `<!-- BEGIN RECLAW MEMORY SNAPSHOT -->` / `<!-- END RECLAW MEMORY SNAPSHOT -->`
+   - `<!-- BEGIN RECLAW SESSION HANDOFF -->` / `<!-- END RECLAW SESSION HANDOFF -->`
+7. Fires a post-init system event that instructs the main session to update managed Reclaw guidance blocks in `AGENTS.md` and `MEMORY.md`
 
-Note: step 7 is guidance-only; CLI `init` does not directly rewrite `AGENTS.md` or inject the Zettelclaw notice block in `MEMORY.md`.
+Note: step 7 is guidance-only; CLI `init` does not directly rewrite `AGENTS.md` or inject the Reclaw notice block in `MEMORY.md`.
 
 ### 8.4 Configuration
 
-In `openclaw.json` under `plugins.entries.zettelclaw`:
+In `openclaw.json` under `plugins.entries.reclaw`:
 
 ```json
 {
   "enabled": true,
   "config": {
-    "logDir": "~/.openclaw/zettelclaw",
+    "logDir": "~/.openclaw/reclaw",
     "extraction": {
       "model": "anthropic/claude-sonnet-4-6",
       "skipSessionTypes": ["cron:", "sub:", "hook:"]
@@ -894,25 +831,25 @@ Search/embedding configuration is inherited from the user's existing `agents.def
 ### 8.5 Nightly cron job
 
 Registered/updated during `init` by writing `~/.openclaw/cron/jobs.json`:
-- Job name: `zettelclaw-memory-snapshot`
+- Job name: `reclaw-memory-snapshot`
 - Schedule: `config.cron.schedule` (default `0 3 * * *`)
 - Timezone: `config.cron.timezone` (defaults to local timezone if unset)
 - Session target: `isolated`
 - Wake mode: `now`
-- Payload: `Run: openclaw zettelclaw snapshot generate`
+- Payload: `Run: openclaw reclaw snapshot generate`
 - Delivery: none
 
-`init` also removes legacy job names `zettelclaw-reset` and `zettelclaw-nightly` if present.
+`init` also removes legacy job names `reclaw-reset` and `reclaw-nightly` if present.
 
 ## 9. Memory Tools (Replaces `memory-core`)
 
-Zettelclaw registers as `kind: "memory"` and replaces `memory-core` in the plugin slot. It provides wrapped versions of the builtin `memory_search` and `memory_get` tools — same tool names, no agent prompt changes needed — with structured log awareness layered on top.
+Reclaw registers as `kind: "memory"` and replaces `memory-core` in the plugin slot. It provides wrapped versions of the builtin `memory_search` and `memory_get` tools — same tool names, no agent prompt changes needed — with structured log awareness layered on top.
 
 ### 9.1 Architecture: wrapping the builtins
 
 `memory-core` is a thin plugin that calls `api.runtime.tools.createMemorySearchTool()` and `createMemoryGetTool()` — these are builtin runtime functions that handle embedding, indexing, hybrid BM25+vector search, MMR, temporal decay, caching, and QMD support. The runtime helpers are always available regardless of which memory plugin is active.
 
-Zettelclaw calls the same runtime helpers internally, then wraps the results with structured log awareness:
+Reclaw calls the same runtime helpers internally, then wraps the results with structured log awareness:
 
 ```typescript
 register(api: OpenClawPluginApi) {
@@ -938,7 +875,7 @@ register(api: OpenClawPluginApi) {
 - All of OpenClaw's search infra for free (hybrid BM25+vector, MMR, temporal decay, embedding caching, QMD, local/remote embeddings)
 - Structured filters on top (type, subject, status)
 - Same tool names — existing agent prompts and system instructions work unchanged
-- The builtin indexer handles markdown memory files (for semantic search); zettelclaw handles `log.jsonl` querying directly
+- The builtin indexer handles markdown memory files (for semantic search); reclaw handles `log.jsonl` querying directly
 
 ### 9.2 `memory_search` (wrapped)
 
@@ -949,9 +886,9 @@ Extends the builtin schema with optional structured filters:
 | `query` | string | Builtin | Optional natural language/keyword query. |
 | `maxResults` | number | Builtin | Optional. Max results to return. |
 | `minScore` | number | Builtin | Optional. Minimum similarity score. |
-| `type` | string | Zettelclaw | Optional. Filter by entry type (`fact`, `decision`, `task`, `question`, `handoff`). |
-| `subject` | string | Zettelclaw | Optional. Filter by subject slug. |
-| `status` | string | Zettelclaw | Optional. Filter tasks by status (`open`, `done`). |
+| `type` | string | Reclaw | Optional. Filter by entry type (`fact`, `decision`, `task`, `question`, `handoff`). |
+| `subject` | string | Reclaw | Optional. Filter by subject slug. |
+| `status` | string | Reclaw | Optional. Filter tasks by status (`open`, `done`). |
 
 **Execution flow:**
 1. At least one of `query`, `type`, `subject`, or `status` must be present.
@@ -974,7 +911,7 @@ Extends the builtin with log entry and transcript lookups:
 
 | Parameter | Type | Source | Description |
 |---|---|---|---|
-| `path` | string | Builtin | File path (e.g., `MEMORY.md`) or zettelclaw entry ID / session reference. |
+| `path` | string | Builtin | File path (e.g., `MEMORY.md`) or reclaw entry ID / session reference. |
 | `from` | number | Builtin | Optional. Start line (for file reads). |
 | `lines` | number | Builtin | Optional. Number of lines (for file reads). |
 
@@ -985,7 +922,7 @@ Extends the builtin with log entry and transcript lookups:
 
 ### 9.4 What's eliminated
 
-By replacing `memory-core`, zettelclaw eliminates:
+By replacing `memory-core`, reclaw eliminates:
 - `memory/YYYY-MM-DD.md` daily notes — the log captures this information structurally
 - The `session-memory` hook — extraction handles session persistence
 - The pre-compaction memory flush — full transcripts survive on disk
@@ -1003,7 +940,7 @@ By replacing `memory-core`, zettelclaw eliminates:
 
 - Obsidian build/sync pipeline.
 - Daily markdown memory files (`memory/YYYY-MM-DD.md`).
-- Running zettelclaw and `memory-core` together.
+- Running reclaw and `memory-core` together.
 - Custom vector index over `log.jsonl` (log search is structured + keyword only).
 - Bidirectional sync or reconciliation between external notes and the event log.
 - Entry-level confidence/importance scoring fields.
@@ -1020,21 +957,21 @@ By replacing `memory-core`, zettelclaw eliminates:
 
 4a. **Scope filtering**: Verify subagent, cron, and hook sessions are not extracted. Only main sessions with human participants produce log entries.
 
-5. **Subject auto-creation**: Verify new subjects from extraction are added to `subjects.json`. Verify `openclaw zettelclaw subjects add` and `openclaw zettelclaw subjects rename` work correctly (rename updates both registry and log).
+5. **Subject auto-creation**: Verify new subjects from extraction are added to `subjects.json`. Verify `openclaw reclaw subjects add` and `openclaw reclaw subjects rename` work correctly (rename updates both registry and log).
 
-6. **Handoff persistence**: End a session that emits a handoff. Verify MEMORY.md `ZETTELCLAW SESSION HANDOFF` block is updated. Start a new session and confirm the handoff appears via MEMORY.md auto-load.
+6. **Handoff persistence**: End a session that emits a handoff. Verify MEMORY.md `RECLAW SESSION HANDOFF` block is updated. Start a new session and confirm the handoff appears via MEMORY.md auto-load.
 
-7. **Nightly snapshot**: Run `openclaw cron run <zettelclaw-memory-snapshot>`. Verify MEMORY.md's generated block is updated. Verify manual content outside the markers is preserved. Verify the snapshot reflects current interests, active projects/systems, conversation focus, active tasks, open questions, and durable memory from the log.
+7. **Nightly snapshot**: Run `openclaw cron run <reclaw-memory-snapshot>`. Verify MEMORY.md's generated block is updated. Verify manual content outside the markers is preserved. Verify the snapshot reflects current interests, active projects/systems, conversation focus, active tasks, open questions, and durable memory from the log.
 
-8. **Memory tools**: Verify `memory_search` returns structured log entries with type/subject/status filters and includes event IDs in log-backed result lines. Verify keyword search over log entries works via ripgrep ("webhook" finds the retry decision). Verify semantic search over MEMORY.md works via the builtin. Verify `memory_get` reads entries by ID, MEMORY.md by path, and transcripts by `session:` prefix. Verify `memory-core` is disabled (slot occupied by zettelclaw).
+8. **Memory tools**: Verify `memory_search` returns structured log entries with type/subject/status filters and includes event IDs in log-backed result lines. Verify keyword search over log entries works via ripgrep ("webhook" finds the retry decision). Verify semantic search over MEMORY.md works via the builtin. Verify `memory_get` reads entries by ID, MEMORY.md by path, and transcripts by `session:` prefix. Verify `memory-core` is disabled (slot occupied by reclaw).
 
-8a. **CLI search**: Run `openclaw zettelclaw search --type decision --subject auth-migration`. Verify correct filtered results.
+8a. **CLI search**: Run `openclaw reclaw search --type decision --subject auth-migration`. Verify correct filtered results.
 
-8b. **CLI trace**: Run `openclaw zettelclaw trace` (and `openclaw zettelclaw trace <id>`). Verify chronological subject sequences render correctly.
+8b. **CLI trace**: Run `openclaw reclaw trace` (and `openclaw reclaw trace <id>`). Verify chronological subject sequences render correctly.
 
 8c. **Usage counters**: Read an entry via `memory_get` by ID, run a `memory_search` that returns log-backed IDs, and cite `[<id>]` in a later transcript. Verify `state.json.eventUsage` increments (`memoryGetCount`, `memorySearchCount`, `citationCount`) for referenced IDs.
 
-8d. **Async import jobs**: Start `openclaw zettelclaw import ...` (non-dry-run). Verify a queued job appears in `state.json.importJobs`, trackable via `openclaw zettelclaw import status <jobId>`, and recoverable with `openclaw zettelclaw import resume <jobId>` when needed.
+8d. **Async import jobs**: Start `openclaw reclaw import ...` (non-dry-run). Verify a queued job appears in `state.json.importJobs`, trackable via `openclaw reclaw import status <jobId>`, and recoverable with `openclaw reclaw import resume <jobId>` when needed.
 
 9. **End-to-end continuity**: Work across 3 sessions in one day. Verify each session starts with the previous session's handoff. Start a session the next morning after the nightly cron. Verify MEMORY.md snapshot reflects all three sessions' activity.
 
@@ -1057,11 +994,11 @@ Resolutions from review of the draft spec against OpenClaw's actual API surface:
 | 9 | Session ID format | OpenClaw's `sessionId` from hook event context. Maps to `<sessionId>.jsonl` transcript. |
 | 10 | Duplicate handoffs | `state.json` tracks `extractedSessions` map (set of sessionIds). Same session = skip. Failed sessions tracked with retry count (max 1 retry). Map pruned after 30d. |
 | 11 | JSONL indexing | Builtin indexer is markdown-only. Log search handled by wrapper (structured filters + ripgrep). Semantic search covers MEMORY.md only for v1. |
-| 12 | Handoff persistence | Extraction rewrites MEMORY.md `ZETTELCLAW SESSION HANDOFF` block when new handoff entries are appended. `before_prompt_build` hook eliminated — MEMORY.md auto-load handles injection. |
+| 12 | Handoff persistence | Extraction rewrites MEMORY.md `RECLAW SESSION HANDOFF` block when new handoff entries are appended. `before_prompt_build` hook eliminated — MEMORY.md auto-load handles injection. |
 | 13 | Extraction model | Sonnet (configurable via `extraction.model`). |
 | 14 | Scope filtering | Only main sessions extracted. Skip `cron:`, `sub:`, `hook:` session key prefixes. |
 | 15 | Error handling | Retry extraction once on failure. Mark as permanently failed after second failure. `gateway_start` sweep also retries. |
-| 16 | Migration/import | Includes CLI import tooling (`openclaw zettelclaw import`) for chatgpt/claude/grok/openclaw sources, queued async by default via isolated cron workers, with state-based dedupe, chronological processing (oldest to newest), import extraction context (`## Existing Entries` with IDs), subject type upsert from `subjectType` hints, malformed-output repair retry, `import status/resume` job management, and optional source backup/cleanup for openclaw migration. |
+| 16 | Migration/import | Includes CLI import tooling (`openclaw reclaw import`) for chatgpt/claude/grok/openclaw sources, queued async by default via isolated cron workers, with state-based dedupe, chronological processing (oldest to newest), import extraction context (`## Existing Entries` with IDs), subject type upsert from `subjectType` hints, malformed-output repair retry, `import status/resume` job management, and optional source backup/cleanup for openclaw migration. |
 | 17 | Subject type enum | Constrained to `project \| person \| system \| topic`. Default `topic`. Subject type comes exclusively from explicit `subjectType` hints in extraction output; no programmatic slug-based inference. Validated on creation with fallback. |
 | 18 | Snapshot pre-filtering | Four buckets (active entries, open items, stale subjects, durable entries) pre-filtered in code before LLM call. `decisionWindow` config removed — decisions are covered by `activeWindow`. LLM handles presentation only. |
 | 19 | Extraction context | Existing log entries (subject-relevant + open items) fed to extraction LLM to avoid duplicates and reason about chronology. Capped at 50 entries per subject and rendered chronologically (oldest to newest). |
@@ -1105,9 +1042,9 @@ Recommended implementation sequence. Each phase is independently testable.
 - **Test:** Install plugin, verify `memory_search` with type/subject filters works, verify `memory_get` by entry ID works, verify `memory-core` is disabled
 
 ### Phase 4: Handoff persistence
-- `memory/handoff.ts` — format and write ZETTELCLAW SESSION HANDOFF managed block in MEMORY.md
+- `memory/handoff.ts` — format and write RECLAW SESSION HANDOFF managed block in MEMORY.md
 - `memory/markers.ts` — canonical marker constants (briefing, handoff, guidance, notice)
-- Extraction post-processing writes `ZETTELCLAW SESSION HANDOFF` markers in MEMORY.md
+- Extraction post-processing writes `RECLAW SESSION HANDOFF` markers in MEMORY.md
 - **Test:** End a session with a handoff, verify MEMORY.md handoff block updates and is loaded in the next session
 
 ### Phase 5: Memory snapshot generation
@@ -1126,7 +1063,7 @@ Recommended implementation sequence. Each phase is independently testable.
 - `memory/markers.ts` — canonical marker constants shared by CLI init, briefing, handoff, and tests
 - `init` flow: create log dir, set memory slot, disable flush, register cron, add markers
 - SKILL.md — agent instructions for the memory system
-- **Test:** Full `openclaw plugins install zettelclaw && openclaw zettelclaw init` flow
+- **Test:** Full `openclaw plugins install reclaw && openclaw reclaw init` flow
 
 ## Appendix C: OpenClaw Reference Materials
 

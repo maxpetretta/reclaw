@@ -9,7 +9,7 @@ describe("transcript", () => {
   let originalOpenClawHome: string | undefined;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-transcript-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-transcript-"));
     originalOpenClawHome = process.env.OPENCLAW_HOME;
     process.env.OPENCLAW_HOME = tempDir;
   });

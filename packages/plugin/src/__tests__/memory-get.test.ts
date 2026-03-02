@@ -6,7 +6,7 @@ import type { LogEntry } from "../log/schema";
 
 function createConfig(): PluginConfig {
   return {
-    logDir: "/tmp/zettelclaw",
+    logDir: "/tmp/reclaw",
     extraction: {
       model: "anthropic/claude-sonnet-4-6",
       skipSessionTypes: ["cron:", "sub:", "hook:"],

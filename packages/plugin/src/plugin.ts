@@ -4,21 +4,21 @@ import {
   type OpenClawPluginDefinition,
 } from "openclaw/plugin-sdk";
 import { resolveConfig } from "./config";
-import { registerZettelclawCli } from "./cli/commands";
+import { registerReclawCli } from "./cli/commands";
 import { registerExtractionHooks } from "./hooks/extraction";
 import { createWrappedMemoryGetTool } from "./tools/memory-get";
 import { createWrappedMemorySearchTool } from "./tools/memory-search";
 
-const zettelclawPlugin: OpenClawPluginDefinition = {
-  id: "zettelclaw",
-  name: "Zettelclaw",
+const reclawPlugin: OpenClawPluginDefinition = {
+  id: "reclaw",
+  name: "Reclaw",
   description: "Append-only event log memory system",
   kind: "memory",
   configSchema: emptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {
     const config = resolveConfig(api.pluginConfig, api.config);
 
-    registerZettelclawCli(api, config);
+    registerReclawCli(api, config);
 
     api.registerTool(
       (ctx) => {
@@ -38,4 +38,4 @@ const zettelclawPlugin: OpenClawPluginDefinition = {
   },
 };
 
-export default zettelclawPlugin;
+export default reclawPlugin;

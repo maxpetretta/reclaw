@@ -75,9 +75,9 @@ describe("extraction hooks", () => {
   let originalOpenClawHome: string | undefined;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-extraction-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-extraction-"));
     openclawHome = join(tempDir, "openclaw");
-    logDir = join(tempDir, "zettelclaw");
+    logDir = join(tempDir, "reclaw");
 
     originalOpenClawHome = process.env.OPENCLAW_HOME;
     process.env.OPENCLAW_HOME = openclawHome;
@@ -704,7 +704,7 @@ describe("extraction hooks", () => {
     );
 
     const firstMemory = await readFile(memoryPath, "utf8");
-    expect(firstMemory).toContain("## Zettelclaw Session Handoff");
+    expect(firstMemory).toContain("## Reclaw Session Handoff");
     expect(firstMemory).toContain("Session: session-h1");
     expect(firstMemory).toContain("Auth migration in progress");
     expect(firstMemory).toContain("Detail: Backfill remains");

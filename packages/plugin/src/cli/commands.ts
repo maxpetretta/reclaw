@@ -41,7 +41,7 @@ import { toObject } from "./parse";
 
 const POST_INIT_EVENT_PROMPT = "post-init-system-event.md";
 const AGENTS_MEMORY_PROMPT = "agents-memory-guidance.md";
-const MEMORY_NOTICE_PROMPT = "memory-zettelclaw-notice.md";
+const MEMORY_NOTICE_PROMPT = "memory-reclaw-notice.md";
 
 export interface GuidanceEventResult {
   sent: boolean;
@@ -213,11 +213,11 @@ export async function removeGeneratedBriefingBlock(memoryMdPath: string): Promis
   await writeFile(memoryMdPath, next, "utf8");
 }
 
-const BRIEFING_CRON_NAME = "zettelclaw-memory-snapshot";
+const BRIEFING_CRON_NAME = "reclaw-memory-snapshot";
 const LEGACY_CRON_NAMES = [
-  "zettelclaw-briefing",
-  "zettelclaw-reset",
-  "zettelclaw-nightly",
+  "reclaw-briefing",
+  "reclaw-reset",
+  "reclaw-nightly",
 ] as const;
 
 function buildBriefingCronJob(config: PluginConfig, existing?: Record<string, unknown>): Record<string, unknown> {
@@ -233,7 +233,7 @@ function buildBriefingCronJob(config: PluginConfig, existing?: Record<string, un
     ...existing,
     id: existingId,
     name: BRIEFING_CRON_NAME,
-    description: "Nightly Zettelclaw MEMORY.md memory snapshot refresh",
+    description: "Nightly Reclaw MEMORY.md memory snapshot refresh",
     enabled: true,
     createdAtMs,
     updatedAtMs: now,
@@ -247,7 +247,7 @@ function buildBriefingCronJob(config: PluginConfig, existing?: Record<string, un
     wakeMode: "now",
     payload: {
       kind: "agentTurn",
-      message: "Run: openclaw zettelclaw snapshot generate",
+      message: "Run: openclaw reclaw snapshot generate",
       timeoutSeconds: 300,
     },
     delivery: {
@@ -406,11 +406,11 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     const sessionMemoryHook = toObject(hookEntries["session-memory"]);
     const sessionMemoryDisabled = sessionMemoryHook.enabled === false;
 
-    if (slotValue === "zettelclaw" && memoryFlushDisabled && sessionMemoryDisabled) {
+    if (slotValue === "reclaw" && memoryFlushDisabled && sessionMemoryDisabled) {
       addCheck("openclaw.json", true, "ok");
     } else {
       const issues: string[] = [];
-      if (slotValue !== "zettelclaw") {
+      if (slotValue !== "reclaw") {
         issues.push(`plugins.slots.memory=${slotValue ? `"${slotValue}"` : "missing"}`);
       }
       if (!memoryFlushDisabled) {
@@ -430,7 +430,7 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     addCheck("openclaw.json", false, detail);
   }
 
-  // AGENTS.md zettelclaw guidance markers
+  // AGENTS.md reclaw guidance markers
   try {
     const agentsContent = await readFile(paths.agentsMdPath, "utf8");
     const hasGuidanceMarkers =
@@ -439,13 +439,13 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     addCheck(
       "AGENTS.md",
       hasGuidanceMarkers,
-      hasGuidanceMarkers ? "ok" : "missing zettelclaw guidance markers",
+      hasGuidanceMarkers ? "ok" : "missing reclaw guidance markers",
     );
   } catch (error) {
     addCheck("AGENTS.md", false, isEnoent(error) ? "missing" : String(error));
   }
 
-  // MEMORY.md markers + zettelclaw notice
+  // MEMORY.md markers + reclaw notice
   try {
     const memoryContent = await readFile(paths.memoryMdPath, "utf8");
     const hasBriefingMarkers =
@@ -465,10 +465,10 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
         issues.push("missing generated memory snapshot markers");
       }
       if (!hasHandoffMarkers) {
-        issues.push("missing zettelclaw session handoff markers");
+        issues.push("missing reclaw session handoff markers");
       }
       if (!hasNoticeMarkers) {
-        issues.push("missing zettelclaw memory notice");
+        issues.push("missing reclaw memory notice");
       }
       addCheck("MEMORY.md", false, issues.join("; "));
     }
@@ -505,58 +505,58 @@ export async function runVerify(config: PluginConfig, workspaceDir?: string): Pr
   }
 
   if (!result.ok) {
-    throw new Error("Zettelclaw verify failed");
+    throw new Error("Reclaw verify failed");
   }
 
-  console.log("Zettelclaw verify passed.");
+  console.log("Reclaw verify passed.");
   console.log(`Log directory: ${result.paths.logDir}`);
   return result;
 }
 
-function registerZettelclawCliCommands(
+function registerReclawCliCommands(
   program: unknown,
   config: PluginConfig,
   api: OpenClawPluginApi,
   workspaceDir?: string,
 ): void {
   const root = program as CommandLike;
-  const zettelclaw = root.command("zettelclaw").description("Zettelclaw memory management");
-  registerSetupCommands(zettelclaw, {
+  const reclaw = root.command("reclaw").description("Reclaw memory management");
+  registerSetupCommands(reclaw, {
     config,
     workspaceDir,
     runInit,
     runUninstall,
     runVerify,
   });
-  registerLogCommands(zettelclaw, {
+  registerLogCommands(reclaw, {
     config,
     workspaceDir,
   });
-  registerImportCommands(zettelclaw, {
+  registerImportCommands(reclaw, {
     config,
     api,
     workspaceDir,
   });
-  registerSubjectCommands(zettelclaw, {
+  registerSubjectCommands(reclaw, {
     config,
     workspaceDir,
   });
-  registerBriefingCommands(zettelclaw, {
+  registerBriefingCommands(reclaw, {
     config,
     api,
     workspaceDir,
   });
 }
 
-export function registerZettelclawCli(
+export function registerReclawCli(
   api: OpenClawPluginApi,
   config: PluginConfig,
 ): void {
   api.registerCli(
     ({ program, workspaceDir }) => {
-      registerZettelclawCliCommands(program, config, api, workspaceDir);
+      registerReclawCliCommands(program, config, api, workspaceDir);
     },
-    { commands: ["zettelclaw"] },
+    { commands: ["reclaw"] },
   );
 }
 

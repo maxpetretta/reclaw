@@ -9,7 +9,7 @@ import type {
   ImportJobStatus,
   ImportJobSummaryState,
   ImportedConversationState,
-  ZettelclawState,
+  ReclawState,
 } from "./state";
 
 const IMPORTED_PLATFORM_SET = new Set(["chatgpt", "claude", "grok", "openclaw"]);
@@ -344,8 +344,8 @@ function normalizeImportJobs(raw: unknown): Record<string, ImportJobState> {
 
 export function normalizeState(
   raw: unknown,
-  createEmptyState: () => ZettelclawState,
-): ZettelclawState {
+  createEmptyState: () => ReclawState,
+): ReclawState {
   if (!isObject(raw)) {
     return createEmptyState();
   }

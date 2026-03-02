@@ -107,13 +107,13 @@ function printTraceReport(entries: LogEntry[], report: TraceReport, focusId?: st
 }
 
 export function registerLogCommands(
-  zettelclaw: CommandLike,
+  reclaw: CommandLike,
   params: {
     config: PluginConfig;
     workspaceDir?: string;
   },
 ): void {
-  zettelclaw
+  reclaw
     .command("log")
     .description("Print recent log entries")
     .option("--limit <n>", "Max number of entries", 20)
@@ -134,7 +134,7 @@ export function registerLogCommands(
       printEntries(entries.slice(0, limit));
     });
 
-  zettelclaw
+  reclaw
     .command("search [query]")
     .description("Search log entries")
     .option("--type <type>", "Entry type")
@@ -166,7 +166,7 @@ export function registerLogCommands(
       printEntries(entries);
     });
 
-  zettelclaw
+  reclaw
     .command("trace [id]")
     .description("Trace chronological event sequences by subject")
     .option("--subject <slug>", "Filter by subject slug")

@@ -92,7 +92,7 @@ export interface ImportJobState {
   cronJobName?: string;
 }
 
-export interface ZettelclawState {
+export interface ReclawState {
   extractedSessions: Record<string, ExtractedSession>;
   failedSessions: Record<string, FailedSession>;
   importedConversations: Record<string, ImportedConversationState>;
@@ -100,7 +100,7 @@ export interface ZettelclawState {
   importJobs: Record<string, ImportJobState>;
 }
 
-export function createEmptyState(): ZettelclawState {
+export function createEmptyState(): ReclawState {
   return {
     extractedSessions: {},
     failedSessions: {},
@@ -110,7 +110,7 @@ export function createEmptyState(): ZettelclawState {
   };
 }
 
-export async function readState(path: string): Promise<ZettelclawState> {
+export async function readState(path: string): Promise<ReclawState> {
   let raw: string;
 
   try {
@@ -126,15 +126,15 @@ export async function readState(path: string): Promise<ZettelclawState> {
   return normalizeState(JSON.parse(raw), createEmptyState);
 }
 
-export async function writeState(path: string, state: ZettelclawState): Promise<void> {
+export async function writeState(path: string, state: ReclawState): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
 export async function updateState(
   path: string,
-  mutator: (state: ZettelclawState) => void | Promise<void>,
-): Promise<ZettelclawState> {
+  mutator: (state: ReclawState) => void | Promise<void>,
+): Promise<ReclawState> {
   const state = await readState(path);
   await mutator(state);
   await writeState(path, state);
@@ -166,15 +166,15 @@ export async function markFailed(path: string, sessionId: string, error: string)
   });
 }
 
-export function isExtracted(state: ZettelclawState, sessionId: string): boolean {
+export function isExtracted(state: ReclawState, sessionId: string): boolean {
   return Boolean(state.extractedSessions[sessionId]);
 }
 
-export function isImportedConversation(state: ZettelclawState, conversationKey: string): boolean {
+export function isImportedConversation(state: ReclawState, conversationKey: string): boolean {
   return Boolean(state.importedConversations[conversationKey]);
 }
 
-export function shouldRetry(state: ZettelclawState, sessionId: string): boolean {
+export function shouldRetry(state: ReclawState, sessionId: string): boolean {
   return (state.failedSessions[sessionId]?.retries ?? 0) < 2;
 }
 

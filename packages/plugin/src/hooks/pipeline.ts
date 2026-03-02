@@ -147,7 +147,7 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
 
     if (parsed.invalidLineCount > 0) {
       params.logger.warn(
-        `zettelclaw extraction for ${params.sessionId}: ignored ${parsed.invalidLineCount} invalid entry line(s)`,
+        `reclaw extraction for ${params.sessionId}: ignored ${parsed.invalidLineCount} invalid entry line(s)`,
       );
     }
 
@@ -158,7 +158,7 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
         const updatedMemory = applyLastHandoffBlock(memoryContent, latestHandoff);
         await params.deps.writeMemoryFile(params.memoryMdPath, updatedMemory);
       } catch (error) {
-        params.logger.warn(`zettelclaw handoff write failed for ${params.sessionId}: ${normalizeError(error)}`);
+        params.logger.warn(`reclaw handoff write failed for ${params.sessionId}: ${normalizeError(error)}`);
       }
     }
 
@@ -166,7 +166,7 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
     await pruneState(params.paths.statePath);
   } catch (error) {
     const message = normalizeError(error);
-    params.logger.warn(`zettelclaw extraction failed for ${params.sessionId}: ${message}`);
+    params.logger.warn(`reclaw extraction failed for ${params.sessionId}: ${message}`);
     await markFailed(params.paths.statePath, params.sessionId, message);
     await pruneState(params.paths.statePath);
   }

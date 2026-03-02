@@ -4,7 +4,7 @@ import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "./markers";
 
 export function formatLastHandoff(entry: LogEntry): string {
   const lines = [
-    "## Zettelclaw Session Handoff",
+    "## Reclaw Session Handoff",
     `Session: ${entry.session} (${entry.timestamp})`,
     entry.content,
   ];

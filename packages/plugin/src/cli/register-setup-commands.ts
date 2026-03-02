@@ -11,7 +11,7 @@ interface InitResult {
 }
 
 export function registerSetupCommands(
-  zettelclaw: CommandLike,
+  reclaw: CommandLike,
   params: {
     config: PluginConfig;
     workspaceDir?: string;
@@ -20,13 +20,13 @@ export function registerSetupCommands(
     runVerify: (config: PluginConfig, workspaceDir?: string) => Promise<unknown>;
   },
 ): void {
-  zettelclaw
+  reclaw
     .command("init")
-    .description("Initialize zettelclaw memory store and config")
+    .description("Initialize reclaw memory store and config")
     .action(async () => {
       const initResult = await params.runInit(params.config, params.workspaceDir);
       const paths = initResult.paths;
-      console.log("Zettelclaw initialized.");
+      console.log("Reclaw initialized.");
       console.log(`Log directory: ${paths.logDir}`);
       console.log(`Config updated: ${paths.openClawConfigPath}`);
       console.log(`MEMORY.md markers ensured: ${paths.memoryMdPath}`);
@@ -39,20 +39,20 @@ export function registerSetupCommands(
       }
     });
 
-  zettelclaw
+  reclaw
     .command("uninstall")
     .description("Reverse init config and remove generated memory snapshot block")
     .action(async () => {
       const paths = await params.runUninstall(params.config, params.workspaceDir);
-      console.log("Zettelclaw uninstalled.");
+      console.log("Reclaw uninstalled.");
       console.log(`Config reverted: ${paths.openClawConfigPath}`);
       console.log(`Generated memory snapshot block removed: ${paths.memoryMdPath}`);
       console.log(`Log data preserved in: ${paths.logDir}`);
     });
 
-  zettelclaw
+  reclaw
     .command("verify")
-    .description("Verify zettelclaw setup and required files")
+    .description("Verify reclaw setup and required files")
     .action(async () => {
       await params.runVerify(params.config, params.workspaceDir);
     });

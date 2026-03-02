@@ -58,10 +58,10 @@ describe("cli init helpers", () => {
   let originalOpenClawHome: string | undefined;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-cli-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-cli-"));
     openClawHome = join(tempDir, "openclaw");
     workspaceDir = join(tempDir, "workspace");
-    logDir = join(tempDir, "zettelclaw-store");
+    logDir = join(tempDir, "reclaw-store");
 
     await mkdir(openClawHome, { recursive: true });
     await mkdir(workspaceDir, { recursive: true });
@@ -102,8 +102,8 @@ describe("cli init helpers", () => {
     expect(logExists).toBe(true);
     expect(subjectsText.trim()).toBe("{}");
     expect(stateText).toContain("extractedSessions");
-    expect((openClawConfig.plugins as { slots?: { memory?: string } }).slots?.memory).toBe("zettelclaw");
-    expect((openClawConfig.plugins as { allow?: string[] }).allow).toContain("zettelclaw");
+    expect((openClawConfig.plugins as { slots?: { memory?: string } }).slots?.memory).toBe("reclaw");
+    expect((openClawConfig.plugins as { allow?: string[] }).allow).toContain("reclaw");
     expect(
       (
         openClawConfig.agents as { defaults?: { compaction?: { memoryFlush?: { enabled?: unknown } } } }
@@ -116,9 +116,9 @@ describe("cli init helpers", () => {
         }
       ).internal?.entries?.["session-memory"]?.enabled,
     ).toBe(false);
-    expect(cronJobs.jobs?.some((job) => job.name === "zettelclaw-memory-snapshot")).toBe(true);
-    expect(cronJobs.jobs?.some((job) => job.name === "zettelclaw-reset")).toBe(false);
-    expect(cronJobs.jobs?.some((job) => job.name === "zettelclaw-nightly")).toBe(false);
+    expect(cronJobs.jobs?.some((job) => job.name === "reclaw-memory-snapshot")).toBe(true);
+    expect(cronJobs.jobs?.some((job) => job.name === "reclaw-reset")).toBe(false);
+    expect(cronJobs.jobs?.some((job) => job.name === "reclaw-nightly")).toBe(false);
     expect(memoryContent).toContain(BRIEFING_BEGIN_MARKER);
     expect(memoryContent).toContain(BRIEFING_END_MARKER);
     expect(memoryContent).toContain(LAST_HANDOFF_BEGIN_MARKER);
@@ -207,7 +207,7 @@ describe("cli init helpers", () => {
         "## Workspace Rules",
         "",
         AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
-        "## Memory System (Zettelclaw)",
+        "## Memory System (Reclaw)",
         AGENTS_MEMORY_GUIDANCE_END_MARKER,
       ].join("\n"),
       "utf8",
@@ -218,7 +218,7 @@ describe("cli init helpers", () => {
       memoryPath,
       [
         MEMORY_NOTICE_BEGIN_MARKER,
-        "## Zettelclaw Memory Mode",
+        "## Reclaw Memory Mode",
         MEMORY_NOTICE_END_MARKER,
         "",
         existingMemory.trim(),
@@ -251,7 +251,7 @@ describe("cli init helpers", () => {
         "## Workspace Rules",
         "",
         AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
-        "## Memory System (Zettelclaw)",
+        "## Memory System (Reclaw)",
         AGENTS_MEMORY_GUIDANCE_END_MARKER,
       ].join("\n"),
       "utf8",
@@ -262,7 +262,7 @@ describe("cli init helpers", () => {
       memoryPath,
       [
         MEMORY_NOTICE_BEGIN_MARKER,
-        "## Zettelclaw Memory Mode",
+        "## Reclaw Memory Mode",
         MEMORY_NOTICE_END_MARKER,
         "",
         existingMemory.trim(),
@@ -793,13 +793,13 @@ describe("cli init helpers", () => {
       jobs?: Array<Record<string, unknown>>;
     };
     const workerJob = cronDoc.jobs?.find(
-      (entry) => entry.name === `zettelclaw-import-worker-${queued.job.id}`,
+      (entry) => entry.name === `reclaw-import-worker-${queued.job.id}`,
     );
     expect(workerJob).toBeDefined();
     expect(workerJob?.deleteAfterRun).toBe(true);
     expect((workerJob?.schedule as { kind?: string }).kind).toBe("at");
     expect((workerJob?.payload as { message?: string }).message).toContain(
-      `openclaw zettelclaw import-worker --job ${queued.job.id}`,
+      `openclaw reclaw import-worker --job ${queued.job.id}`,
     );
   });
 
@@ -840,7 +840,7 @@ describe("cli init helpers", () => {
       jobs?: Array<Record<string, unknown>>;
     };
     const workerJob = cronDoc.jobs?.find(
-      (entry) => entry.name === `zettelclaw-import-worker-${queued.job.id}`,
+      (entry) => entry.name === `reclaw-import-worker-${queued.job.id}`,
     );
     expect(workerJob).toBeUndefined();
   });

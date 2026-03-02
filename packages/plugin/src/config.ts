@@ -20,7 +20,7 @@ export interface PluginConfig {
 }
 
 const DEFAULT_CONFIG: PluginConfig = {
-  logDir: "~/.openclaw/zettelclaw",
+  logDir: "~/.openclaw/reclaw",
   extraction: {
     model: "anthropic/claude-sonnet-4-6",
     skipSessionTypes: ["cron:", "sub:", "hook:"],

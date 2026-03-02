@@ -10,7 +10,7 @@ describe("openclaw import adapter", () => {
   let memoryDir = "";
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-import-openclaw-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-import-openclaw-"));
     openClawHome = join(tempDir, "openclaw");
     memoryDir = join(tempDir, "workspace", "memory");
     await mkdir(memoryDir, { recursive: true });

@@ -20,7 +20,7 @@ describe("schema", () => {
   let logPath = "";
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-schema-"));
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-schema-"));
     logPath = join(tempDir, "log.jsonl");
   });
 

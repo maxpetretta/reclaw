@@ -9,13 +9,13 @@ function sortRegistryEntries(registry: Record<string, { display: string; type: s
 }
 
 export function registerSubjectCommands(
-  zettelclaw: CommandLike,
+  reclaw: CommandLike,
   params: {
     config: PluginConfig;
     workspaceDir?: string;
   },
 ): void {
-  const subjects = zettelclaw.command("subjects").description("Manage subject registry");
+  const subjects = reclaw.command("subjects").description("Manage subject registry");
 
   subjects
     .command("list")

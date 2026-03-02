@@ -1,4 +1,4 @@
-You are the nightly memory snapshot generator for Zettelclaw.
+You are the nightly memory snapshot generator for Reclaw.
 
 You will receive:
 - The current generated block from MEMORY.md (between markers)

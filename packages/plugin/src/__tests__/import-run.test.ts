@@ -51,8 +51,8 @@ describe("import run", () => {
   let openClawHome = "";
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "zettelclaw-import-run-"));
-    logDir = join(tempDir, "zettelclaw");
+    tempDir = await mkdtemp(join(tmpdir(), "reclaw-import-run-"));
+    logDir = join(tempDir, "reclaw");
     logPath = join(logDir, "log.jsonl");
     subjectsPath = join(logDir, "subjects.json");
     statePath = join(logDir, "state.json");
