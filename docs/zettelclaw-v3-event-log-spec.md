@@ -1,8 +1,100 @@
-# Zettelclaw V3: Event Log Architecture
+# Reclaw V3: Event Log Architecture
 
 Status: Implementation contract
 Last updated: 2026-03-02
-Scope: `packages/plugin` (OpenClaw memory slot plugin)
+Scope: `packages/plugin` + `packages/skill` (OpenClaw memory slot plugin + memory skill package)
+
+## 0. Global Rename Spec (`zettelclaw` -> `reclaw`)
+
+This section is the canonical v3 naming contract. Until the rename lands in code, legacy `zettelclaw` strings may still appear in examples below; treat the mappings in this section as authoritative.
+
+### 0.1 Naming and Brand Direction
+
+- Canonical product name: `Reclaw`
+- Canonical plugin/skill namespace: `reclaw`
+- Product role line: `Reclaw is the OpenClaw memory system plugin`
+- Primary tagline (from legacy Reclaw): `Reclaim your AI conversations.`
+- Preferred memory framing (from legacy Reclaw): `durable memory`
+- CLI heading style: `🦞 Reclaw - Reclaim your AI conversations`
+- Deprecated for new user-facing copy: `Zettelclaw` (allowed only in migration warnings and backward-compat notes)
+
+### 0.2 Rename Matrix (Plugin + Skill Packages)
+
+| Surface | Legacy value | New value | Migration behavior |
+|---|---|---|---|
+| Plugin manifest ID (`openclaw.plugin.json`) | `zettelclaw` | `reclaw` | Register plugin under `reclaw`. Keep temporary alias routing for `zettelclaw` CLI command path. |
+| Plugin manifest display name | `Zettelclaw` | `Reclaw` | Replace all user-facing labels. |
+| Plugin npm package name (`packages/plugin/package.json`) | `zettelclaw` | `reclaw` | Publish new package name; keep compatibility notes in release docs. |
+| Plugin config key in `openclaw.json` | `plugins.entries.zettelclaw` | `plugins.entries.reclaw` | Auto-migrate key on `init`/`verify` when legacy key exists. |
+| Memory slot ownership | `plugins.slots.memory = "zettelclaw"` | `plugins.slots.memory = "reclaw"` | Rewrite slot value during migration. |
+| Plugin allowlist entry | `"zettelclaw"` | `"reclaw"` | Replace allowlist value; dedupe list. |
+| Default log directory | `~/.openclaw/zettelclaw` | `~/.openclaw/reclaw` | Migrate directory path on first `init` (see 0.3). |
+| CLI root command | `openclaw zettelclaw ...` | `openclaw reclaw ...` | `openclaw zettelclaw ...` remains a deprecated alias during transition. |
+| Cron names | `zettelclaw-memory-snapshot`, `zettelclaw-briefing`, `zettelclaw-reset`, `zettelclaw-nightly`, `zettelclaw-import-worker-*` | `reclaw-memory-snapshot`, `reclaw-briefing`, `reclaw-reset`, `reclaw-nightly`, `reclaw-import-worker-*` | `init` removes legacy names and upserts new names. |
+| Model/session labels | `zettelclaw-extraction-model`, `zettelclaw-memory-snapshot-model`, `zettelclaw-import-extract` | `reclaw-extraction-model`, `reclaw-memory-snapshot-model`, `reclaw-import-extract` | Rename for observability consistency. |
+| Prompt filename | `prompts/memory-zettelclaw-notice.md` | `prompts/memory-reclaw-notice.md` | Update references in command wiring. |
+| Managed markers in `AGENTS.md`/`MEMORY.md` | `BEGIN/END ZETTELCLAW ...` | `BEGIN/END RECLAW ...` | Readers accept both marker families; writers emit `RECLAW` markers. |
+| Managed block headings | `## Memory System (Zettelclaw)`, `## Zettelclaw Memory Mode`, `## Zettelclaw Session Handoff` | `## Memory System (Reclaw)`, `## Reclaw Memory Mode`, `## Reclaw Session Handoff` | Rewrite on next managed-block update. |
+| Plugin skill directory | `packages/plugin/skills/zettelclaw/` | `packages/plugin/skills/reclaw/` | Move directory and update manifest references. |
+| Published skill package name | `@zettelclaw/skill` | `@reclaw/skill` | Publish new package and update resolver fallback candidates. |
+| Skill package entry path | `zettelclaw/SKILL.md` | `reclaw/SKILL.md` | Move entry path and `files` array. |
+| Skill frontmatter name | `name: zettelclaw` | `name: reclaw` | Required for runtime skill discovery consistency. |
+| Internal type names | `ZettelclawState`, `registerZettelclawCli`, etc. | `ReclawState`, `registerReclawCli`, etc. | Pure refactor; no behavior change. |
+
+### 0.3 Backward Compatibility and Migration Contract
+
+1. Config migration on first `openclaw reclaw init`:
+   - If `plugins.entries.zettelclaw` exists and `plugins.entries.reclaw` does not, move the object to `plugins.entries.reclaw`.
+   - If `plugins.slots.memory === "zettelclaw"`, rewrite to `"reclaw"`.
+   - Replace any `"zettelclaw"` value in `plugins.allow` with `"reclaw"` and dedupe.
+
+2. Log directory migration:
+   - If `~/.openclaw/reclaw` does not exist and `~/.openclaw/zettelclaw` exists, move `zettelclaw` -> `reclaw`.
+   - If both directories exist and both are non-empty, abort with an actionable conflict message (no automatic merge).
+   - After migration, all reads/writes use `~/.openclaw/reclaw` unless an explicit `logDir` override is configured.
+
+3. Marker migration:
+   - Managed-block readers must detect both `ZETTELCLAW` and `RECLAW` marker sets.
+   - Managed-block writers must emit only `RECLAW` markers and headings.
+   - Existing legacy blocks are replaced in place the next time `init`, `snapshot generate`, or `handoff refresh` runs.
+
+4. CLI compatibility window:
+   - Register `openclaw reclaw` as canonical.
+   - Keep `openclaw zettelclaw` as a deprecated alias for one minor release cycle with warning output on use.
+   - Alias removal target: first v4 release after rename stabilization.
+
+5. Cron migration:
+   - On `init`, remove legacy cron names and create/update only `reclaw-*` names.
+   - Import worker names follow `reclaw-import-worker-<jobId>` immediately after rename.
+
+6. Legacy Reclaw importer continuity:
+   - Keep existing import source support (`chatgpt`, `claude`, `grok`, `openclaw`) under `openclaw reclaw import`.
+   - Position this as the successor to the old standalone Reclaw importer, now integrated directly in the memory plugin workflow.
+
+### 0.4 Implementation Sequence (Scoped to Plugin + Skill)
+
+1. Plugin package:
+   - Rename manifest/package identifiers, command root, config keys, log directory default, cron names, marker constants, prompt filenames, and user-facing copy.
+   - Keep CLI alias and marker dual-read support.
+   - Update plugin tests to assert `reclaw` defaults and migration behavior.
+   - Primary files: `packages/plugin/openclaw.plugin.json`, `packages/plugin/package.json`, `packages/plugin/src/plugin.ts`, `packages/plugin/src/config.ts`, `packages/plugin/src/cli/*.ts`, `packages/plugin/src/memory/markers.ts`, `packages/plugin/prompts/*.md`, `packages/plugin/src/__tests__/*.test.ts`.
+
+2. Skill package:
+   - Rename package name and entry path to `@reclaw/skill` + `reclaw/SKILL.md`.
+   - Rewrite SKILL.md commands/examples to `openclaw reclaw ...`.
+   - Sync plugin bundled skill copy (`packages/plugin/skills/reclaw/SKILL.md`).
+   - Primary files: `packages/skill/package.json`, `packages/skill/reclaw/SKILL.md`, `packages/plugin/skills/reclaw/SKILL.md`, and any resolver logic in `packages/cli/src/lib/skill.ts` that points at `@zettelclaw/skill`.
+
+3. Verification gates:
+   - `rg -n "zettelclaw|Zettelclaw|ZETTELCLAW" packages/plugin packages/skill` returns only intentional compatibility shims/messages.
+   - Fresh install path produces only `reclaw` identifiers in config, cron jobs, markers, and log directory.
+   - Migration path from a live `zettelclaw` install preserves data and command functionality.
+
+### 0.5 Non-Goals of Rename
+
+- No event schema change (`log.jsonl` entry fields stay the same).
+- No behavior change to extraction/snapshot logic.
+- No rollback to legacy daily-memory file workflows.
 
 ## 1. System Contract
 
