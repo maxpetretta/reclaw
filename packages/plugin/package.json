@@ -3,7 +3,7 @@
   "version": "3.0.0",
   "description": "Durable append-only event log memory system for OpenClaw",
   "license": "MIT",
-  "repository": "https://github.com/maxpetretta/zettelclaw",
+  "repository": "https://github.com/maxpetretta/reclaw",
   "homepage": "https://reclaw.sh",
   "keywords": [
     "openclaw",

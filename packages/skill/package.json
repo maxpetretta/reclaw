@@ -3,7 +3,7 @@
   "version": "3.0.0",
   "description": "Reclaw memory system skill for OpenClaw — agent instructions for the append-only event log",
   "license": "MIT",
-  "repository": "https://github.com/maxpetretta/zettelclaw",
+  "repository": "https://github.com/maxpetretta/reclaw",
   "homepage": "https://reclaw.sh",
   "private": false,
   "type": "module",
