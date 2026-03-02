@@ -236,12 +236,13 @@ export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): 
   let transientFailures = 0;
 
   while (Date.now() - startedAt < timeoutMs) {
-    let result: OpenClawCommandResult;
     try {
-      result = runOpenClaw(["cron", "runs", "--id", jobId, "--limit", "20"], {
-        allowFailure: true,
-        timeoutMs: 30_000,
-      });
+      const entries = await readCronRunEntries(jobId);
+      transientFailures = 0;
+      const finishedEntry = pickLatestFinishedEntry(entries);
+      if (finishedEntry) {
+        return resolveFinishedCronSummary(jobId, finishedEntry);
+      }
     } catch (error) {
       const wrapped = toOpenClawCronError(error);
       if (wrapped.code === "CLI_NOT_FOUND") {
@@ -250,44 +251,7 @@ export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): 
 
       transientFailures += 1;
       if (transientFailures >= 5) {
-        throw new OpenClawCronError(
-          "COMMAND_FAILED",
-          `openclaw cron runs failed repeatedly while waiting for job ${jobId}.`,
-          wrapped.details ?? wrapped.message,
-        );
-      }
-
-      await sleep(backoffDelayMs(transientFailures, 1_000, 8_000));
-      continue;
-    }
-
-    if (result.status !== 0) {
-      transientFailures += 1;
-      if (transientFailures >= 5) {
-        const detail = result.stderr.trim() || result.stdout.trim() || `exit code ${result.status}`;
-        throw new OpenClawCronError(
-          "COMMAND_FAILED",
-          `openclaw cron runs failed repeatedly while waiting for job ${jobId}.`,
-          detail,
-        );
-      }
-
-      await sleep(backoffDelayMs(transientFailures, 1_000, 8_000));
-      continue;
-    }
-
-    let parsed: CronRunsResponse;
-    try {
-      parsed = parseJson<CronRunsResponse>(result.stdout);
-    } catch (error) {
-      const wrapped = toOpenClawCronError(error);
-      transientFailures += 1;
-      if (transientFailures >= 5) {
-        throw new OpenClawCronError(
-          "INVALID_JSON",
-          `openclaw cron runs returned invalid JSON repeatedly for job ${jobId}.`,
-          wrapped.details ?? wrapped.message,
-        );
+        throw buildRepeatedCronRunsError(jobId, wrapped);
       }
 
       await sleep(backoffDelayMs(transientFailures, 1_000, 8_000));
@@ -295,40 +259,77 @@ export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): 
     }
 
     transientFailures = 0;
-    const entries = toCronRunEntries(parsed.entries);
-    const finishedEntry = entries
-      .filter((entry) => entry.action === "finished")
-      .sort((left, right) => right.ts - left.ts)[0];
-
-    if (finishedEntry) {
-      if (finishedEntry.status && finishedEntry.status !== "ok") {
-        const errorText = finishedEntry.error;
-        const summaryText = finishedEntry.summary;
-        const normalizedError = errorText.toLowerCase();
-        const isDeliveryFailure =
-          normalizedError.includes("cron delivery target is missing") ||
-          normalizedError.includes("cron announce delivery failed");
-        if (isDeliveryFailure && summaryText.length > 0) {
-          return summaryText;
-        }
-
-        const detail = errorText || summaryText || "no summary";
-        throw new OpenClawCronError(
-          "JOB_FAILED",
-          `Subagent job ${jobId} finished with status '${finishedEntry.status}'.`,
-          detail,
-        );
-      }
-
-      return finishedEntry.summary;
-    }
-
     await sleep(3_000);
   }
 
   throw new OpenClawCronError(
     "TIMEOUT",
     `Timed out waiting for extraction result for cron job ${jobId}.`,
+  );
+}
+
+async function readCronRunEntries(jobId: string): Promise<ReturnType<typeof toCronRunEntries>> {
+  const result = await runOpenClawRetryingCommand(["cron", "runs", "--id", jobId, "--limit", "20"], {
+    allowFailure: true,
+    timeoutMs: 30_000,
+    retries: CRON_RETRY_MEDIUM,
+  });
+
+  if (result.status !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim() || `exit code ${result.status}`;
+    throw new OpenClawCronError(
+      "COMMAND_FAILED",
+      `openclaw cron runs failed for job ${jobId}.`,
+      detail,
+    );
+  }
+
+  const parsed = parseJson<CronRunsResponse>(result.stdout);
+  return toCronRunEntries(parsed.entries);
+}
+
+function pickLatestFinishedEntry(entries: ReturnType<typeof toCronRunEntries>) {
+  return entries
+    .filter((entry) => entry.action === "finished")
+    .sort((left, right) => right.ts - left.ts)[0];
+}
+
+function resolveFinishedCronSummary(jobId: string, finishedEntry: ReturnType<typeof toCronRunEntries>[number]): string {
+  if (!finishedEntry.status || finishedEntry.status === "ok") {
+    return finishedEntry.summary;
+  }
+
+  const errorText = finishedEntry.error;
+  const summaryText = finishedEntry.summary;
+  const normalizedError = errorText.toLowerCase();
+  const isDeliveryFailure =
+    normalizedError.includes("cron delivery target is missing") ||
+    normalizedError.includes("cron announce delivery failed");
+  if (isDeliveryFailure && summaryText.length > 0) {
+    return summaryText;
+  }
+
+  const detail = errorText || summaryText || "no summary";
+  throw new OpenClawCronError(
+    "JOB_FAILED",
+    `Subagent job ${jobId} finished with status '${finishedEntry.status}'.`,
+    detail,
+  );
+}
+
+function buildRepeatedCronRunsError(jobId: string, error: OpenClawCronError): OpenClawCronError {
+  if (error.code === "INVALID_JSON") {
+    return new OpenClawCronError(
+      "INVALID_JSON",
+      `openclaw cron runs returned invalid JSON repeatedly for job ${jobId}.`,
+      error.details ?? error.message,
+    );
+  }
+
+  return new OpenClawCronError(
+    "COMMAND_FAILED",
+    `openclaw cron runs failed repeatedly while waiting for job ${jobId}.`,
+    error.details ?? error.message,
   );
 }
 
