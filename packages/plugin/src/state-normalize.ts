@@ -208,7 +208,12 @@ function normalizeExtractedSessions(raw: unknown): Record<string, ExtractedSessi
       return undefined;
     }
 
-    return { at, entries };
+    const lastMessageAt = readTimestamp(sessionValue.lastMessageAt);
+    return {
+      at,
+      entries,
+      ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
+    };
   });
 }
 

@@ -45,7 +45,7 @@ interface ExtractionPipelineParams {
   logger: OpenClawPluginApi["logger"];
   apiBaseUrl: string;
   apiToken?: string;
-  /** Skip the isExtracted guard (used by after_compaction to re-extract). */
+  /** Skip the isExtracted guard (used by after_compaction delta extraction). */
   force?: boolean;
 }
 
@@ -92,20 +92,36 @@ async function recordTranscriptCitationUsage(statePath: string, logPath: string,
   await incrementEventUsage(statePath, citedIds, "citation");
 }
 
+function findLatestMessageTimestamp(messages: TranscriptMessage[]): string | undefined {
+  let latestTimestampMs = Number.NEGATIVE_INFINITY;
+
+  for (const message of messages) {
+    const timestampMs = Date.parse(message.timestamp);
+    if (Number.isFinite(timestampMs) && timestampMs > latestTimestampMs) {
+      latestTimestampMs = timestampMs;
+    }
+  }
+
+  return Number.isFinite(latestTimestampMs) ? new Date(latestTimestampMs).toISOString() : undefined;
+}
+
 export async function runExtractionPipeline(params: ExtractionPipelineParams): Promise<void> {
   const state = await readState(params.paths.statePath);
+  const lastMessageAt = findLatestMessageTimestamp(params.messages);
 
   if (!params.force && isExtracted(state, params.sessionId)) {
     return;
   }
 
-  if (!params.force && state.failedSessions[params.sessionId] && !shouldRetry(state, params.sessionId)) {
+  if (state.failedSessions[params.sessionId] && !shouldRetry(state, params.sessionId)) {
     return;
   }
 
   const transcript = formatTranscript(params.messages);
   if (!transcript.trim()) {
-    await markExtracted(params.paths.statePath, params.sessionId, 0);
+    await markExtracted(params.paths.statePath, params.sessionId, 0, {
+      ...(lastMessageAt ? { lastMessageAt } : {}),
+    });
     await pruneState(params.paths.statePath);
     return;
   }
@@ -164,7 +180,9 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
       }
     }
 
-    await markExtracted(params.paths.statePath, params.sessionId, appendedCount);
+    await markExtracted(params.paths.statePath, params.sessionId, appendedCount, {
+      ...(lastMessageAt ? { lastMessageAt } : {}),
+    });
     await pruneState(params.paths.statePath);
   } catch (error) {
     const message = normalizeError(error);

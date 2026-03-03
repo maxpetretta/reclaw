@@ -40,3 +40,4 @@ Rules:
 - Output ONLY the generated block content.
 - Do NOT include marker lines.
 - Do NOT include explanations or commentary.
+- Do NOT use placeholder text like "- …" or "- ..." — either list concrete items or omit the section entirely.

@@ -6,6 +6,8 @@ import { normalizeState } from "./state-normalize";
 export interface ExtractedSession {
   at: string;
   entries: number;
+  /** Latest transcript message timestamp included in the last successful extraction. */
+  lastMessageAt?: string;
 }
 
 export interface FailedSession {
@@ -173,11 +175,17 @@ export async function markExtracted(
   path: string,
   sessionId: string,
   entryCount: number,
+  opts: {
+    lastMessageAt?: string;
+  } = {},
 ): Promise<void> {
   await updateState(path, (state) => {
     state.extractedSessions[sessionId] = {
       at: new Date().toISOString(),
       entries: entryCount,
+      ...(typeof opts.lastMessageAt === "string" && opts.lastMessageAt.trim().length > 0
+        ? { lastMessageAt: opts.lastMessageAt.trim() }
+        : {}),
     };
     delete state.failedSessions[sessionId];
   });

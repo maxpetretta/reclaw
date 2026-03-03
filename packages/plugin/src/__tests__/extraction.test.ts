@@ -543,6 +543,73 @@ describe("extraction hooks", () => {
     expect(state.extractedSessions["session-compaction-2"]?.entries).toBe(1);
   });
 
+  test("after_compaction extracts only transcript delta after last extracted timestamp", async () => {
+    const sessionsDir = join(openclawHome, "agents", "agent-1", "sessions");
+    const transcriptPath = join(sessionsDir, "session-compaction-delta.jsonl");
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-compaction-delta","timestamp":"2026-02-22T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-22T00:01:00.000Z","message":{"role":"user","content":"Capture first update."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:02:00.000Z","message":{"role":"assistant","content":"Captured first."}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    let llmCalls = 0;
+    const transcripts: string[] = [];
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async (opts) => {
+        llmCalls += 1;
+        transcripts.push(opts.transcript);
+        return llmCalls === 1
+          ? '{"type":"fact","content":"First compaction extraction","subject":"auth-migration"}'
+          : '{"type":"fact","content":"Second compaction extraction","subject":"auth-migration"}';
+      },
+    });
+
+    const event = {
+      messageCount: 2,
+      compactedCount: 4,
+      sessionFile: transcriptPath,
+    };
+    const ctx = {
+      agentId: "agent-1",
+      sessionId: "session-compaction-delta",
+      sessionKey: "agent:agent-1:main",
+    };
+
+    await handlers.after_compaction?.(event, ctx);
+
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-compaction-delta","timestamp":"2026-02-22T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-22T00:01:00.000Z","message":{"role":"user","content":"Capture first update."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:02:00.000Z","message":{"role":"assistant","content":"Captured first."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:03:00.000Z","message":{"role":"user","content":"Capture second update."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:04:00.000Z","message":{"role":"assistant","content":"Captured second."}}',
+      ].join("\n"),
+      "utf8",
+    );
+    await handlers.after_compaction?.(event, ctx);
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    const state = await readState(join(logDir, "state.json"));
+
+    expect(llmCalls).toBe(2);
+    expect(entries).toHaveLength(2);
+    expect(transcripts).toHaveLength(2);
+    expect(transcripts[0]).toContain("Capture first update.");
+    expect(transcripts[1]).toContain("Capture second update.");
+    expect(transcripts[1]).not.toContain("Capture first update.");
+    expect(state.extractedSessions["session-compaction-delta"]?.lastMessageAt).toBe("2026-02-22T00:04:00.000Z");
+  });
+
 
   test("after_compaction resolves session fallback when context is empty", async () => {
     const sessionsDir = join(openclawHome, "agents", "main", "sessions");

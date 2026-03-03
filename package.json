@@ -4,6 +4,9 @@
   "workspaces": ["packages/plugin", "packages/skill", "packages/website"],
   "scripts": {
     "smoke": "./scripts/run-plugin-smoke-tests.sh",
+    "switch:local": "./scripts/switch-openclaw-reclaw.sh local",
+    "switch:latest": "./scripts/switch-openclaw-reclaw.sh latest",
+    "switch:status": "./scripts/switch-openclaw-reclaw.sh status",
     "web": "bun run --cwd packages/website dev",
     "web:dev": "bun run --cwd packages/website dev",
     "web:build": "bun run --cwd packages/website build",

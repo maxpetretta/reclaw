@@ -10,6 +10,29 @@ export function hasUserMessage(messages: TranscriptMessage[]): boolean {
   return messages.some((message) => message.role === "user");
 }
 
+export function selectMessagesAfterTimestamp(
+  messages: TranscriptMessage[],
+  afterTimestamp: string | undefined,
+): TranscriptMessage[] {
+  if (!afterTimestamp) {
+    return messages;
+  }
+
+  const cutoffMs = Date.parse(afterTimestamp);
+  if (!Number.isFinite(cutoffMs)) {
+    return messages;
+  }
+
+  return messages.filter((message) => {
+    const messageTimestampMs = Date.parse(message.timestamp);
+    // Keep undated/invalid messages to avoid dropping potentially new content.
+    if (!Number.isFinite(messageTimestampMs)) {
+      return true;
+    }
+    return messageTimestampMs > cutoffMs;
+  });
+}
+
 function extractBeforeResetMessages(rawMessages: unknown[] | undefined): TranscriptMessage[] {
   if (!Array.isArray(rawMessages)) {
     return [];

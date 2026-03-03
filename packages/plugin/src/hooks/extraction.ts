@@ -14,7 +14,6 @@ import {
   readTranscript,
 } from "../lib/transcript";
 import {
-  isExtracted,
   markCompactionObserved,
   markCompactionStatus,
   markFailed,
@@ -29,6 +28,7 @@ import {
 import {
   hasUserMessage,
   loadBeforeResetMessages,
+  selectMessagesAfterTimestamp,
 } from "./transcript-utils";
 import {
   runExtractionPipeline,
@@ -344,8 +344,8 @@ export function registerExtractionHooks(
       return;
     }
 
-    // Note: no isExtracted check here — compaction always produces new content
-    // that should be extracted, even if the session was previously extracted.
+    // Compaction keeps the same session id, so we run delta extraction using
+    // only transcript messages newer than the last successful extraction.
 
     const transcriptFile = transcriptFileHint ?? (await findTranscriptFile(agentId, sessionId));
     if (!transcriptFile) {
@@ -378,9 +378,29 @@ export function registerExtractionHooks(
       return;
     }
 
+    const stateBefore = await readState(paths.statePath);
+    const extractedBeforeAt = stateBefore.extractedSessions[sessionId]?.at;
+    const failedBeforeAt = stateBefore.failedSessions[sessionId]?.at;
+    const extractionWatermark =
+      stateBefore.extractedSessions[sessionId]?.lastMessageAt ?? stateBefore.extractedSessions[sessionId]?.at;
+    const deltaMessages = selectMessagesAfterTimestamp(messages, extractionWatermark);
+    if (deltaMessages.length === 0) {
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: "no new messages since last extraction",
+      });
+      return;
+    }
+
+    if (!hasUserMessage(deltaMessages)) {
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: "no new user messages since last extraction",
+      });
+      return;
+    }
+
     await runExtractionPipeline({
       sessionId,
-      messages,
+      messages: deltaMessages,
       paths,
       memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
       config,
@@ -392,21 +412,22 @@ export function registerExtractionHooks(
     });
 
     const stateAfter = await readState(paths.statePath);
-    if (isExtracted(stateAfter, sessionId)) {
+    const extractedAfter = stateAfter.extractedSessions[sessionId];
+    if (extractedAfter && extractedAfter.at !== extractedBeforeAt) {
       api.logger.info(
-        `reclaw after_compaction extracted ${sessionId}: entries=${stateAfter.extractedSessions[sessionId]?.entries ?? 0}`,
+        `reclaw after_compaction extracted ${sessionId}: entries=${extractedAfter.entries ?? 0}`,
       );
       await markCompactionStatus(paths.statePath, sessionId, "extracted", {
-        entries: stateAfter.extractedSessions[sessionId]?.entries ?? 0,
+        entries: extractedAfter.entries ?? 0,
       });
       return;
     }
 
-    const failed = stateAfter.failedSessions[sessionId];
-    if (failed) {
-      api.logger.warn(`reclaw after_compaction failed ${sessionId}: ${failed.error}`);
+    const failedAfter = stateAfter.failedSessions[sessionId];
+    if (failedAfter && failedAfter.at !== failedBeforeAt) {
+      api.logger.warn(`reclaw after_compaction failed ${sessionId}: ${failedAfter.error}`);
       await markCompactionStatus(paths.statePath, sessionId, "failed", {
-        error: failed.error,
+        error: failedAfter.error,
       });
       return;
     }

@@ -48,6 +48,15 @@ describe("state", () => {
     expect(state.failedSessions["session-1"]).toBeUndefined();
   });
 
+  test("markExtracted optionally records lastMessageAt watermark", async () => {
+    await markExtracted(statePath, "session-watermark", 1, {
+      lastMessageAt: "2026-03-01T10:00:00.000Z",
+    });
+
+    const state = await readState(statePath);
+    expect(state.extractedSessions["session-watermark"]?.lastMessageAt).toBe("2026-03-01T10:00:00.000Z");
+  });
+
   test("readState preserves imported records when required fields are present", async () => {
     const at = new Date().toISOString();
     await writeState(statePath, {
