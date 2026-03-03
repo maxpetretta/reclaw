@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isEnoent, isObject } from "../lib/guards";
-import { runPluginCommandWithTimeout, type OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { normalizeCliInputPath } from "../lib/path";
 import { ensureManagedBlock } from "../memory/managed-block";
@@ -37,16 +37,12 @@ import {
   writeCronJobsDocument,
 } from "../lib/cron-jobs-store";
 import { parseInteractiveImportJobs } from "./import-ui";
+import { dispatchPostInitGuidanceEvent, type GuidanceEventResult } from "./post-init-guidance-event";
 import { toObject } from "./parse";
 
 const POST_INIT_EVENT_PROMPT = "post-init-system-event.md";
 const AGENTS_MEMORY_PROMPT = "agents-memory-guidance.md";
 const MEMORY_NOTICE_PROMPT = "memory-reclaw-notice.md";
-
-export interface GuidanceEventResult {
-  sent: boolean;
-  message?: string;
-}
 
 interface InitDeps {
   fireGuidanceEvent?: (paths: InitPaths) => Promise<GuidanceEventResult>;
@@ -114,40 +110,7 @@ export async function firePostInitGuidanceEvent(paths: InitPaths): Promise<Guida
     return { sent: false, message: `Could not build init event text: ${message}` };
   }
 
-  if (!eventText) {
-    return { sent: false, message: "Could not build init event text: empty output" };
-  }
-
-  const attempts: string[][] = [
-    ["openclaw", "system", "event", "--text", eventText, "--mode", "now"],
-    ["openclaw", "system", "event", "--text", eventText],
-  ];
-
-  let lastErrorMessage = "unknown error";
-  for (const argv of attempts) {
-    try {
-      const result = await runPluginCommandWithTimeout({
-        argv,
-        timeoutMs: 10_000,
-      });
-
-      if (result.code === 0) {
-        return { sent: true };
-      }
-
-      const stderr = result.stderr.trim();
-      const stdout = result.stdout.trim();
-      lastErrorMessage =
-        stderr || stdout || `command exited with code ${String(result.code)}`;
-    } catch (error) {
-      lastErrorMessage = error instanceof Error ? error.message : String(error);
-    }
-  }
-
-  return {
-    sent: false,
-    message: `Could not fire post-init system event: ${lastErrorMessage}`,
-  };
+  return await dispatchPostInitGuidanceEvent(eventText);
 }
 
 export async function ensureLogStoreFiles(paths: InitPaths): Promise<void> {
