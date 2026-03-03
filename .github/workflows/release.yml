@@ -78,7 +78,7 @@ jobs:
           skill_version="$(node -p "require('./packages/skill/package.json').version")"
           changelog="$(echo "$RELEASE_BODY" | tr '\n' ' ')"
 
-          clawhub --no-input publish packages/skill \
+          clawhub --no-input publish packages/skill/reclaw \
             --slug reclaw \
             --name "Reclaw" \
             --version "$skill_version" \
