@@ -388,6 +388,7 @@ export function registerExtractionHooks(
       logger: api.logger,
       apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
       apiToken,
+      force: true,
     });
 
     const stateAfter = await readState(paths.statePath);

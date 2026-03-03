@@ -45,6 +45,8 @@ interface ExtractionPipelineParams {
   logger: OpenClawPluginApi["logger"];
   apiBaseUrl: string;
   apiToken?: string;
+  /** Skip the isExtracted guard (used by after_compaction to re-extract). */
+  force?: boolean;
 }
 
 const EVENT_ID_LENGTH = 12;
@@ -93,11 +95,11 @@ async function recordTranscriptCitationUsage(statePath: string, logPath: string,
 export async function runExtractionPipeline(params: ExtractionPipelineParams): Promise<void> {
   const state = await readState(params.paths.statePath);
 
-  if (isExtracted(state, params.sessionId)) {
+  if (!params.force && isExtracted(state, params.sessionId)) {
     return;
   }
 
-  if (state.failedSessions[params.sessionId] && !shouldRetry(state, params.sessionId)) {
+  if (!params.force && state.failedSessions[params.sessionId] && !shouldRetry(state, params.sessionId)) {
     return;
   }
 
