@@ -571,7 +571,7 @@ The snapshot model receives pre-bucketed entries plus subject-activity summaries
 The LLM handles presentation grouping, prioritization, and consolidation but does not need to apply time-window filtering — that's already done.
 
 Constraints:
-- Max 80 lines between markers (enforced by `limitLines` post-LLM).
+- Max 120 lines between markers (enforced by `limitLines` post-LLM).
 - Content outside markers is never touched.
 - The generated block is the only part the nightly job writes to.
 
@@ -813,7 +813,7 @@ In `openclaw.json` under `plugins.entries.reclaw`:
       "model": "anthropic/claude-sonnet-4-6",
       "activeWindow": 14,
       "staleThreshold": 30,
-      "maxLines": 80
+      "maxLines": 120
     },
 
     "cron": {

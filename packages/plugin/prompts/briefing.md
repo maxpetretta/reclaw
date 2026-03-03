@@ -36,7 +36,7 @@ Rules:
 - Prefer stable, actionable context over exhaustive chronology.
 - Do not invent goals, preferences, projects, or tasks not present in the provided entries.
 - Keep output high signal, terse, and scannable.
-- Maximum 80 lines total.
+- Maximum 120 lines total.
 - Output ONLY the generated block content.
 - Do NOT include marker lines.
 - Do NOT include explanations or commentary.

@@ -25,7 +25,7 @@
           "model": { "type": "string", "default": "anthropic/claude-sonnet-4-6" },
           "activeWindow": { "type": "number", "default": 14 },
           "staleThreshold": { "type": "number", "default": 30 },
-          "maxLines": { "type": "number", "default": 80 }
+          "maxLines": { "type": "number", "default": 120 }
         }
       },
       "cron": {

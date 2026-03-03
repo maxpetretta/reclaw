@@ -106,7 +106,7 @@ import { runInit } from '$plugin_dir/src/cli/commands';
 await runInit({
   logDir: '$log_dir',
   extraction: { model: 'test', skipSessionTypes: ['cron:', 'sub:', 'hook:'] },
-  briefing: { model: 'test', activeWindow: 14, staleThreshold: 30, maxLines: 80 },
+  briefing: { model: 'test', activeWindow: 14, staleThreshold: 30, maxLines: 120 },
   cron: { schedule: '0 3 * * *', timezone: 'UTC' },
 }, '$workspace_dir');
 console.log('init ok');
@@ -295,7 +295,7 @@ import { runUninstall } from '$plugin_dir/src/cli/commands';
 await runUninstall({
   logDir: '$log_dir',
   extraction: { model: 'test', skipSessionTypes: ['cron:', 'sub:', 'hook:'] },
-  briefing: { model: 'test', activeWindow: 14, staleThreshold: 30, maxLines: 80 },
+  briefing: { model: 'test', activeWindow: 14, staleThreshold: 30, maxLines: 120 },
   cron: { schedule: '0 3 * * *', timezone: 'UTC' },
 }, '$workspace_dir');
 console.log('uninstall ok');

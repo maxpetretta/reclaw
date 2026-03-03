@@ -344,14 +344,8 @@ export function registerExtractionHooks(
       return;
     }
 
-    const stateBefore = await readState(paths.statePath);
-    if (isExtracted(stateBefore, sessionId)) {
-      api.logger.info(`reclaw after_compaction skipped ${sessionId}: already extracted`);
-      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-        reason: "already extracted",
-      });
-      return;
-    }
+    // Note: no isExtracted check here — compaction always produces new content
+    // that should be extracted, even if the session was previously extracted.
 
     const transcriptFile = transcriptFileHint ?? (await findTranscriptFile(agentId, sessionId));
     if (!transcriptFile) {

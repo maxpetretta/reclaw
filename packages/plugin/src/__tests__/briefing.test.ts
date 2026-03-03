@@ -23,7 +23,7 @@ function createConfig(logDir: string): PluginConfig {
       model: "anthropic/claude-sonnet-4-6",
       activeWindow: 14,
       staleThreshold: 30,
-      maxLines: 80,
+      maxLines: 120,
     },
     cron: {
       schedule: "0 3 * * *",
