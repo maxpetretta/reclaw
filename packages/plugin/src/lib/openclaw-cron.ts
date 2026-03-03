@@ -46,6 +46,8 @@ interface CronRunEntry {
   summary?: unknown;
   error?: unknown;
   ts?: unknown;
+  sessionId?: unknown;
+  sessionKey?: unknown;
 }
 
 interface CronRunResponse {
@@ -87,6 +89,12 @@ export interface ScheduleSubagentParams {
 
 export interface ScheduledSubagent {
   jobId: string;
+}
+
+export interface CronCompletionResult {
+  summary: string;
+  sessionId?: string;
+  sessionKey?: string;
 }
 
 async function runOpenClawRetryingCommand(
@@ -252,7 +260,7 @@ function buildCronAddArgs(input: {
   return args;
 }
 
-export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): Promise<string> {
+export async function waitForCronResult(jobId: string, timeoutMs = 1_900_000): Promise<CronCompletionResult> {
   const startedAt = Date.now();
   let transientFailures = 0;
 
@@ -262,7 +270,7 @@ export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): 
       transientFailures = 0;
       const finishedEntry = pickLatestFinishedEntry(entries);
       if (finishedEntry) {
-        return resolveFinishedCronSummary(jobId, finishedEntry);
+        return resolveFinishedCronResult(jobId, finishedEntry);
       }
     } catch (error) {
       const wrapped = toOpenClawCronError(error);
@@ -287,6 +295,11 @@ export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): 
     "TIMEOUT",
     `Timed out waiting for extraction result for cron job ${jobId}.`,
   );
+}
+
+export async function waitForCronSummary(jobId: string, timeoutMs = 1_900_000): Promise<string> {
+  const result = await waitForCronResult(jobId, timeoutMs);
+  return result.summary;
 }
 
 async function readCronRunEntries(jobId: string): Promise<ReturnType<typeof toCronRunEntries>> {
@@ -315,9 +328,18 @@ function pickLatestFinishedEntry(entries: ReturnType<typeof toCronRunEntries>) {
     .sort((left, right) => right.ts - left.ts)[0];
 }
 
-function resolveFinishedCronSummary(jobId: string, finishedEntry: ReturnType<typeof toCronRunEntries>[number]): string {
+function resolveFinishedCronResult(
+  jobId: string,
+  finishedEntry: ReturnType<typeof toCronRunEntries>[number],
+): CronCompletionResult {
+  const completion: CronCompletionResult = {
+    summary: finishedEntry.summary,
+    ...(finishedEntry.sessionId ? { sessionId: finishedEntry.sessionId } : {}),
+    ...(finishedEntry.sessionKey ? { sessionKey: finishedEntry.sessionKey } : {}),
+  };
+
   if (!finishedEntry.status || finishedEntry.status === "ok") {
-    return finishedEntry.summary;
+    return completion;
   }
 
   const errorText = finishedEntry.error;
@@ -327,7 +349,7 @@ function resolveFinishedCronSummary(jobId: string, finishedEntry: ReturnType<typ
     normalizedError.includes("cron delivery target is missing") ||
     normalizedError.includes("cron announce delivery failed");
   if (isDeliveryFailure && summaryText.length > 0) {
-    return summaryText;
+    return completion;
   }
 
   const detail = errorText || summaryText || "no summary";
@@ -499,6 +521,8 @@ function toCronRunEntries(value: unknown): Array<{
   summary: string;
   error: string;
   ts: number;
+  sessionId: string;
+  sessionKey: string;
 }> {
   if (!Array.isArray(value)) {
     return [];
@@ -510,6 +534,8 @@ function toCronRunEntries(value: unknown): Array<{
     summary: string;
     error: string;
     ts: number;
+    sessionId: string;
+    sessionKey: string;
   }> = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object") {
@@ -523,6 +549,8 @@ function toCronRunEntries(value: unknown): Array<{
       summary: typeof raw.summary === "string" ? raw.summary : "",
       error: typeof raw.error === "string" ? raw.error : "",
       ts: typeof raw.ts === "number" && Number.isFinite(raw.ts) ? raw.ts : 0,
+      sessionId: typeof raw.sessionId === "string" ? raw.sessionId : "",
+      sessionKey: typeof raw.sessionKey === "string" ? raw.sessionKey : "",
     });
   }
 
