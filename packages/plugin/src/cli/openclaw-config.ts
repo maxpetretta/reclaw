@@ -77,6 +77,22 @@ function removeAgentMemoryFlush(root: Record<string, unknown>): void {
   delete compaction.memoryFlush;
 }
 
+function ensureSessionRetentionForever(root: Record<string, unknown>): void {
+  const session = getOrCreateObject(root, "session");
+  const maintenance = getOrCreateObject(session, "maintenance");
+  maintenance.pruneAfter = "36500d";
+  maintenance.maxEntries = 100_000;
+  maintenance.resetArchiveRetention = false;
+}
+
+function removeSessionRetention(root: Record<string, unknown>): void {
+  const session = getOrCreateObject(root, "session");
+  const maintenance = getOrCreateObject(session, "maintenance");
+  delete maintenance.pruneAfter;
+  delete maintenance.maxEntries;
+  delete maintenance.resetArchiveRetention;
+}
+
 function ensureSessionMemoryHookDisabled(root: Record<string, unknown>): void {
   const hooks = getOrCreateObject(root, "hooks");
   const internalHooks = getOrCreateObject(hooks, "internal");
@@ -96,11 +112,12 @@ export async function updateOpenClawConfigForInit(configPath: string): Promise<v
   const root = await readConfigObject(configPath);
   ensurePluginMemorySlot(root);
   ensureAgentMemoryFlushDisabled(root);
+  ensureSessionRetentionForever(root);
   ensureSessionMemoryHookDisabled(root);
   await writeConfigObject(configPath, root);
 }
 
-export async function updateOpenClawConfigForUninit(configPath: string): Promise<void> {
+export async function updateOpenClawConfigForUninstall(configPath: string): Promise<void> {
   const root = await readConfigObjectOrEmpty(configPath);
   if (!root) {
     return;
@@ -108,6 +125,7 @@ export async function updateOpenClawConfigForUninit(configPath: string): Promise
 
   removePluginMemorySlot(root);
   removeAgentMemoryFlush(root);
+  removeSessionRetention(root);
   removeSessionMemoryHook(root);
   await writeConfigObject(configPath, root);
 }

@@ -23,7 +23,7 @@ import {
 } from "./import-detect";
 import { ensureStoreFiles } from "../store/files";
 import type { CommandLike } from "./command-like";
-import { updateOpenClawConfigForInit, updateOpenClawConfigForUninit } from "./openclaw-config";
+import { updateOpenClawConfigForInit, updateOpenClawConfigForUninstall } from "./openclaw-config";
 import { type InitPaths, resolvePaths } from "./paths";
 import { registerBriefingCommands } from "./register-briefing-commands";
 import { registerImportCommands } from "./register-import-commands";
@@ -247,7 +247,7 @@ function buildBriefingCronJob(config: PluginConfig, existing?: Record<string, un
     wakeMode: "now",
     payload: {
       kind: "agentTurn",
-      message: "Run: openclaw reclaw snapshot generate",
+      message: "Run: openclaw reclaw snapshot refresh",
       timeoutSeconds: 300,
     },
     delivery: {
@@ -317,7 +317,7 @@ export async function runInit(
 export async function runUninstall(config: PluginConfig, workspaceDir?: string): Promise<InitPaths> {
   const paths = resolvePaths(config, workspaceDir);
 
-  await updateOpenClawConfigForUninit(paths.openClawConfigPath);
+  await updateOpenClawConfigForUninstall(paths.openClawConfigPath);
   await removeGeneratedBriefingBlock(paths.memoryMdPath);
   await removeBriefingCron(paths);
 
@@ -400,13 +400,18 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     const compaction = toObject(defaults.compaction);
     const memoryFlush = compaction.memoryFlush;
     const memoryFlushDisabled = isObject(memoryFlush) && memoryFlush.enabled === false;
+    const session = toObject(configRoot.session);
+    const maintenance = toObject(session.maintenance);
+    const pruneDisabled = maintenance.pruneAfter === "36500d";
+    const maxEntriesHigh = typeof maintenance.maxEntries === "number" && maintenance.maxEntries >= 100_000;
+    const resetArchiveDisabled = maintenance.resetArchiveRetention === false;
     const hooks = toObject(configRoot.hooks);
     const internalHooks = toObject(hooks.internal);
     const hookEntries = toObject(internalHooks.entries);
     const sessionMemoryHook = toObject(hookEntries["session-memory"]);
     const sessionMemoryDisabled = sessionMemoryHook.enabled === false;
 
-    if (slotValue === "reclaw" && memoryFlushDisabled && sessionMemoryDisabled) {
+    if (slotValue === "reclaw" && memoryFlushDisabled && sessionMemoryDisabled && pruneDisabled && maxEntriesHigh && resetArchiveDisabled) {
       addCheck("openclaw.json", true, "ok");
     } else {
       const issues: string[] = [];
@@ -419,6 +424,15 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
         } else {
           issues.push("memoryFlush missing");
         }
+      }
+      if (!pruneDisabled) {
+        issues.push("session.maintenance.pruneAfter is not \"36500d\" (sessions will be pruned)");
+      }
+      if (!maxEntriesHigh) {
+        issues.push("session.maintenance.maxEntries is below 100000 (sessions will be capped)");
+      }
+      if (!resetArchiveDisabled) {
+        issues.push("session.maintenance.resetArchiveRetention is not false (reset archives will be deleted)");
       }
       if (!sessionMemoryDisabled) {
         issues.push("hooks.internal.entries.session-memory.enabled is not false");
