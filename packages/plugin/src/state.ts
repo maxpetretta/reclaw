@@ -8,12 +8,26 @@ export interface ExtractedSession {
   entries: number;
   /** Latest transcript message timestamp included in the last successful extraction. */
   lastMessageAt?: string;
+  /** OpenClaw source session key the extraction was run for (if resolvable). */
+  sourceSessionKey?: string;
+  /** Isolated worker session id that produced extraction output. */
+  workerSessionId?: string;
+  /** Isolated worker session key that produced extraction output. */
+  workerSessionKey?: string;
 }
 
 export interface FailedSession {
   at: string;
   error: string;
   retries: number;
+  /** Latest transcript message timestamp included in the failed extraction attempt. */
+  lastMessageAt?: string;
+  /** OpenClaw source session key the failed extraction was run for (if resolvable). */
+  sourceSessionKey?: string;
+  /** Isolated worker session id from the failed extraction attempt (if available). */
+  workerSessionId?: string;
+  /** Isolated worker session key from the failed extraction attempt (if available). */
+  workerSessionKey?: string;
 }
 
 export interface ImportedConversationState {
@@ -116,6 +130,10 @@ export interface SnapshotRunState {
   status: SnapshotRunStatus;
   memoryMdPath: string;
   error?: string;
+  /** Isolated worker session id that produced snapshot output. */
+  workerSessionId?: string;
+  /** Isolated worker session key that produced snapshot output. */
+  workerSessionKey?: string;
 }
 
 export interface ReclawState {
@@ -177,6 +195,9 @@ export async function markExtracted(
   entryCount: number,
   opts: {
     lastMessageAt?: string;
+    sourceSessionKey?: string;
+    workerSessionId?: string;
+    workerSessionKey?: string;
   } = {},
 ): Promise<void> {
   await updateState(path, (state) => {
@@ -186,18 +207,49 @@ export async function markExtracted(
       ...(typeof opts.lastMessageAt === "string" && opts.lastMessageAt.trim().length > 0
         ? { lastMessageAt: opts.lastMessageAt.trim() }
         : {}),
+      ...(typeof opts.sourceSessionKey === "string" && opts.sourceSessionKey.trim().length > 0
+        ? { sourceSessionKey: opts.sourceSessionKey.trim() }
+        : {}),
+      ...(typeof opts.workerSessionId === "string" && opts.workerSessionId.trim().length > 0
+        ? { workerSessionId: opts.workerSessionId.trim() }
+        : {}),
+      ...(typeof opts.workerSessionKey === "string" && opts.workerSessionKey.trim().length > 0
+        ? { workerSessionKey: opts.workerSessionKey.trim() }
+        : {}),
     };
     delete state.failedSessions[sessionId];
   });
 }
 
-export async function markFailed(path: string, sessionId: string, error: string): Promise<void> {
+export async function markFailed(
+  path: string,
+  sessionId: string,
+  error: string,
+  opts: {
+    lastMessageAt?: string;
+    sourceSessionKey?: string;
+    workerSessionId?: string;
+    workerSessionKey?: string;
+  } = {},
+): Promise<void> {
   await updateState(path, (state) => {
     const previous = state.failedSessions[sessionId];
     state.failedSessions[sessionId] = {
       at: new Date().toISOString(),
       error,
       retries: (previous?.retries ?? 0) + 1,
+      ...(typeof opts.lastMessageAt === "string" && opts.lastMessageAt.trim().length > 0
+        ? { lastMessageAt: opts.lastMessageAt.trim() }
+        : {}),
+      ...(typeof opts.sourceSessionKey === "string" && opts.sourceSessionKey.trim().length > 0
+        ? { sourceSessionKey: opts.sourceSessionKey.trim() }
+        : {}),
+      ...(typeof opts.workerSessionId === "string" && opts.workerSessionId.trim().length > 0
+        ? { workerSessionId: opts.workerSessionId.trim() }
+        : {}),
+      ...(typeof opts.workerSessionKey === "string" && opts.workerSessionKey.trim().length > 0
+        ? { workerSessionKey: opts.workerSessionKey.trim() }
+        : {}),
     };
   });
 }
@@ -210,6 +262,8 @@ export async function appendSnapshotRun(
     status: SnapshotRunStatus;
     memoryMdPath: string;
     error?: string;
+    workerSessionId?: string;
+    workerSessionKey?: string;
   },
 ): Promise<void> {
   await updateState(path, (state) => {
@@ -218,6 +272,8 @@ export async function appendSnapshotRun(
       status: run.status,
       memoryMdPath: run.memoryMdPath,
       ...(run.error ? { error: run.error } : {}),
+      ...(run.workerSessionId ? { workerSessionId: run.workerSessionId } : {}),
+      ...(run.workerSessionKey ? { workerSessionKey: run.workerSessionKey } : {}),
     };
 
     state.snapshotRuns = [nextRun, ...state.snapshotRuns].slice(0, MAX_SNAPSHOT_RUNS);

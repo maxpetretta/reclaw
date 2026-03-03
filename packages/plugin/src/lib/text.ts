@@ -2,9 +2,22 @@ export function normalizeWhitespace(value: string): string {
   return value.replaceAll(/\s+/gu, " ").trim();
 }
 
-export function extractTextContent(content: unknown): string {
+export interface ExtractTextContentOptions {
+  collapseWhitespace?: boolean;
+}
+
+function normalizeExtractedText(value: string, collapseWhitespace: boolean): string {
+  return collapseWhitespace ? normalizeWhitespace(value) : value.trim();
+}
+
+export function extractTextContent(
+  content: unknown,
+  options: ExtractTextContentOptions = {},
+): string {
+  const collapseWhitespace = options.collapseWhitespace ?? true;
+
   if (typeof content === "string") {
-    return normalizeWhitespace(content);
+    return normalizeExtractedText(content, collapseWhitespace);
   }
 
   if (!Array.isArray(content)) {
@@ -21,7 +34,7 @@ export function extractTextContent(content: unknown): string {
     const type = typeof record.type === "string" ? record.type : "";
 
     if ((type === "text" || type === "input_text" || type === "output_text") && typeof record.text === "string") {
-      const normalized = normalizeWhitespace(record.text);
+      const normalized = normalizeExtractedText(record.text, collapseWhitespace);
       if (normalized) {
         parts.push(normalized);
       }
@@ -29,7 +42,7 @@ export function extractTextContent(content: unknown): string {
     }
 
     if (typeof record.output_text === "string") {
-      const normalized = normalizeWhitespace(record.output_text);
+      const normalized = normalizeExtractedText(record.output_text, collapseWhitespace);
       if (normalized) {
         parts.push(normalized);
       }
@@ -37,7 +50,7 @@ export function extractTextContent(content: unknown): string {
     }
 
     if (typeof record.input_text === "string") {
-      const normalized = normalizeWhitespace(record.input_text);
+      const normalized = normalizeExtractedText(record.input_text, collapseWhitespace);
       if (normalized) {
         parts.push(normalized);
       }
@@ -45,7 +58,7 @@ export function extractTextContent(content: unknown): string {
     }
 
     if (typeof record.text === "string") {
-      const normalized = normalizeWhitespace(record.text);
+      const normalized = normalizeExtractedText(record.text, collapseWhitespace);
       if (normalized) {
         parts.push(normalized);
       }

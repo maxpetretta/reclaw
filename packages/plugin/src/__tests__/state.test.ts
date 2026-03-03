@@ -57,6 +57,21 @@ describe("state", () => {
     expect(state.extractedSessions["session-watermark"]?.lastMessageAt).toBe("2026-03-01T10:00:00.000Z");
   });
 
+  test("markExtracted optionally records source and worker session metadata", async () => {
+    await markExtracted(statePath, "session-meta", 2, {
+      sourceSessionKey: "agent:main:main:session-meta",
+      workerSessionId: "worker-session-id",
+      workerSessionKey: "agent:main:cron:job-1:run:worker-session-id",
+    });
+
+    const state = await readState(statePath);
+    expect(state.extractedSessions["session-meta"]?.sourceSessionKey).toBe("agent:main:main:session-meta");
+    expect(state.extractedSessions["session-meta"]?.workerSessionId).toBe("worker-session-id");
+    expect(state.extractedSessions["session-meta"]?.workerSessionKey).toBe(
+      "agent:main:cron:job-1:run:worker-session-id",
+    );
+  });
+
   test("readState preserves imported records when required fields are present", async () => {
     const at = new Date().toISOString();
     await writeState(statePath, {
@@ -92,6 +107,25 @@ describe("state", () => {
     state = await readState(statePath);
     expect(state.failedSessions["session-2"]?.retries).toBe(2);
     expect(shouldRetry(state, "session-2")).toBe(false);
+  });
+
+  test("markFailed optionally records source/worker metadata", async () => {
+    await markFailed(statePath, "session-failed-meta", "parse error", {
+      lastMessageAt: "2026-03-03T18:27:49.000Z",
+      sourceSessionKey: "agent:main:main:session-failed-meta",
+      workerSessionId: "worker-failed-session-id",
+      workerSessionKey: "agent:main:cron:job-9:run:worker-failed-session-id",
+    });
+
+    const state = await readState(statePath);
+    const failed = state.failedSessions["session-failed-meta"];
+
+    expect(failed?.error).toBe("parse error");
+    expect(failed?.retries).toBe(1);
+    expect(failed?.lastMessageAt).toBe("2026-03-03T18:27:49.000Z");
+    expect(failed?.sourceSessionKey).toBe("agent:main:main:session-failed-meta");
+    expect(failed?.workerSessionId).toBe("worker-failed-session-id");
+    expect(failed?.workerSessionKey).toBe("agent:main:cron:job-9:run:worker-failed-session-id");
   });
 
   test("pruneState removes entries older than cutoff", async () => {

@@ -232,6 +232,7 @@ export function registerExtractionHooks(
       logger: api.logger,
       apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
       apiToken,
+      sourceSessionKey: sessionKey,
     });
   });
 
@@ -262,6 +263,7 @@ export function registerExtractionHooks(
       logger: api.logger,
       apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
       apiToken,
+      sourceSessionKey: readTrimmedString(ctx.sessionKey),
     });
   });
 
@@ -408,6 +410,7 @@ export function registerExtractionHooks(
       logger: api.logger,
       apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
       apiToken,
+      sourceSessionKey: resolvedSessionKey,
       force: true,
     });
 
@@ -475,6 +478,7 @@ export function registerExtractionHooks(
         logger: api.logger,
         apiBaseUrl: resolveApiBaseUrlFromConfig(api.config, event.port),
         apiToken,
+        sourceSessionKey: resolvedSessionKey,
       });
     }
   });

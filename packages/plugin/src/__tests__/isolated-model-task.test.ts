@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { runIsolatedModelTask, type IsolatedModelTaskDeps } from "../lib/isolated-model-task";
+import {
+  runIsolatedModelTask,
+  runIsolatedModelTaskWithMeta,
+  type IsolatedModelTaskDeps,
+} from "../lib/isolated-model-task";
 import type { TranscriptMessage } from "../lib/transcript";
 
 const BASE_OPTIONS = {
@@ -54,6 +58,28 @@ describe("runIsolatedModelTask", () => {
     expect(removed).toEqual(["job-1"]);
   });
 
+  test("returns multiline assistant transcript output unchanged", async () => {
+    const transcriptMessages: TranscriptMessage[] = [
+      {
+        role: "user",
+        content: "request",
+        timestamp: "2026-03-03T00:00:00.000Z",
+      },
+      {
+        role: "assistant",
+        content: "## Snapshot\n- one\n- two",
+        timestamp: "2026-03-03T00:00:01.000Z",
+      },
+    ];
+
+    const deps = createDeps({
+      readTranscript: async () => transcriptMessages,
+    });
+
+    const output = await runIsolatedModelTask(BASE_OPTIONS, deps);
+    expect(output).toBe("## Snapshot\n- one\n- two");
+  });
+
   test("falls back to cron summary when transcript lookup/read fails", async () => {
     const removed: string[] = [];
     const deps = createDeps({
@@ -69,5 +95,22 @@ describe("runIsolatedModelTask", () => {
 
     expect(output).toBe("TRUNCATED_SUMMARY");
     expect(removed).toEqual(["job-1"]);
+  });
+
+  test("runIsolatedModelTaskWithMeta returns output plus session metadata", async () => {
+    const deps = createDeps({
+      readTranscript: async () => [
+        {
+          role: "assistant",
+          content: "FULL_OUTPUT",
+          timestamp: "2026-03-03T00:00:01.000Z",
+        },
+      ],
+    });
+
+    const result = await runIsolatedModelTaskWithMeta(BASE_OPTIONS, deps);
+    expect(result.output).toBe("FULL_OUTPUT");
+    expect(result.sessionId).toBe("session-1");
+    expect(result.sessionKey).toBe("agent:main:cron:job-1:run:session-1");
   });
 });

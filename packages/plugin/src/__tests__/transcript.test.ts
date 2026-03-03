@@ -54,6 +54,27 @@ describe("transcript", () => {
     ]);
   });
 
+  test("readTranscript preserves multiline assistant content", async () => {
+    const sessionFile = join(tempDir, "multiline.jsonl");
+
+    await writeFile(
+      sessionFile,
+      [
+        '{"type":"session","version":3,"id":"s2","timestamp":"2026-02-20T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"Generate markdown"}}',
+        '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"## Snapshot\\n- one\\n- two"}]}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const messages = await readTranscript(sessionFile);
+    expect(messages[1]).toEqual({
+      role: "assistant",
+      content: "## Snapshot\n- one\n- two",
+      timestamp: "2026-02-20T00:02:00.000Z",
+    });
+  });
+
   test("findTranscriptFile prefers the primary file", async () => {
     const sessionsDir = join(tempDir, "agents", "agent-a", "sessions");
     const primary = join(sessionsDir, "session-1.jsonl");

@@ -8,7 +8,7 @@ import {
   type ParsedExtractionEntry,
 } from "../extraction/shared";
 import { queryByIds, queryExtractionContext } from "../log/query";
-import { appendEntry, finalizeEntry } from "../log/schema";
+import { appendEntry, finalizeEntry, type LogEntry } from "../log/schema";
 import { applyLastHandoffBlock } from "../memory/handoff";
 import {
   isExtracted,
@@ -21,7 +21,7 @@ import {
 } from "../state";
 import { readRegistry, upsertSubjectFromExtraction } from "../subjects/registry";
 import { formatTranscript, type TranscriptMessage } from "../lib/transcript";
-import { extractFromTranscript } from "../lib/llm";
+import { extractFromTranscript, type ExtractionModelResult } from "../lib/llm";
 
 export interface ExtractionPaths {
   logPath: string;
@@ -30,7 +30,14 @@ export interface ExtractionPaths {
 }
 
 export interface ExtractionPipelineDeps {
-  extractFromTranscript: typeof extractFromTranscript;
+  extractFromTranscript: (opts: {
+    transcript: string;
+    subjects: Awaited<ReturnType<typeof readRegistry>>;
+    existingEntries?: LogEntry[];
+    model: string;
+    apiBaseUrl?: string;
+    apiToken?: string;
+  }) => Promise<string | ExtractionModelResult>;
   readMemoryFile: (path: string) => Promise<string>;
   writeMemoryFile: (path: string, content: string) => Promise<void>;
 }
@@ -45,6 +52,7 @@ interface ExtractionPipelineParams {
   logger: OpenClawPluginApi["logger"];
   apiBaseUrl: string;
   apiToken?: string;
+  sourceSessionKey?: string;
   /** Skip the isExtracted guard (used by after_compaction delta extraction). */
   force?: boolean;
 }
@@ -126,6 +134,9 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
     return;
   }
 
+  let workerSessionId: string | undefined;
+  let workerSessionKey: string | undefined;
+
   try {
     await recordTranscriptCitationUsage(params.paths.statePath, params.paths.logPath, transcript);
 
@@ -134,7 +145,7 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
     const existingEntries = await queryExtractionContext(params.paths.logPath, transcriptSubjects, {
       maxPerSubject: DEFAULT_EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
     });
-    const rawOutput = await params.deps.extractFromTranscript({
+    const extractionModelResult = await params.deps.extractFromTranscript({
       transcript,
       subjects,
       existingEntries,
@@ -142,6 +153,15 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
       apiBaseUrl: params.apiBaseUrl,
       apiToken: params.apiToken,
     });
+    const outputRecord =
+      typeof extractionModelResult === "string"
+        ? {
+          output: extractionModelResult,
+        }
+        : extractionModelResult;
+    workerSessionId = outputRecord.workerSessionId;
+    workerSessionKey = outputRecord.workerSessionKey;
+    const rawOutput = outputRecord.output;
 
     let appendedCount = 0;
     const appendedEntries: Array<ReturnType<typeof finalizeEntry>> = [];
@@ -173,7 +193,9 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
     if (latestHandoff) {
       try {
         const memoryContent = await params.deps.readMemoryFile(params.memoryMdPath);
-        const updatedMemory = applyLastHandoffBlock(memoryContent, latestHandoff);
+        const updatedMemory = applyLastHandoffBlock(memoryContent, latestHandoff, {
+          sessionKey: params.sourceSessionKey,
+        });
         await params.deps.writeMemoryFile(params.memoryMdPath, updatedMemory);
       } catch (error) {
         params.logger.warn(`reclaw handoff write failed for ${params.sessionId}: ${normalizeError(error)}`);
@@ -182,12 +204,20 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
 
     await markExtracted(params.paths.statePath, params.sessionId, appendedCount, {
       ...(lastMessageAt ? { lastMessageAt } : {}),
+      ...(params.sourceSessionKey ? { sourceSessionKey: params.sourceSessionKey } : {}),
+      ...(workerSessionId ? { workerSessionId } : {}),
+      ...(workerSessionKey ? { workerSessionKey } : {}),
     });
     await pruneState(params.paths.statePath);
   } catch (error) {
     const message = normalizeError(error);
     params.logger.warn(`reclaw extraction failed for ${params.sessionId}: ${message}`);
-    await markFailed(params.paths.statePath, params.sessionId, message);
+    await markFailed(params.paths.statePath, params.sessionId, message, {
+      ...(lastMessageAt ? { lastMessageAt } : {}),
+      ...(params.sourceSessionKey ? { sourceSessionKey: params.sourceSessionKey } : {}),
+      ...(workerSessionId ? { workerSessionId } : {}),
+      ...(workerSessionKey ? { workerSessionKey } : {}),
+    });
     await pruneState(params.paths.statePath);
   }
 }

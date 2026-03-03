@@ -209,10 +209,16 @@ function normalizeExtractedSessions(raw: unknown): Record<string, ExtractedSessi
     }
 
     const lastMessageAt = readTimestamp(sessionValue.lastMessageAt);
+    const sourceSessionKey = readTrimmedString(sessionValue.sourceSessionKey);
+    const workerSessionId = readTrimmedString(sessionValue.workerSessionId);
+    const workerSessionKey = readTrimmedString(sessionValue.workerSessionKey);
     return {
       at,
       entries,
       ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
+      ...(sourceSessionKey !== undefined ? { sourceSessionKey } : {}),
+      ...(workerSessionId !== undefined ? { workerSessionId } : {}),
+      ...(workerSessionKey !== undefined ? { workerSessionKey } : {}),
     };
   });
 }
@@ -228,10 +234,19 @@ function normalizeFailedSessions(raw: unknown): Record<string, FailedSession> {
       return undefined;
     }
 
+    const lastMessageAt = readTimestamp(sessionValue.lastMessageAt);
+    const sourceSessionKey = readTrimmedString(sessionValue.sourceSessionKey);
+    const workerSessionId = readTrimmedString(sessionValue.workerSessionId);
+    const workerSessionKey = readTrimmedString(sessionValue.workerSessionKey);
+
     return {
       at,
       error: sessionValue.error,
       retries: sessionValue.retries,
+      ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
+      ...(sourceSessionKey !== undefined ? { sourceSessionKey } : {}),
+      ...(workerSessionId !== undefined ? { workerSessionId } : {}),
+      ...(workerSessionKey !== undefined ? { workerSessionKey } : {}),
     };
   });
 }
@@ -355,11 +370,15 @@ function normalizeSnapshotRuns(raw: unknown): SnapshotRunState[] {
     }
 
     const error = readTrimmedString(runValue.error);
+    const workerSessionId = readTrimmedString(runValue.workerSessionId);
+    const workerSessionKey = readTrimmedString(runValue.workerSessionKey);
     runs.push({
       at,
       status,
       memoryMdPath,
       ...(error !== undefined ? { error } : {}),
+      ...(workerSessionId !== undefined ? { workerSessionId } : {}),
+      ...(workerSessionKey !== undefined ? { workerSessionKey } : {}),
     });
   }
 

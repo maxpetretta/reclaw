@@ -31,6 +31,12 @@ export interface IsolatedModelTaskDeps {
   readTranscript: typeof readTranscript;
 }
 
+export interface IsolatedModelTaskResult {
+  output: string;
+  sessionId?: string;
+  sessionKey?: string;
+}
+
 const DEFAULT_DEPS: IsolatedModelTaskDeps = {
   scheduleSubagentCronJob,
   runCronJobNow,
@@ -156,6 +162,13 @@ export async function runIsolatedModelTask(
   opts: IsolatedModelTaskOptions,
   deps: Partial<IsolatedModelTaskDeps> = {},
 ): Promise<string> {
+  return (await runIsolatedModelTaskWithMeta(opts, deps)).output;
+}
+
+export async function runIsolatedModelTaskWithMeta(
+  opts: IsolatedModelTaskOptions,
+  deps: Partial<IsolatedModelTaskDeps> = {},
+): Promise<IsolatedModelTaskResult> {
   const resolvedDeps: IsolatedModelTaskDeps = {
     ...DEFAULT_DEPS,
     ...deps,
@@ -178,13 +191,21 @@ export async function runIsolatedModelTask(
         readTranscript: resolvedDeps.readTranscript,
       });
       if (transcriptOutput) {
-        return transcriptOutput;
+        return {
+          output: transcriptOutput,
+          ...(completion.sessionId ? { sessionId: completion.sessionId } : {}),
+          ...(completion.sessionKey ? { sessionKey: completion.sessionKey } : {}),
+        };
       }
     } catch {
       // Fall back to cron summary if transcript lookup is unavailable.
     }
 
-    return completion.summary;
+    return {
+      output: completion.summary,
+      ...(completion.sessionId ? { sessionId: completion.sessionId } : {}),
+      ...(completion.sessionKey ? { sessionKey: completion.sessionKey } : {}),
+    };
   } catch (error) {
     throw formatModelTaskError(opts.errorPrefix ?? "LLM call failed", error);
   } finally {

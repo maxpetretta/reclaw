@@ -491,8 +491,9 @@ describe("extraction hooks", () => {
     expect(state.extractedSessions["session-compaction-1"]?.entries).toBe(1);
     expect(state.compactionSessions["session-compaction-1"]?.status).toBe("extracted");
     expect(state.compactionSessions["session-compaction-1"]?.entries).toBe(1);
-    expect(memory).toContain("Session: session-compaction-1");
+    expect(memory).toContain("## Previous Session Handoff (agent:main)");
     expect(memory).toContain("Compaction handoff saved");
+    expect(memory).toContain("### Details");
   });
 
   test("after_compaction is idempotent for repeated compactions on one session", async () => {
@@ -752,7 +753,11 @@ describe("extraction hooks", () => {
     const api = createMockApi({}, handlers);
 
     registerExtractionHooks(api, createPluginConfig(logDir), {
-      extractFromTranscript: async () => "not-json\nalso-not-json",
+      extractFromTranscript: async () => ({
+        output: "not-json\nalso-not-json",
+        workerSessionId: "worker-invalid-session-id",
+        workerSessionKey: "agent:main:cron:job-7:run:worker-invalid-session-id",
+      }),
     });
 
     await handlers.before_reset?.(
@@ -768,6 +773,11 @@ describe("extraction hooks", () => {
     const state = await readState(join(logDir, "state.json"));
     expect(state.extractedSessions["session-invalid-output"]).toBeUndefined();
     expect(state.failedSessions["session-invalid-output"]?.retries).toBe(1);
+    expect(state.failedSessions["session-invalid-output"]?.sourceSessionKey).toBe("agent:main");
+    expect(state.failedSessions["session-invalid-output"]?.workerSessionId).toBe("worker-invalid-session-id");
+    expect(state.failedSessions["session-invalid-output"]?.workerSessionKey).toBe(
+      "agent:main:cron:job-7:run:worker-invalid-session-id",
+    );
   });
 
   test("passes transcript-relevant existing entries and open items to extraction model", async () => {
@@ -998,10 +1008,10 @@ describe("extraction hooks", () => {
     );
 
     const firstMemory = await readFile(memoryPath, "utf8");
-    expect(firstMemory).toContain("## Reclaw Session Handoff");
-    expect(firstMemory).toContain("Session: session-h1");
+    expect(firstMemory).toContain("## Previous Session Handoff (agent:agent-1:main:session-h1)");
     expect(firstMemory).toContain("Auth migration in progress");
-    expect(firstMemory).toContain("Detail: Backfill remains");
+    expect(firstMemory).toContain("### Details");
+    expect(firstMemory).toContain("Backfill remains");
     expect(firstMemory).not.toContain("Old handoff text");
 
     await handlers.session_end?.(
@@ -1010,10 +1020,11 @@ describe("extraction hooks", () => {
     );
 
     const secondMemory = await readFile(memoryPath, "utf8");
-    expect(secondMemory).toContain("Session: session-h2");
+    expect(secondMemory).toContain("## Previous Session Handoff (agent:agent-1:main:session-h2)");
     expect(secondMemory).toContain("Auth migration complete");
-    expect(secondMemory).toContain("Detail: Backfill done");
-    expect(secondMemory).not.toContain("Session: session-h1");
+    expect(secondMemory).toContain("### Details");
+    expect(secondMemory).toContain("Backfill done");
+    expect(secondMemory).not.toContain("agent:agent-1:main:session-h1");
     expect(secondMemory).toContain("## Goals");
     expect(secondMemory).toContain("## Notes");
     expect(secondMemory).toContain(BRIEFING_BEGIN_MARKER);
@@ -1047,8 +1058,10 @@ describe("extraction hooks", () => {
     const memoryContent = await readFile(memoryPath, "utf8");
     expect(memoryContent).toContain(LAST_HANDOFF_BEGIN_MARKER);
     expect(memoryContent).toContain(LAST_HANDOFF_END_MARKER);
-    expect(memoryContent).toContain("Session: session-reset-handoff");
+    expect(memoryContent).toContain("## Previous Session Handoff (agent:main)");
     expect(memoryContent).toContain("Queue retries stable");
+    expect(memoryContent).toContain("### Details");
+    expect(memoryContent).toContain("Monitoring next 24h");
     expect(memoryContent).toContain("## Goals");
   });
 });

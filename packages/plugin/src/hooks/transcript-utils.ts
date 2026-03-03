@@ -60,7 +60,7 @@ function extractBeforeResetMessages(rawMessages: unknown[] | undefined): Transcr
     }
 
     const contentValue = nestedMessage?.content ?? rawMessage.content ?? rawMessage.body;
-    const content = extractTextContent(contentValue);
+    const content = extractTextContent(contentValue, { collapseWhitespace: false });
     if (!content) {
       continue;
     }

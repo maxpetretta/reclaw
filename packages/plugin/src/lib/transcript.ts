@@ -41,7 +41,8 @@ function parseMessageLine(line: string): TranscriptMessage | null {
     return null;
   }
 
-  const content = extractTextContent(message.content);
+  // Preserve line breaks for transcript content so markdown-shaped model output stays intact.
+  const content = extractTextContent(message.content, { collapseWhitespace: false });
   if (!content) {
     return null;
   }
