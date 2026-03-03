@@ -176,7 +176,7 @@ describe("briefing generation", () => {
         type: "task",
         content: "Open task should remain",
         status: "open",
-        subject: "legacy-system",
+        subject: "auth-migration",
         session: "session-4",
       },
       {
@@ -193,7 +193,7 @@ describe("briefing generation", () => {
         timestamp: "2025-10-01T09:00:00.000Z",
         type: "question",
         content: "Open question should remain",
-        subject: "legacy-system",
+        subject: "auth-migration",
         session: "session-6",
       },
     ];
@@ -225,7 +225,7 @@ describe("briefing generation", () => {
     expect(capturedUserInput).toContain("## Open Items");
     expect(capturedUserInput).toContain("## Stale Subjects");
     expect(capturedUserInput).toContain("## Durable Entries");
-    expect(capturedUserInput).toContain("## Included Entries (Deduped Union)");
+    expect(capturedUserInput).not.toContain("## Included Entries (Deduped Union)");
 
     expect(capturedUserInput).toContain("Active auth rollout");
     expect(capturedUserInput).toContain("Use queue retries");
@@ -291,7 +291,7 @@ describe("briefing generation", () => {
     );
 
     expect(capturedUserInput).toContain("## Durable Entries");
-    expect(capturedUserInput).toContain(`- ${durableId}`);
+    expect(capturedUserInput).toContain(`id=${durableId}`);
     expect(capturedUserInput).toContain("Critical historical migration decision");
   });
 
@@ -350,7 +350,7 @@ describe("briefing generation", () => {
     );
 
     expect(capturedUserInput).toContain("## Durable Entries");
-    expect(capturedUserInput).toContain(`- ${durableId}`);
+    expect(capturedUserInput).toContain(`id=${durableId}`);
     expect(capturedUserInput).toContain("Historically important fact from search recall");
   });
 
