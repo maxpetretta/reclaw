@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { PluginConfig } from "../config";
 import type { CommandLike } from "../cli/command-like";
 import { registerBriefingCommands, runSessionHandoffRefresh } from "../cli/register-briefing-commands";
+import { writeState } from "../state";
 import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/markers";
 
 function createConfig(logDir: string): PluginConfig {
@@ -75,7 +76,7 @@ describe("snapshot and handoff CLI commands", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  test("registers snapshot and handoff commands without briefing alias", () => {
+  test("registers snapshot and handoff command sets with refresh/list/status", () => {
     const root = new MockCommand("reclaw");
     registerBriefingCommands(root, {
       config: createConfig(logDir),
@@ -86,10 +87,85 @@ describe("snapshot and handoff CLI commands", () => {
     expect(root.children.has("snapshot")).toBe(true);
     expect(root.children.has("handoff")).toBe(true);
     expect(root.children.has("briefing")).toBe(false);
-    expect(root.children.get("snapshot")?.children.has("generate")).toBe(true);
-    expect(root.children.get("handoff")?.children.has("refresh")).toBe(true);
+
+    const snapshot = root.children.get("snapshot");
+    expect(snapshot?.children.has("refresh")).toBe(true);
+    expect(snapshot?.children.has("generate")).toBe(true);
+    expect(snapshot?.children.has("list")).toBe(true);
+    expect(snapshot?.children.has("status")).toBe(true);
+
+    const handoff = root.children.get("handoff");
+    expect(handoff?.children.has("refresh")).toBe(true);
+    expect(handoff?.children.has("list")).toBe(true);
+    expect(handoff?.children.has("status [sessionId]")).toBe(true);
   });
 
+
+  test("handoff status command reports compaction and extraction for a session", async () => {
+    const root = new MockCommand("reclaw");
+    registerBriefingCommands(root, {
+      config: createConfig(logDir),
+      workspaceDir,
+      api: { config: {} } as never,
+    });
+
+    await writeFile(
+      join(logDir, "log.jsonl"),
+      '{"timestamp":"2026-03-01T09:00:00.000Z","id":"M3n4O5p6Q7r8","type":"handoff","subject":"reclaw","content":"Session handoff","session":"session-42"}\n',
+      "utf8",
+    );
+
+    await writeState(join(logDir, "state.json"), {
+      extractedSessions: {
+        "session-42": {
+          at: "2026-03-01T09:01:00.000Z",
+          entries: 2,
+        },
+      },
+      failedSessions: {},
+      importedConversations: {},
+      eventUsage: {},
+      importJobs: {},
+      compactionSessions: {
+        "session-42": {
+          at: "2026-03-01T09:00:30.000Z",
+          messageCount: 24,
+          compactedCount: 12,
+          status: "extracted",
+          extractedAt: "2026-03-01T09:01:00.000Z",
+          entries: 2,
+        },
+      },
+      snapshotRuns: [],
+    });
+
+    const handler = root
+      .children
+      .get("handoff")
+      ?.children
+      .get("status [sessionId]")
+      ?.actionHandler;
+
+    expect(handler).toBeDefined();
+
+    const output: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+    };
+
+    try {
+      await handler?.("session-42");
+    } finally {
+      console.log = originalLog;
+    }
+
+    const rendered = output.join("\n");
+    expect(rendered).toContain("Handoff status for session=session-42");
+    expect(rendered).toContain("Compaction: extracted");
+    expect(rendered).toContain("Extraction: success");
+    expect(rendered).toContain("Handoff: yes");
+  });
   test("runSessionHandoffRefresh writes the latest handoff entry into MEMORY.md", async () => {
     const logPath = join(logDir, "log.jsonl");
     await writeFile(
