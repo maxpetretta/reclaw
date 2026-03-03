@@ -799,7 +799,7 @@ describe("cli init helpers", () => {
     expect(workerJob?.deleteAfterRun).toBe(true);
     expect((workerJob?.schedule as { kind?: string }).kind).toBe("at");
     expect((workerJob?.payload as { message?: string }).message).toContain(
-      `openclaw reclaw import-worker --job ${queued.job.id}`,
+      `openclaw reclaw import run --job ${queued.job.id}`,
     );
   });
 

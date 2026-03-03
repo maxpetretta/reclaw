@@ -3,46 +3,46 @@ import "@fontsource-variable/inter/standard.css"
 import "@fontsource-variable/inter/standard-italic.css"
 import "@/styles/global.css"
 
-const title = "Reclaw | Durable memory for OpenClaw"
+const title = "Reclaw | Reclaim your AI conversations"
 const description =
-  "An append-only event log that captures structured knowledge from every session. Facts, decisions, tasks — extracted automatically, searchable instantly."
+  "Durable memory for OpenClaw. Your AI conversations produce knowledge — Reclaw makes sure none of it gets lost."
 
 const features = [
   {
     icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
-    title: "Event log",
+    title: "Permanent record",
     description:
-      "Append-only structured entries — facts, decisions, tasks, questions, and session handoffs. Never mutated, always queryable.",
+      "Facts, decisions, tasks, questions, and session handoffs — all stored in a structured log that never loses data.",
   },
   {
     icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5v3a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5z"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M12 22v-5"/><path d="M9 22h6"/></svg>`,
     title: "Smart extraction",
     description:
-      "An LLM reads each transcript and extracts only user-specific knowledge. General information any model could produce is filtered out.",
+      "Automatically pulls out what matters — only things specific to you. Generic knowledge any AI already knows is filtered out.",
   },
   {
     icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>`,
-    title: "Memory snapshot",
+    title: "Nightly refresh",
     description:
-      "A nightly cron rewrites the generated section of MEMORY.md with current interests, active work, open loops, and durable knowledge.",
+      "Every night, your assistant's memory is updated with current interests, active work, and open items — so it always starts fresh.",
   },
   {
     icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`,
-    title: "Structured search",
+    title: "Search everything",
     description:
-      "Filter by type, subject, or status. Keyword search via ripgrep. Semantic search over MEMORY.md via the builtin indexer.",
+      "Find any memory by keyword, topic, or type. Your assistant can search its own history to answer questions about past work.",
   },
   {
     icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44H2.5A2.5 2.5 0 0 1 0 17.5v-13A2.5 2.5 0 0 1 2.5 2z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44h4.54A2.5 2.5 0 0 0 24 17.5v-13A2.5 2.5 0 0 0 21.5 2z"/></svg>`,
-    title: "Subject registry",
+    title: "Organized by subject",
     description:
-      "Organize entries by project, person, system, or topic. Auto-created from extraction, manageable via CLI.",
+      "Entries are automatically tagged by project, person, or topic — making it easy to trace the history of anything.",
   },
   {
     icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
     title: "Import history",
     description:
-      "Bring in conversations from ChatGPT, Claude, and Grok. Async background jobs with dedup and resume support.",
+      "Bring in past conversations from ChatGPT, Claude, and Grok. Runs in the background, picks up where it left off.",
   },
 ]
 
@@ -143,149 +143,132 @@ const decayRows = [
   </head>
 
   <body class="bg-background text-foreground antialiased">
-    <!-- ════════════════════════════════════════════ HEADER -->
-    <header class="sticky top-0 z-50 backdrop-blur-xl bg-background/80 border-b border-border">
-      <div class="max-w-5xl mx-auto px-5 h-14 flex items-center justify-between">
-        <a href="#top" class="flex items-center gap-2 text-foreground font-semibold text-sm">
-          <span>🦞</span>
-          <span>Reclaw</span>
-        </a>
-        <nav class="hidden md:flex items-center gap-8 text-sm text-muted-foreground">
-          <a href="#how" class="hover:text-foreground transition-colors">How it works</a>
-          <a href="#features" class="hover:text-foreground transition-colors">Features</a>
-          <a href="#start" class="hover:text-foreground transition-colors">Get started</a>
-        </nav>
-        <a
-          href="https://github.com/maxpetretta/reclaw"
-          class="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          GitHub &rarr;
-        </a>
-      </div>
-    </header>
+    <!-- ════════════════════════════════════════════ STICKY GITHUB NAV -->
+    <nav class="fixed top-0 right-0 z-50 p-4 sm:p-5">
+      <a
+        href="https://github.com/maxpetretta/reclaw"
+        target="_blank"
+        rel="noopener"
+        class="github-btn group inline-flex items-center gap-2 rounded-full border border-border bg-background/70 backdrop-blur-lg px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-amber-500/40 transition-all"
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+        GitHub
+      </a>
+    </nav>
 
     <!-- ════════════════════════════════════════════ HERO -->
-    <section id="top" class="hero-section relative overflow-hidden md:mx-5 lg:mx-auto md:max-w-5xl md:mt-6 md:rounded-2xl md:border md:border-border reveal">
-      <div class="hero-graph" aria-hidden="true">
-        <svg viewBox="0 0 1200 620" preserveAspectRatio="xMidYMid slice" role="presentation" focusable="false">
-          <defs>
-            <radialGradient id="glow-coral" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="var(--brand)" stop-opacity="0.9" />
-              <stop offset="100%" stop-color="var(--brand)" stop-opacity="0" />
-            </radialGradient>
-            <radialGradient id="glow-violet" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.9" />
-              <stop offset="100%" stop-color="#7c3aed" stop-opacity="0" />
-            </radialGradient>
-            <filter id="edge-blur">
-              <feGaussianBlur stdDeviation="0.8" />
-            </filter>
-          </defs>
-
-          <g class="graph-edges">
-            {edges.map(([a, b], index) => {
-              const sourceNode = nodes[a]
-              const targetNode = nodes[b]
-              if (!(sourceNode && targetNode)) return null
-              return (
-                <line
-                  x1={sourceNode.cx} y1={sourceNode.cy}
-                  x2={targetNode.cx} y2={targetNode.cy}
-                  style={`--edge-d: ${(index * 0.4) % 3}s`}
-                />
-              )
-            })}
-          </g>
-
-          <g class="graph-halos">
-            {nodes.map((node) => (
-              <circle
-                cx={node.cx} cy={node.cy} r={node.r * 4}
-                fill={node.color === "coral" ? "url(#glow-coral)" : "url(#glow-violet)"}
-                style={`--d: ${node.d}s`}
-                class="halo"
-              />
-            ))}
-          </g>
-
-          <g class="graph-nodes">
-            {nodes.map((node) => (
-              <circle cx={node.cx} cy={node.cy} r={node.r} class={`node node-${node.color}`} style={`--d: ${node.d}s`} />
-            ))}
-          </g>
-        </svg>
+    <section class="relative min-h-[100svh] flex items-center justify-center overflow-hidden px-6">
+      <!-- Amber orb -->
+      <div class="amber-orb" aria-hidden="true"></div>
+      <!-- Strata lines -->
+      <div class="strata" aria-hidden="true">
+        <div class="strata-line" style="--y: 18%; --w: 60%; --delay: 0s;"></div>
+        <div class="strata-line" style="--y: 34%; --w: 45%; --delay: 0.4s;"></div>
+        <div class="strata-line" style="--y: 52%; --w: 70%; --delay: 0.8s;"></div>
+        <div class="strata-line" style="--y: 68%; --w: 38%; --delay: 1.2s;"></div>
+        <div class="strata-line" style="--y: 82%; --w: 55%; --delay: 1.6s;"></div>
       </div>
 
-      <div class="hero-scanlines" aria-hidden="true"></div>
-
-      <div class="relative z-10 px-6 pt-24 pb-16 md:px-10 md:pt-48 md:pb-24">
-        <p class="hero-kicker font-mono text-[8px] sm:text-xs tracking-[0.2em] uppercase text-brand mb-5 inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand-soft px-3.5 py-1.5 backdrop-blur-sm">
-          <span aria-hidden="true">🦞</span>
-          Durable memory for OpenClaw
+      <div class="relative z-10 max-w-3xl text-center">
+        <p class="hero-kicker mb-5 text-sm font-semibold tracking-[0.2em] uppercase text-amber-400/90 mx-6">
+          Long-term memory for your AI assistant
         </p>
-
-        <h1 class="hero-title hero-heading font-extrabold tracking-tighter leading-none text-foreground">
-          <span class="whitespace-nowrap">Conversations fade.</span><br />
-          <span class="hero-accent whitespace-nowrap">Knowledge compounds.</span>
+        <h1 class="hero-title text-4xl sm:text-6xl md:text-7xl font-extrabold leading-[1.08] tracking-tight">
+          Your best ideas are<br />
+          <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-orange-400 to-red-400">buried in old chats</span>
         </h1>
-
-        <p class="hero-sub mt-8 text-lg md:text-xl text-[#C8CDDF] max-w-xl leading-relaxed">
-          An append-only event log that captures structured knowledge from every session &mdash; facts, decisions, tasks, questions &mdash; extracted automatically, searchable instantly.
+        <p class="hero-sub mt-7 text-base sm:text-xl text-muted-foreground max-w-xl mx-auto leading-relaxed">
+          Every conversation with your AI produces knowledge. Reclaw is an <a href="https://openclaw.com" target="_blank" rel="noopener" class="text-foreground/90 hover:text-amber-400 underline decoration-amber-500/30 underline-offset-2 transition-colors">OpenClaw</a> plugin that captures all of it, so your assistant remembers everything and picks up right where you left off.
         </p>
-
-        <div class="hero-actions mt-10 flex flex-wrap gap-3">
-          <a
-            href="#start"
-            class="inline-flex items-center px-5 py-2.5 bg-brand text-white font-semibold text-sm rounded-lg hover:brightness-110 transition-all hover:-translate-y-0.5 active:translate-y-0 shadow-lg shadow-brand/30"
+        <div class="hero-actions mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
+          <div class="group relative">
+            <div class="absolute -inset-1 rounded-xl bg-gradient-to-r from-amber-500/40 to-orange-600/40 blur-lg opacity-60 group-hover:opacity-100 transition-opacity"></div>
+            <a
+              href="#start"
+              class="relative inline-flex items-center gap-2.5 rounded-lg bg-gradient-to-b from-amber-500 to-orange-600 px-7 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-600/25 hover:shadow-orange-500/40 transition-all"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              Get started
+            </a>
+          </div>
+          <button
+            id="hero-copy-btn"
+            type="button"
+            class="copy-pill inline-flex items-center gap-2.5 rounded-lg border border-border px-6 py-3.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-amber-500/40 transition-colors cursor-pointer"
           >
-            Get started
-          </a>
-          <a
-            href="https://github.com/maxpetretta/reclaw"
-            class="inline-flex items-center px-5 py-2.5 border border-border text-foreground font-semibold text-sm rounded-lg hover:bg-card transition-all hover:-translate-y-0.5 active:translate-y-0 backdrop-blur-sm"
-          >
-            View on GitHub
-          </a>
+            <code class="hero-copy-text font-mono text-[13px] inline-block text-center">openclaw plugins install reclaw</code>
+            <svg class="copy-icon w-3.5 h-3.5 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <svg class="check-icon w-3.5 h-3.5 text-green-400 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
         </div>
       </div>
 
-      <aside class="hero-marginalia" aria-hidden="true">
-        <span class="font-mono text-xs text-violet-400 tracking-wide">append-only</span>
-        <span class="text-sm italic text-muted-foreground leading-relaxed border-l-2 border-violet-500/30 pl-2.5"
-          >"The log is authoritative. The snapshot is a cache."</span
-        >
-      </aside>
+      <!-- Scroll hint -->
+      <div class="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-muted-foreground/50">
+        <span class="text-[11px] tracking-widest uppercase">Scroll</span>
+        <svg class="w-4 h-4 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+      </div>
     </section>
 
+    <!-- ════════════════════════════════════════════ THE PROBLEM -->
+    <section class="relative py-20 sm:py-24 px-6">
+      <div class="reveal max-w-2xl mx-auto text-center">
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight leading-snug">
+          Thousands of conversations.<br/>
+          <span class="text-muted-foreground">Zero lasting memory.</span>
+        </h2>
+        <p class="mt-6 text-muted-foreground text-base sm:text-lg leading-relaxed max-w-lg mx-auto">
+          You&rsquo;ve spent hundreds of hours talking to AI — debugging, brainstorming, making decisions. All of it sits in separate apps; decaying, unsearchable, forgotten.
+        </p>
+      </div>
+
+      <!-- Decay visualization -->
+      <div class="reveal mt-14 max-w-2xl mx-auto space-y-2.5">
+        <div class="decay-row" style="--fade: 1; --pulse-delay: 0s;">
+          <div class="decay-dot bg-amber-400 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/35 via-amber-400/15 to-amber-400/05" style="--pulse-delay: 0s;"></div>
+          <span class="text-xs text-amber-400/70 tabular-nums w-20 text-right">today</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.85; --pulse-delay: 0.3s;">
+          <div class="decay-dot bg-amber-400/80 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/25 via-amber-400/10 to-transparent" style="--pulse-delay: 0.3s;"></div>
+          <span class="text-xs text-amber-400/50 tabular-nums w-20 text-right">3 days</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.7; --pulse-delay: 0.6s;">
+          <div class="decay-dot bg-amber-400/60 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/18 to-transparent" style="--pulse-delay: 0.6s;"></div>
+          <span class="text-xs text-muted-foreground/50 tabular-nums w-20 text-right">2 weeks</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.5; --pulse-delay: 0.9s;">
+          <div class="decay-dot bg-amber-400/40 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/12 to-transparent" style="--pulse-delay: 0.9s;"></div>
+          <span class="text-xs text-muted-foreground/40 tabular-nums w-20 text-right">1 month</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.35; --pulse-delay: 1.2s;">
+          <div class="decay-dot bg-amber-400/25 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/08 to-transparent" style="--pulse-delay: 1.2s;"></div>
+          <span class="text-xs text-muted-foreground/30 tabular-nums w-20 text-right">3 months</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.2; --pulse-delay: 1.5s;">
+          <div class="decay-dot bg-amber-400/12 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/04 to-transparent" style="--pulse-delay: 1.5s;"></div>
+          <span class="text-xs text-muted-foreground/20 tabular-nums w-20 text-right">6 months</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.1; --pulse-delay: 1.8s;">
+          <div class="decay-dot bg-amber-400/06 decay-pulse"></div>
+          <div class="decay-bar flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/02 to-transparent" style="--pulse-delay: 1.8s;"></div>
+          <span class="text-xs text-muted-foreground/10 tabular-nums w-20 text-right">1 year</span>
+        </div>
+        <div class="decay-row" style="--fade: 0.04; --pulse-delay: 2.1s;">
+          <div class="decay-dot bg-amber-400/03"></div>
+          <div class="flex-1 h-3 rounded-full bg-gradient-to-r from-amber-400/01 to-transparent"></div>
+          <span class="text-xs text-muted-foreground/05 tabular-nums w-20 text-right">gone</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════ NEW SITE CONTENT -->
     <main class="max-w-5xl mx-auto px-5">
-      <!-- ════════════════════════════════════════════ PROBLEM -->
-      <section class="py-20 sm:py-24">
-        <div class="reveal max-w-2xl mx-auto text-center">
-          <h2 class="text-2xl sm:text-4xl font-bold tracking-tight leading-snug">
-            Conversations fade.<br />
-            <span class="text-muted-foreground">Knowledge should compound.</span>
-          </h2>
-          <p class="mt-6 text-muted-foreground text-base sm:text-lg leading-relaxed max-w-lg mx-auto">
-            Every session produces decisions, context, and open loops. Without durable memory, your agent starts from zero each time.
-          </p>
-        </div>
-
-        <div class="reveal mt-14 max-w-2xl mx-auto space-y-2.5">
-          {decayRows.map((row, i) => (
-            <div class="decay-row" style={`--fade: ${row.fade}; --pulse-delay: ${i * 0.3}s;`}>
-              <div class={`decay-dot bg-${row.color} ${i < 7 ? 'decay-pulse' : ''}`}></div>
-              <div
-                class={`decay-bar flex-1 h-3 rounded-full bg-gradient-to-r ${row.barStops}`}
-                style={`--pulse-delay: ${i * 0.3}s;`}
-              ></div>
-              <span class={`text-xs tabular-nums w-20 text-right ${i === 0 ? 'text-brand/70' : i < 4 ? 'text-brand/50' : 'text-muted-foreground/' + Math.max(5, Math.round(row.fade * 50))}`}>
-                {row.label}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-
       <!-- ════════════════════════════════════════════ DEMO -->
       <section class="py-20" id="demo">
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal">See it in action</p>
@@ -301,10 +284,10 @@ const decayRows = [
             </div>
             <div class="space-y-3">
               <div class="rounded-lg bg-muted px-4 py-3 text-sm text-foreground/90 leading-relaxed">
-                We decided to use queue-based retries for webhook delivery instead of synchronous. The cascading failures were too risky.
+                We&rsquo;re doing the Amalfi Coast for our anniversary instead of Greece. Flights were way cheaper and Sarah&rsquo;s always wanted to go. Oh, and remind me &mdash; I still need to book Il Ritrovo for dinner.
               </div>
               <div class="rounded-lg bg-brand-soft border border-brand/20 px-4 py-3 text-sm text-foreground/90 leading-relaxed">
-                Good call. I'll note that decision. The backfill script for the 47 failed jobs from last week is still pending &mdash; want me to track that as an open task?
+                Great choice! I&rsquo;ll remember that. By the way, last time you mentioned Sarah prefers window seats &mdash; want me to flag that when you book flights?
               </div>
             </div>
           </div>
@@ -319,23 +302,23 @@ const decayRows = [
           <div class="rounded-xl border border-border bg-card p-5">
             <div class="flex items-center gap-2 text-xs text-muted-foreground font-mono mb-4">
               <span class="w-2 h-2 rounded-full bg-brand shrink-0"></span>
-              Extracted to log.jsonl
+              Saved to memory
             </div>
             <div class="space-y-2.5 font-mono text-[11px] sm:text-xs leading-relaxed">
               <div class="log-entry log-entry-decision">
                 <span class="log-type text-violet-400">decision</span>
-                <span class="text-foreground/80">Queue-based retries for webhook delivery</span>
-                <span class="text-muted-foreground/50">auth-migration</span>
+                <span class="text-foreground/80">Amalfi Coast for anniversary instead of Greece</span>
+                <span class="text-muted-foreground/50">anniversary-trip</span>
               </div>
               <div class="log-entry log-entry-task">
                 <span class="log-type text-brand">task:open</span>
-                <span class="text-foreground/80">Backfill script for 47 failed webhook jobs</span>
-                <span class="text-muted-foreground/50">auth-migration</span>
+                <span class="text-foreground/80">Book dinner at Il Ritrovo</span>
+                <span class="text-muted-foreground/50">anniversary-trip</span>
               </div>
-              <div class="log-entry log-entry-handoff">
-                <span class="log-type text-emerald-400">handoff</span>
-                <span class="text-foreground/80">Retry logic done, backfill + canary pending</span>
-                <span class="text-muted-foreground/50">&nbsp;</span>
+              <div class="log-entry log-entry-fact">
+                <span class="log-type text-sky-400">fact</span>
+                <span class="text-foreground/80">Sarah prefers window seats on flights</span>
+                <span class="text-muted-foreground/50">sarah</span>
               </div>
             </div>
           </div>
@@ -347,16 +330,14 @@ const decayRows = [
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal">How it works</p>
         <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-4 reveal">Three steps to <span class="hero-accent">total recall</span></h2>
         <p class="text-muted-foreground leading-relaxed max-w-2xl mb-4 reveal">
-          Reclaw replaces OpenClaw's default <code class="font-mono text-xs bg-violet-500/15 text-violet-400 px-1.5 py-0.5 rounded">memory-core</code> with an append-only event log. Sessions produce structured entries. A nightly snapshot keeps MEMORY.md current.
+          Reclaw gives OpenClaw a persistent memory that grows with every conversation. It captures the important parts automatically and keeps your assistant up to date overnight.
         </p>
-        <div class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground mb-12 reveal">
-          <span>session ends</span>
+        <div class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground/60 mb-12 reveal">
+          <span>conversation ends</span>
           <span class="text-brand font-bold">&rarr;</span>
-          <span>extraction hook</span>
+          <span>important details saved to memory</span>
           <span class="text-brand font-bold">&rarr;</span>
-          <span>structured entries in log.jsonl</span>
-          <span class="text-brand font-bold">&rarr;</span>
-          <span>nightly snapshot to MEMORY.md</span>
+          <span>assistant starts next session fully caught up</span>
         </div>
 
         <div class="grid md:grid-cols-3 gap-8">
@@ -370,7 +351,7 @@ const decayRows = [
             </div>
             <h3 class="text-lg font-bold mt-5">Install</h3>
             <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
-              Install the plugin and run init. Reclaw creates the log directory, sets the memory slot, registers the nightly cron, and adds managed blocks to MEMORY.md.
+              Two commands and you&rsquo;re done. Reclaw takes over as OpenClaw&rsquo;s memory system &mdash; no configuration needed.
             </p>
           </article>
           <article class="reveal step-card">
@@ -382,7 +363,7 @@ const decayRows = [
             </div>
             <h3 class="text-lg font-bold mt-5">Converse</h3>
             <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
-              Use OpenClaw normally. When a session ends, the extraction hook reads the transcript and an LLM extracts structured entries &mdash; applying a hard filter for user-specific knowledge only.
+              Use OpenClaw normally. When a conversation ends, Reclaw automatically extracts the important parts &mdash; only things specific to you, never generic knowledge.
             </p>
           </article>
           <article class="reveal step-card">
@@ -396,7 +377,7 @@ const decayRows = [
             </div>
             <h3 class="text-lg font-bold mt-5">Remember</h3>
             <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
-              Facts, decisions, tasks, and open questions accumulate in the log. A nightly cron rewrites your MEMORY.md snapshot. Your agent starts every session with full context.
+              Your facts, decisions, tasks, and open questions build up over time. Every night, your assistant&rsquo;s memory is refreshed &mdash; so it starts each session with full context.
             </p>
           </article>
         </div>
@@ -405,7 +386,7 @@ const decayRows = [
       <!-- ════════════════════════════════════════════ FEATURES -->
       <section class="py-20" id="features">
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal">Capabilities</p>
-        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-10 reveal">Everything the log provides</h2>
+        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-10 reveal">What you get</h2>
 
         <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border rounded-xl overflow-hidden reveal">
           {features.map((feature) => (
@@ -418,6 +399,49 @@ const decayRows = [
         </div>
       </section>
 
+      <!-- ════════════════════════════════════════════ IMPORT -->
+      <section class="py-20">
+        <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal text-center">Import history</p>
+        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-6 reveal text-center">
+          Bring your conversations with you
+        </h2>
+        <p class="text-muted-foreground leading-relaxed max-w-2xl mx-auto mb-14 reveal text-center">
+          Export from any major AI platform. Reclaw processes them into searchable memory in the background.
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl mx-auto">
+          <!-- ChatGPT -->
+          <div class="reveal provider-card">
+            <div class="provider-icon" style="--glow: 16, 185, 129;">
+              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="rgb(16, 185, 129)"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>
+            </div>
+            <h3 class="text-lg font-bold mt-4">ChatGPT</h3>
+            <p class="text-sm text-muted-foreground mt-1">Conversations</p>
+            <code class="block mt-3 text-[10px] sm:text-xs text-muted-foreground/60 font-mono">openclaw reclaw import chatgpt</code>
+          </div>
+
+          <!-- Claude -->
+          <div class="reveal provider-card">
+            <div class="provider-icon" style="--glow: 251, 191, 136;">
+              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="rgb(251, 191, 136)"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
+            </div>
+            <h3 class="text-lg font-bold mt-4">Claude</h3>
+            <p class="text-sm text-muted-foreground mt-1">Conversations</p>
+            <code class="block mt-3 text-[10px] sm:text-xs text-muted-foreground/60 font-mono">openclaw reclaw import claude</code>
+          </div>
+
+          <!-- Grok -->
+          <div class="reveal provider-card">
+            <div class="provider-icon" style="--glow: 148, 163, 184;">
+              <svg class="w-7 h-7" viewBox="0 0 512 492" fill="rgb(148, 163, 184)"><path fill-rule="evenodd" clip-rule="evenodd" d="M197.76 315.52l170.197-125.803c8.342-6.186 20.267-3.776 24.256 5.803 20.907 50.539 11.563 111.253-30.08 152.939-41.621 41.685-99.562 50.816-152.512 29.994l-57.834 26.816c82.965 56.768 183.701 42.731 246.656-20.33 49.941-50.006 65.408-118.166 50.944-179.627l.128.149c-20.971-90.282 5.162-126.378 58.666-200.17 1.28-1.75 2.56-3.499 3.819-5.291l-70.421 70.507v-.214l-243.883 245.27m-35.072 30.528c-59.563-56.96-49.28-145.088 1.515-195.926 37.568-37.61 99.136-52.97 152.874-30.4l57.707-26.666a166.554 166.554 0 00-39.019-21.334 191.467 191.467 0 00-208.042 41.942c-54.038 54.101-71.04 137.301-41.856 208.298 21.802 53.056-13.931 90.582-49.92 128.47C23.104 463.915 10.304 477.333 0 491.541l162.56-145.386"/></svg>
+            </div>
+            <h3 class="text-lg font-bold mt-4">Grok</h3>
+            <p class="text-sm text-muted-foreground mt-1">Conversations</p>
+            <code class="block mt-3 text-[10px] sm:text-xs text-muted-foreground/60 font-mono">openclaw reclaw import grok</code>
+          </div>
+        </div>
+      </section>
+
       <!-- ════════════════════════════════════════════ INSTALL -->
       <section class="py-20" id="start">
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal text-center">Get started</p>
@@ -425,10 +449,10 @@ const decayRows = [
           Two commands. That's it.
         </h2>
         <p class="text-muted-foreground leading-relaxed max-w-2xl mx-auto mb-8 reveal text-center">
-          Install the plugin, run init, and your next session will automatically extract structured memory.
+          Install the plugin, run init, and your next conversation will start building memory automatically.
         </p>
 
-        <div class="max-w-lg mx-auto reveal">
+        <div class="max-w-xl mx-auto reveal">
           <div class="terminal">
             <div class="terminal-bar">
               <div class="flex gap-2">
@@ -490,61 +514,16 @@ const decayRows = [
           </div>
         </div>
       </section>
-
-      <!-- ════════════════════════════════════════════ IMPORT -->
-      <section class="py-20">
-        <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal text-center">Import history</p>
-        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-6 reveal text-center">
-          Bring your conversations with you
-        </h2>
-        <p class="text-muted-foreground leading-relaxed max-w-2xl mx-auto mb-14 reveal text-center">
-          Export from any major AI platform. Reclaw processes them into structured log entries with async background jobs.
-        </p>
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl mx-auto">
-          <!-- ChatGPT -->
-          <div class="reveal provider-card">
-            <div class="provider-icon" style="--glow: 16, 185, 129;">
-              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="rgb(16, 185, 129)"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>
-            </div>
-            <h3 class="text-lg font-bold mt-4">ChatGPT</h3>
-            <p class="text-sm text-muted-foreground mt-1">Conversations</p>
-            <code class="block mt-3 text-[10px] sm:text-xs text-muted-foreground/60 font-mono">openclaw reclaw import chatgpt</code>
-          </div>
-
-          <!-- Claude -->
-          <div class="reveal provider-card">
-            <div class="provider-icon" style="--glow: 251, 191, 136;">
-              <svg class="w-7 h-7" viewBox="0 0 24 24" fill="rgb(251, 191, 136)"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
-            </div>
-            <h3 class="text-lg font-bold mt-4">Claude</h3>
-            <p class="text-sm text-muted-foreground mt-1">Conversations</p>
-            <code class="block mt-3 text-[10px] sm:text-xs text-muted-foreground/60 font-mono">openclaw reclaw import claude</code>
-          </div>
-
-          <!-- Grok -->
-          <div class="reveal provider-card">
-            <div class="provider-icon" style="--glow: 148, 163, 184;">
-              <svg class="w-7 h-7" viewBox="0 0 512 492" fill="rgb(148, 163, 184)"><path fill-rule="evenodd" clip-rule="evenodd" d="M197.76 315.52l170.197-125.803c8.342-6.186 20.267-3.776 24.256 5.803 20.907 50.539 11.563 111.253-30.08 152.939-41.621 41.685-99.562 50.816-152.512 29.994l-57.834 26.816c82.965 56.768 183.701 42.731 246.656-20.33 49.941-50.006 65.408-118.166 50.944-179.627l.128.149c-20.971-90.282 5.162-126.378 58.666-200.17 1.28-1.75 2.56-3.499 3.819-5.291l-70.421 70.507v-.214l-243.883 245.27m-35.072 30.528c-59.563-56.96-49.28-145.088 1.515-195.926 37.568-37.61 99.136-52.97 152.874-30.4l57.707-26.666a166.554 166.554 0 00-39.019-21.334 191.467 191.467 0 00-208.042 41.942c-54.038 54.101-71.04 137.301-41.856 208.298 21.802 53.056-13.931 90.582-49.92 128.47C23.104 463.915 10.304 477.333 0 491.541l162.56-145.386"/></svg>
-            </div>
-            <h3 class="text-lg font-bold mt-4">Grok</h3>
-            <p class="text-sm text-muted-foreground mt-1">Conversations</p>
-            <code class="block mt-3 text-[10px] sm:text-xs text-muted-foreground/60 font-mono">openclaw reclaw import grok</code>
-          </div>
-        </div>
-      </section>
     </main>
 
     <!-- ════════════════════════════════════════════ FOOTER -->
     <footer class="border-t border-border mt-10 py-8">
-      <div class="max-w-5xl mx-auto px-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="max-w-5xl mx-auto px-5 flex items-center justify-between gap-4">
         <p class="text-sm text-muted-foreground flex items-center gap-1.5">
-          <span>🦞</span>
-          <span>Reclaw &mdash; durable memory for OpenClaw</span>
+          <span>Built with 🦞 by <a href="https://x.com/maxpetretta" target="_blank" rel="noopener" class="text-foreground hover:text-brand transition-colors">Max Petretta</a></span>
         </p>
         <div class="flex gap-5 text-sm">
           <a href="https://www.npmjs.com/package/reclaw" class="text-muted-foreground hover:text-foreground transition-colors">npm</a>
-          <a href="https://github.com/maxpetretta/reclaw" class="text-muted-foreground hover:text-foreground transition-colors">GitHub</a>
         </div>
       </div>
     </footer>
@@ -572,6 +551,35 @@ const decayRows = [
         })
       }
 
+      const heroButton = document.getElementById("hero-copy-btn")
+      if (heroButton) {
+        heroButton.addEventListener("click", () => {
+          const textEl = heroButton.querySelector(".hero-copy-text")
+          const copyIcon = heroButton.querySelector(".copy-icon")
+          const checkIcon = heroButton.querySelector(".check-icon")
+
+          navigator.clipboard
+            .writeText("openclaw plugins install reclaw")
+            .then(() => {
+              if (textEl) textEl.textContent = "Copied!"
+              if (copyIcon) copyIcon.classList.add("hidden")
+              if (checkIcon) checkIcon.classList.remove("hidden")
+
+              setTimeout(() => {
+                if (textEl) textEl.textContent = "openclaw plugins install reclaw"
+                if (copyIcon) copyIcon.classList.remove("hidden")
+                if (checkIcon) checkIcon.classList.add("hidden")
+              }, 2000)
+            })
+            .catch(() => {
+              if (textEl) {
+                textEl.textContent = "Copy failed"
+                setTimeout(() => { textEl.textContent = "openclaw plugins install reclaw" }, 2000)
+              }
+            })
+        })
+      }
+
       const installBtn = document.getElementById("install-copy-btn")
       if (installBtn) {
         installBtn.addEventListener("click", () => {
@@ -583,115 +591,13 @@ const decayRows = [
 </html>
 
 <style>
-  /* ─── Hero ─── */
-  .hero-section {
-    min-height: clamp(480px, 68vh, 620px);
-    background:
-      radial-gradient(ellipse 60% 50% at 70% 30%, rgba(124, 58, 237, 0.14) 0%, transparent 70%),
-      radial-gradient(ellipse 40% 60% at 20% 70%, rgba(255, 107, 53, 0.08) 0%, transparent 70%),
-      linear-gradient(160deg, rgba(20, 18, 30, 0.9) 0%, rgba(11, 15, 20, 0.95) 100%);
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.03) inset,
-      0 40px 80px -20px rgba(0, 0, 0, 0.6),
-      0 0 120px -40px rgba(124, 58, 237, 0.15);
-  }
-
-  .hero-heading {
-    font-size: clamp(1.75rem, 6.5vw, 5rem);
-  }
-
+  /* ─── Gradient accent text ─── */
   .hero-accent {
     background: linear-gradient(135deg, var(--brand) 20%, #ff9f6b 50%, #7c3aed 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
-
-  .hero-graph {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-  }
-
-  .hero-graph svg {
-    width: 100%;
-    height: 100%;
-  }
-
-  .hero-scanlines {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    background: repeating-linear-gradient(
-      0deg, transparent 0px, transparent 2px,
-      rgba(0, 0, 0, 0.03) 2px, rgba(0, 0, 0, 0.03) 4px
-    );
-    pointer-events: none;
-  }
-
-  .hero-marginalia {
-    position: absolute;
-    right: 2rem;
-    top: 2.5rem;
-    z-index: 10;
-    display: none;
-    flex-direction: column;
-    gap: 0.35rem;
-    max-width: 200px;
-    opacity: 0.4;
-    transition: opacity 300ms ease;
-  }
-
-  .hero-section:hover .hero-marginalia {
-    opacity: 0.65;
-  }
-
-  /* Hero entrance sequence */
-  .hero-kicker { animation: rise 0.8s ease-out both; animation-delay: 0.1s; }
-  .hero-title { animation: rise 0.8s ease-out both; animation-delay: 0.25s; }
-  .hero-sub { animation: rise 0.8s ease-out both; animation-delay: 0.45s; }
-  .hero-actions { animation: rise 0.8s ease-out both; animation-delay: 0.65s; }
-
-  @keyframes rise {
-    from { opacity: 0; transform: translateY(24px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* ─── Graph ─── */
-  .graph-edges line {
-    stroke: rgba(124, 58, 237, 0.4);
-    stroke-width: 1;
-    stroke-linecap: round;
-    stroke-dasharray: 6 10;
-    animation: edge-travel 6s linear infinite;
-    animation-delay: var(--edge-d);
-    filter: url(#edge-blur);
-  }
-
-  .graph-edges line:nth-child(odd) {
-    stroke: rgba(255, 107, 53, 0.35);
-    animation-duration: 8s;
-    stroke-dasharray: 4 12;
-  }
-
-  .graph-edges line:nth-child(3n) {
-    stroke: rgba(255, 255, 255, 0.15);
-    animation-duration: 10s;
-  }
-
-  .halo {
-    opacity: 0.3;
-    animation: halo-breathe 5s ease-in-out infinite;
-    animation-delay: var(--d);
-  }
-
-  .node {
-    animation: node-pulse 4s ease-in-out infinite;
-    animation-delay: var(--d);
-  }
-
-  .node-coral { fill: var(--brand); }
-  .node-violet { fill: #7c3aed; }
 
   /* ─── Demo ─── */
   .log-entry {
@@ -706,6 +612,7 @@ const decayRows = [
 
   .log-entry-decision { border-left-color: #7c3aed; }
   .log-entry-task { border-left-color: var(--brand); }
+  .log-entry-fact { border-left-color: #38bdf8; }
   .log-entry-handoff { border-left-color: #34d399; }
 
   .log-type {
@@ -717,31 +624,6 @@ const decayRows = [
 
   .demo-arrow {
     animation: arrow-pulse 2.5s ease-in-out infinite;
-  }
-
-  /* ─── Decay ─── */
-  .decay-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    opacity: var(--fade);
-  }
-
-  .decay-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .decay-pulse {
-    animation: dot-pulse 3s ease-in-out infinite;
-    animation-delay: var(--pulse-delay);
-  }
-
-  .decay-bar {
-    animation: bar-pulse 3s ease-in-out infinite;
-    animation-delay: var(--pulse-delay);
   }
 
   /* ─── Steps ─── */
@@ -870,55 +752,13 @@ const decayRows = [
   }
 
   /* ─── Keyframes ─── */
-  @keyframes edge-travel {
-    from { stroke-dashoffset: 0; }
-    to { stroke-dashoffset: -48; }
-  }
-
-  @keyframes node-pulse {
-    0%, 100% { opacity: 0.35; }
-    50% { opacity: 0.7; }
-  }
-
-  @keyframes halo-breathe {
-    0%, 100% { opacity: 0.15; transform: scale(0.8); }
-    50% { opacity: 0.4; transform: scale(1.2); }
-  }
-
   @keyframes arrow-pulse {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
   }
 
-  @keyframes dot-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0); transform: scale(1); }
-    50% { box-shadow: 0 0 8px 3px rgba(255, 107, 53, 0.25); transform: scale(1.3); }
-  }
-
-  @keyframes bar-pulse {
-    0%, 100% { opacity: 1; filter: brightness(1); }
-    50% { opacity: 1; filter: brightness(1.6); }
-  }
-
-  /* ─── Responsive ─── */
-  @media (max-width: 767px) {
-    .hero-section {
-      -webkit-mask-image: linear-gradient(to bottom, black 0%, black 85%, transparent 100%);
-      mask-image: linear-gradient(to bottom, black 0%, black 85%, transparent 100%);
-      box-shadow: none;
-    }
-  }
-
-  @media (min-width: 860px) {
-    .hero-marginalia {
-      display: flex;
-    }
-  }
-
+  /* ─── Accessibility ─── */
   @media (prefers-reduced-motion: reduce) {
-    .graph-edges line,
-    .graph-nodes .node,
-    .halo,
     .demo-arrow,
     .decay-pulse,
     .decay-bar {

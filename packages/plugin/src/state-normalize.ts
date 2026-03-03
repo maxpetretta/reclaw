@@ -1,5 +1,7 @@
 import { isObject } from "./lib/guards";
 import type {
+  CompactionExtractionStatus,
+  CompactionSessionState,
   EventUsageState,
   ExtractedSession,
   FailedSession,
@@ -10,6 +12,8 @@ import type {
   ImportJobSummaryState,
   ImportedConversationState,
   ReclawState,
+  SnapshotRunState,
+  SnapshotRunStatus,
 } from "./state";
 
 const IMPORTED_PLATFORM_SET = new Set(["chatgpt", "claude", "grok", "openclaw"]);
@@ -19,6 +23,13 @@ const IMPORT_JOB_STATUS_SET: ReadonlySet<ImportJobStatus> = new Set([
   "completed",
   "failed",
 ]);
+const COMPACTION_STATUS_SET: ReadonlySet<CompactionExtractionStatus> = new Set([
+  "observed",
+  "extracted",
+  "failed",
+  "skipped",
+]);
+const SNAPSHOT_STATUS_SET: ReadonlySet<SnapshotRunStatus> = new Set(["success", "failed"]);
 
 function readFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -275,6 +286,81 @@ function normalizeEventUsage(raw: unknown): Record<string, EventUsageState> {
   });
 }
 
+
+function normalizeCompactionSessions(raw: unknown): Record<string, CompactionSessionState> {
+  return normalizeRecord(raw, (sessionValue) => {
+    if (!isObject(sessionValue)) {
+      return undefined;
+    }
+
+    const at = readTimestamp(sessionValue.at);
+    const messageCount = readNonNegativeInt(sessionValue.messageCount);
+    const compactedCount = readNonNegativeInt(sessionValue.compactedCount);
+    const status =
+      typeof sessionValue.status === "string" && COMPACTION_STATUS_SET.has(sessionValue.status as CompactionExtractionStatus)
+        ? (sessionValue.status as CompactionExtractionStatus)
+        : undefined;
+
+    if (at === undefined || messageCount === undefined || compactedCount === undefined || status === undefined) {
+      return undefined;
+    }
+
+    const tokenCount = readFiniteNumber(sessionValue.tokenCount);
+    const sessionFile = readTrimmedString(sessionValue.sessionFile);
+    const reason = readTrimmedString(sessionValue.reason);
+    const error = readTrimmedString(sessionValue.error);
+    const extractedAt = readTimestamp(sessionValue.extractedAt);
+    const entries = readNonNegativeInt(sessionValue.entries);
+
+    return {
+      at,
+      messageCount,
+      compactedCount,
+      ...(tokenCount !== undefined ? { tokenCount } : {}),
+      ...(sessionFile !== undefined ? { sessionFile } : {}),
+      status,
+      ...(reason !== undefined ? { reason } : {}),
+      ...(error !== undefined ? { error } : {}),
+      ...(extractedAt !== undefined ? { extractedAt } : {}),
+      ...(entries !== undefined ? { entries } : {}),
+    };
+  });
+}
+
+function normalizeSnapshotRuns(raw: unknown): SnapshotRunState[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const runs: SnapshotRunState[] = [];
+
+  for (const runValue of raw) {
+    if (!isObject(runValue)) {
+      continue;
+    }
+
+    const at = readTimestamp(runValue.at);
+    const status =
+      typeof runValue.status === "string" && SNAPSHOT_STATUS_SET.has(runValue.status as SnapshotRunStatus)
+        ? (runValue.status as SnapshotRunStatus)
+        : undefined;
+    const memoryMdPath = readTrimmedString(runValue.memoryMdPath);
+    if (at === undefined || status === undefined || memoryMdPath === undefined) {
+      continue;
+    }
+
+    const error = readTrimmedString(runValue.error);
+    runs.push({
+      at,
+      status,
+      memoryMdPath,
+      ...(error !== undefined ? { error } : {}),
+    });
+  }
+
+  return runs.sort((left, right) => right.at.localeCompare(left.at));
+}
+
 function normalizeImportJobs(raw: unknown): Record<string, ImportJobState> {
   const importJobs: Record<string, ImportJobState> = {};
   const importJobsRaw = isObject(raw) ? raw : {};
@@ -356,5 +442,7 @@ export function normalizeState(
     importedConversations: normalizeImportedConversations(raw.importedConversations),
     eventUsage: normalizeEventUsage(raw.eventUsage),
     importJobs: normalizeImportJobs(raw.importJobs),
+    compactionSessions: normalizeCompactionSessions(raw.compactionSessions),
+    snapshotRuns: normalizeSnapshotRuns(raw.snapshotRuns),
   };
 }

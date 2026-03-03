@@ -33,6 +33,8 @@ describe("state", () => {
       importedConversations: {},
       eventUsage: {},
       importJobs: {},
+      compactionSessions: {},
+      snapshotRuns: [],
     });
   });
 

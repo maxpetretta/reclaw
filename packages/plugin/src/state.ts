@@ -92,12 +92,38 @@ export interface ImportJobState {
   cronJobName?: string;
 }
 
+export type CompactionExtractionStatus = "observed" | "extracted" | "failed" | "skipped";
+
+export interface CompactionSessionState {
+  at: string;
+  messageCount: number;
+  compactedCount: number;
+  tokenCount?: number;
+  sessionFile?: string;
+  status: CompactionExtractionStatus;
+  reason?: string;
+  error?: string;
+  extractedAt?: string;
+  entries?: number;
+}
+
+export type SnapshotRunStatus = "success" | "failed";
+
+export interface SnapshotRunState {
+  at: string;
+  status: SnapshotRunStatus;
+  memoryMdPath: string;
+  error?: string;
+}
+
 export interface ReclawState {
   extractedSessions: Record<string, ExtractedSession>;
   failedSessions: Record<string, FailedSession>;
   importedConversations: Record<string, ImportedConversationState>;
   eventUsage: Record<string, EventUsageState>;
   importJobs: Record<string, ImportJobState>;
+  compactionSessions: Record<string, CompactionSessionState>;
+  snapshotRuns: SnapshotRunState[];
 }
 
 export function createEmptyState(): ReclawState {
@@ -107,6 +133,8 @@ export function createEmptyState(): ReclawState {
     importedConversations: {},
     eventUsage: {},
     importJobs: {},
+    compactionSessions: {},
+    snapshotRuns: [],
   };
 }
 
@@ -162,6 +190,83 @@ export async function markFailed(path: string, sessionId: string, error: string)
       at: new Date().toISOString(),
       error,
       retries: (previous?.retries ?? 0) + 1,
+    };
+  });
+}
+
+const MAX_SNAPSHOT_RUNS = 50;
+
+export async function appendSnapshotRun(
+  path: string,
+  run: {
+    status: SnapshotRunStatus;
+    memoryMdPath: string;
+    error?: string;
+  },
+): Promise<void> {
+  await updateState(path, (state) => {
+    const nextRun: SnapshotRunState = {
+      at: new Date().toISOString(),
+      status: run.status,
+      memoryMdPath: run.memoryMdPath,
+      ...(run.error ? { error: run.error } : {}),
+    };
+
+    state.snapshotRuns = [nextRun, ...state.snapshotRuns].slice(0, MAX_SNAPSHOT_RUNS);
+  });
+}
+
+export async function markCompactionObserved(
+  path: string,
+  sessionId: string,
+  event: {
+    messageCount: number;
+    compactedCount: number;
+    tokenCount?: number;
+    sessionFile?: string;
+  },
+): Promise<void> {
+  await updateState(path, (state) => {
+    state.compactionSessions[sessionId] = {
+      at: new Date().toISOString(),
+      messageCount: event.messageCount,
+      compactedCount: event.compactedCount,
+      ...(typeof event.tokenCount === "number" && Number.isFinite(event.tokenCount)
+        ? { tokenCount: event.tokenCount }
+        : {}),
+      ...(typeof event.sessionFile === "string" && event.sessionFile.trim().length > 0
+        ? { sessionFile: event.sessionFile.trim() }
+        : {}),
+      status: "observed",
+    };
+  });
+}
+
+export async function markCompactionStatus(
+  path: string,
+  sessionId: string,
+  status: CompactionExtractionStatus,
+  details: {
+    reason?: string;
+    error?: string;
+    entries?: number;
+  } = {},
+): Promise<void> {
+  await updateState(path, (state) => {
+    const existing = state.compactionSessions[sessionId];
+    if (!existing) {
+      return;
+    }
+
+    state.compactionSessions[sessionId] = {
+      ...existing,
+      status,
+      ...(details.reason ? { reason: details.reason } : {}),
+      ...(details.error ? { error: details.error } : {}),
+      ...(typeof details.entries === "number" && Number.isFinite(details.entries)
+        ? { entries: Math.max(0, Math.floor(details.entries)) }
+        : {}),
+      ...(status === "extracted" ? { extractedAt: new Date().toISOString() } : {}),
     };
   });
 }
@@ -236,5 +341,15 @@ export async function pruneState(path: string, maxAgeDays = 30): Promise<void> {
         delete state.failedSessions[sessionId];
       }
     }
+
+    for (const [sessionId, compaction] of Object.entries(state.compactionSessions)) {
+      if (!Number.isFinite(Date.parse(compaction.at)) || Date.parse(compaction.at) < cutoff) {
+        delete state.compactionSessions[sessionId];
+      }
+    }
+
+    state.snapshotRuns = state.snapshotRuns.filter((run) =>
+      Number.isFinite(Date.parse(run.at)) && Date.parse(run.at) >= cutoff,
+    );
   });
 }

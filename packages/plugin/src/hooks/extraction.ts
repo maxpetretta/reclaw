@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { isObject, normalizeError } from "../lib/guards";
@@ -10,12 +10,20 @@ import {
 } from "../lib/runtime-env";
 import {
   findTranscriptFile,
+  parseSessionIdFromTranscriptFileName,
   readTranscript,
 } from "../lib/transcript";
-import { markFailed } from "../state";
+import {
+  isExtracted,
+  markCompactionObserved,
+  markCompactionStatus,
+  markFailed,
+  readState,
+} from "../state";
 import {
   findSessionKeyForSession,
   listSessionCandidates,
+  type SessionCandidate,
   shouldExtractSession,
 } from "./session-discovery";
 import {
@@ -29,6 +37,8 @@ import {
 } from "./pipeline";
 
 export interface ExtractionHookDeps extends ExtractionPipelineDeps {}
+
+const COMPACTION_FALLBACK_WINDOW_MS = 10 * 60 * 1000;
 
 const DEFAULT_DEPS: ExtractionHookDeps = {
   extractFromTranscript,
@@ -87,6 +97,87 @@ function resolvePaths(config: PluginConfig): ExtractionPaths {
   };
 }
 
+function readTrimmedString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+interface CandidateWithTranscript {
+  candidate: SessionCandidate;
+  transcriptFile: string;
+  mtimeMs: number;
+}
+
+async function resolveCandidateTranscript(candidate: SessionCandidate): Promise<CandidateWithTranscript | undefined> {
+  const transcriptFile = await findTranscriptFile(candidate.agentId, candidate.sessionId);
+  if (!transcriptFile) {
+    return undefined;
+  }
+
+  try {
+    const fileStat = await stat(transcriptFile);
+    return {
+      candidate,
+      transcriptFile,
+      mtimeMs: fileStat.mtimeMs,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function pickMostRecentCandidate(candidates: SessionCandidate[]): Promise<CandidateWithTranscript | undefined> {
+  let mostRecent: CandidateWithTranscript | undefined;
+
+  for (const candidate of candidates) {
+    const withTranscript = await resolveCandidateTranscript(candidate);
+    if (!withTranscript) {
+      continue;
+    }
+
+    if (!mostRecent || withTranscript.mtimeMs > mostRecent.mtimeMs) {
+      mostRecent = withTranscript;
+    }
+  }
+
+  return mostRecent;
+}
+
+async function resolveCandidateBySessionId(sessionId: string): Promise<SessionCandidate | undefined> {
+  const matches = (await listSessionCandidates()).filter((candidate) => candidate.sessionId === sessionId);
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  return (await pickMostRecentCandidate(matches))?.candidate;
+}
+
+async function findFallbackMainCompactionSession(skipPrefixes: string[]): Promise<CandidateWithTranscript | undefined> {
+  const extractableCandidates = (await listSessionCandidates()).filter(
+    (candidate) =>
+      typeof candidate.sessionKey === "string" &&
+      shouldExtractSession(candidate.sessionKey, skipPrefixes),
+  );
+  if (extractableCandidates.length === 0) {
+    return undefined;
+  }
+
+  const mostRecent = await pickMostRecentCandidate(extractableCandidates);
+  if (!mostRecent) {
+    return undefined;
+  }
+
+  if (extractableCandidates.length === 1) {
+    return mostRecent;
+  }
+
+  const isRecentEnough = Date.now() - mostRecent.mtimeMs <= COMPACTION_FALLBACK_WINDOW_MS;
+  return isRecentEnough ? mostRecent : undefined;
+}
+
 export { listSessionCandidates, findSessionKeyForSession };
 
 export function registerExtractionHooks(
@@ -102,14 +193,14 @@ export function registerExtractionHooks(
 
   const apiToken = readGatewayToken(api.config);
 
-  api.registerHook("session_end", async (event, ctx) => {
+  api.on("session_end", async (event, ctx) => {
     if (!ctx.agentId) {
       api.logger.warn(`reclaw extraction skipped ${event.sessionId}: missing agentId`);
       return;
     }
 
     const sessionKey = await findSessionKeyForSession(ctx.agentId, event.sessionId);
-    if (sessionKey && !shouldExtractSession(sessionKey, config.extraction.skipSessionTypes)) {
+    if (!shouldExtractSession(sessionKey, config.extraction.skipSessionTypes)) {
       return;
     }
 
@@ -144,12 +235,12 @@ export function registerExtractionHooks(
     });
   });
 
-  api.registerHook("before_reset", async (event, ctx) => {
+  api.on("before_reset", async (event, ctx) => {
     if (!ctx.sessionId) {
       return;
     }
 
-    if (ctx.sessionKey && !shouldExtractSession(ctx.sessionKey, config.extraction.skipSessionTypes)) {
+    if (!shouldExtractSession(ctx.sessionKey, config.extraction.skipSessionTypes)) {
       return;
     }
 
@@ -174,14 +265,170 @@ export function registerExtractionHooks(
     });
   });
 
-  api.registerHook("gateway_start", async (event) => {
+  api.on("after_compaction", async (event, ctx) => {
+    const sessionFile = readTrimmedString(event.sessionFile);
+    let sessionId = readTrimmedString(ctx.sessionId);
+    let agentId = readTrimmedString(ctx.agentId);
+    let sessionKey = readTrimmedString(ctx.sessionKey);
+    let transcriptFileHint = sessionFile;
+    api.logger.info(
+      `reclaw after_compaction received: sessionId=${sessionId ?? "none"} agentId=${agentId ?? "none"} ` +
+      `sessionKey=${sessionKey ?? "none"} sessionFile=${sessionFile ?? "none"} ` +
+      `compacted=${event.compactedCount} remaining=${event.messageCount}`,
+    );
+
+    if (!sessionId && sessionFile) {
+      const parsedSessionId = parseSessionIdFromTranscriptFileName(basename(sessionFile));
+      if (parsedSessionId) {
+        sessionId = parsedSessionId;
+      }
+    }
+
+    if (sessionId && (!agentId || !sessionKey)) {
+      const matchingCandidate = await resolveCandidateBySessionId(sessionId);
+      if (matchingCandidate) {
+        agentId ??= matchingCandidate.agentId;
+        sessionKey ??= matchingCandidate.sessionKey;
+      }
+    }
+
+    if (!sessionId || !agentId) {
+      const fallbackCandidate = await findFallbackMainCompactionSession(config.extraction.skipSessionTypes);
+      if (fallbackCandidate) {
+        sessionId ??= fallbackCandidate.candidate.sessionId;
+        agentId ??= fallbackCandidate.candidate.agentId;
+        sessionKey ??= fallbackCandidate.candidate.sessionKey;
+        transcriptFileHint ??= fallbackCandidate.transcriptFile;
+        api.logger.info(
+          `reclaw after_compaction fallback resolved: sessionId=${sessionId ?? "none"} ` +
+          `agentId=${agentId ?? "none"} sessionKey=${sessionKey ?? "none"} ` +
+          `sessionFile=${transcriptFileHint ?? "none"}`,
+        );
+      }
+    }
+
+    if (!sessionId) {
+      api.logger.warn(
+        `reclaw extraction skipped after_compaction: missing sessionId and no fallback ` +
+        `(ctx.sessionId=${readTrimmedString(ctx.sessionId) ?? "none"}, sessionFile=${sessionFile ?? "none"})`,
+      );
+      return;
+    }
+
+    await markCompactionObserved(paths.statePath, sessionId, {
+      messageCount: event.messageCount,
+      compactedCount: event.compactedCount,
+      ...(typeof event.tokenCount === "number" && Number.isFinite(event.tokenCount)
+        ? { tokenCount: event.tokenCount }
+        : {}),
+      ...(transcriptFileHint ? { sessionFile: transcriptFileHint } : {}),
+    });
+
+    if (!agentId) {
+      api.logger.warn(`reclaw extraction skipped ${sessionId}: missing agentId`);
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: "missing agentId",
+      });
+      return;
+    }
+
+    const resolvedSessionKey =
+      sessionKey ??
+      (await findSessionKeyForSession(agentId, sessionId));
+    if (!shouldExtractSession(resolvedSessionKey, config.extraction.skipSessionTypes)) {
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: resolvedSessionKey
+          ? `session type excluded (${resolvedSessionKey})`
+          : "session key not resolvable",
+      });
+      return;
+    }
+
+    const stateBefore = await readState(paths.statePath);
+    if (isExtracted(stateBefore, sessionId)) {
+      api.logger.info(`reclaw after_compaction skipped ${sessionId}: already extracted`);
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: "already extracted",
+      });
+      return;
+    }
+
+    const transcriptFile = transcriptFileHint ?? (await findTranscriptFile(agentId, sessionId));
+    if (!transcriptFile) {
+      const message = "transcript file not found";
+      api.logger.warn(`reclaw after_compaction failed ${sessionId}: ${message}`);
+      await markFailed(paths.statePath, sessionId, message);
+      await markCompactionStatus(paths.statePath, sessionId, "failed", {
+        error: message,
+      });
+      return;
+    }
+
+    let messages;
+    try {
+      messages = await readTranscript(transcriptFile);
+    } catch (error) {
+      const message = normalizeError(error);
+      api.logger.warn(`reclaw after_compaction failed ${sessionId}: unable to read transcript (${message})`);
+      await markFailed(paths.statePath, sessionId, message);
+      await markCompactionStatus(paths.statePath, sessionId, "failed", {
+        error: message,
+      });
+      return;
+    }
+
+    if (!hasUserMessage(messages)) {
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: "no user messages",
+      });
+      return;
+    }
+
+    await runExtractionPipeline({
+      sessionId,
+      messages,
+      paths,
+      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
+      config,
+      deps: runtimeDeps,
+      logger: api.logger,
+      apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
+      apiToken,
+    });
+
+    const stateAfter = await readState(paths.statePath);
+    if (isExtracted(stateAfter, sessionId)) {
+      api.logger.info(
+        `reclaw after_compaction extracted ${sessionId}: entries=${stateAfter.extractedSessions[sessionId]?.entries ?? 0}`,
+      );
+      await markCompactionStatus(paths.statePath, sessionId, "extracted", {
+        entries: stateAfter.extractedSessions[sessionId]?.entries ?? 0,
+      });
+      return;
+    }
+
+    const failed = stateAfter.failedSessions[sessionId];
+    if (failed) {
+      api.logger.warn(`reclaw after_compaction failed ${sessionId}: ${failed.error}`);
+      await markCompactionStatus(paths.statePath, sessionId, "failed", {
+        error: failed.error,
+      });
+      return;
+    }
+
+    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+      reason: "no extraction changes",
+    });
+  });
+
+  api.on("gateway_start", async (event) => {
     const candidates = await listSessionCandidates();
 
     for (const candidate of candidates) {
       const resolvedSessionKey =
         candidate.sessionKey ??
         (await findSessionKeyForSession(candidate.agentId, candidate.sessionId));
-      if (resolvedSessionKey && !shouldExtractSession(resolvedSessionKey, config.extraction.skipSessionTypes)) {
+      if (!shouldExtractSession(resolvedSessionKey, config.extraction.skipSessionTypes)) {
         continue;
       }
 

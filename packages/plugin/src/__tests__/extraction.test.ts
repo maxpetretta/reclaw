@@ -24,6 +24,10 @@ type HookHandlers = {
     event: { messages?: unknown[]; sessionFile?: string },
     ctx: { agentId?: string; sessionId?: string; sessionKey?: string; workspaceDir?: string },
   ) => Promise<void>;
+  after_compaction?: (
+    event: { messageCount: number; compactedCount: number; tokenCount?: number; sessionFile?: string },
+    ctx: { agentId?: string; sessionId?: string; sessionKey?: string; workspaceDir?: string },
+  ) => Promise<void>;
   gateway_start?: (event: { port: number }) => Promise<void>;
 };
 
@@ -36,7 +40,8 @@ function createMockApi(config: unknown, handlers: HookHandlers): OpenClawPluginA
       error() {},
       debug() {},
     },
-    registerHook(hookName: string, handler: (...args: unknown[]) => Promise<void>) {
+    registerHook() {},
+    on(hookName: string, handler: (...args: unknown[]) => Promise<void>) {
       (handlers as Record<string, (...args: unknown[]) => Promise<void>>)[hookName] = handler;
     },
   };
@@ -68,6 +73,18 @@ async function seedLogEntry(logDir: string, entry: LogEntry): Promise<void> {
   await appendEntry(join(logDir, "log.jsonl"), entry);
 }
 
+async function seedMainSession(openclawHome: string, agentId: string, sessionId: string): Promise<void> {
+  const sessionsDir = join(openclawHome, "agents", agentId, "sessions");
+  await mkdir(sessionsDir, { recursive: true });
+  const storePath = join(sessionsDir, "sessions.json");
+  let store: Record<string, unknown> = {};
+  try {
+    store = JSON.parse(await readFile(storePath, "utf8")) as Record<string, unknown>;
+  } catch {}
+  store[`agent:${agentId}:main:${sessionId}`] = { sessionId };
+  await writeFile(storePath, JSON.stringify(store, null, 2), "utf8");
+}
+
 describe("extraction hooks", () => {
   let tempDir = "";
   let openclawHome = "";
@@ -94,8 +111,8 @@ describe("extraction hooks", () => {
   });
 
   test("session_end runs extraction pipeline and dedups repeated sessions", async () => {
+    await seedMainSession(openclawHome, "agent-1", "session-1");
     const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-1.jsonl");
-    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
     await writeFile(
       transcriptPath,
       [
@@ -190,8 +207,8 @@ describe("extraction hooks", () => {
   });
 
   test("auto-created subject types use enum validation with topic fallback", async () => {
+    await seedMainSession(openclawHome, "agent-1", "session-types");
     const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-types.jsonl");
-    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
     await writeFile(
       transcriptPath,
       [
@@ -240,8 +257,8 @@ describe("extraction hooks", () => {
       session: "seed-1",
     });
 
+    await seedMainSession(openclawHome, "agent-1", "session-cited-id");
     const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-cited-id.jsonl");
-    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
     await writeFile(
       transcriptPath,
       [
@@ -282,8 +299,8 @@ describe("extraction hooks", () => {
       session: "seed-1",
     });
 
+    await seedMainSession(openclawHome, "agent-1", "session-cite-usage");
     const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-cite-usage.jsonl");
-    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
     await writeFile(
       transcriptPath,
       [
@@ -321,8 +338,8 @@ describe("extraction hooks", () => {
       session: "seed-1",
     });
 
+    await seedMainSession(openclawHome, "agent-1", "session-search-link");
     const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-search-link.jsonl");
-    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
     await writeFile(
       transcriptPath,
       [
@@ -417,6 +434,215 @@ describe("extraction hooks", () => {
     expect(llmCalls).toBe(1);
     expect(entries).toHaveLength(1);
     expect(entries[0]?.content).toContain("sessionFile fallback");
+  });
+
+  test("after_compaction is registered, uses sessionFile, and writes handoff state", async () => {
+    const workspaceDir = join(tempDir, "workspace-after-compaction");
+    const memoryPath = join(workspaceDir, "MEMORY.md");
+    await mkdir(workspaceDir, { recursive: true });
+    await writeFile(memoryPath, "## Memory\n", "utf8");
+
+    const transcriptPath = join(tempDir, "compaction-session.jsonl");
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-compaction-1","timestamp":"2026-02-22T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-22T00:01:00.000Z","message":{"role":"user","content":"Please remember this handoff."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:02:00.000Z","message":{"role":"assistant","content":"Captured."}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    let llmCalls = 0;
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () => {
+        llmCalls += 1;
+        return '{"type":"handoff","content":"Compaction handoff saved","detail":"Use sessionFile transcript","subject":"auth-migration"}';
+      },
+    });
+
+    expect(handlers.after_compaction).toBeDefined();
+
+    await handlers.after_compaction?.(
+      {
+        messageCount: 3,
+        compactedCount: 2,
+        sessionFile: transcriptPath,
+      },
+      {
+        agentId: "missing-agent",
+        sessionId: "session-compaction-1",
+        sessionKey: "agent:main",
+        workspaceDir,
+      },
+    );
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    const state = await readState(join(logDir, "state.json"));
+    const memory = await readFile(memoryPath, "utf8");
+
+    expect(llmCalls).toBe(1);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.type).toBe("handoff");
+    expect(entries[0]?.session).toBe("session-compaction-1");
+    expect(state.extractedSessions["session-compaction-1"]?.entries).toBe(1);
+    expect(state.compactionSessions["session-compaction-1"]?.status).toBe("extracted");
+    expect(state.compactionSessions["session-compaction-1"]?.entries).toBe(1);
+    expect(memory).toContain("Session: session-compaction-1");
+    expect(memory).toContain("Compaction handoff saved");
+  });
+
+  test("after_compaction is idempotent for repeated compactions on one session", async () => {
+    const sessionsDir = join(openclawHome, "agents", "agent-1", "sessions");
+    const transcriptPath = join(sessionsDir, "session-compaction-2.jsonl");
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-compaction-2","timestamp":"2026-02-22T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-22T00:01:00.000Z","message":{"role":"user","content":"Capture this once."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:02:00.000Z","message":{"role":"assistant","content":"Done."}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    let llmCalls = 0;
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () => {
+        llmCalls += 1;
+        return '{"type":"fact","content":"Compaction extraction ran","subject":"auth-migration"}';
+      },
+    });
+
+    const event = {
+      messageCount: 2,
+      compactedCount: 4,
+      sessionFile: transcriptPath,
+    };
+    const ctx = {
+      agentId: "agent-1",
+      sessionId: "session-compaction-2",
+      sessionKey: "agent:agent-1:main",
+    };
+
+    await handlers.after_compaction?.(event, ctx);
+    await handlers.after_compaction?.(event, ctx);
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    const state = await readState(join(logDir, "state.json"));
+
+    expect(llmCalls).toBe(1);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.session).toBe("session-compaction-2");
+    expect(state.extractedSessions["session-compaction-2"]?.entries).toBe(1);
+  });
+
+
+  test("after_compaction resolves session fallback when context is empty", async () => {
+    const sessionsDir = join(openclawHome, "agents", "main", "sessions");
+    const transcriptPath = join(sessionsDir, "session-compaction-fallback.jsonl");
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-compaction-fallback","timestamp":"2026-02-22T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-22T00:01:00.000Z","message":{"role":"user","content":"Fallback extraction should run."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:02:00.000Z","message":{"role":"assistant","content":"Done."}}',
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(sessionsDir, "sessions.json"),
+      JSON.stringify(
+        {
+          "agent:main:main": {
+            sessionId: "session-compaction-fallback",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    let llmCalls = 0;
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () => {
+        llmCalls += 1;
+        return '{"type":"fact","content":"Fallback compaction extraction ran","subject":"auth-migration"}';
+      },
+    });
+
+    await handlers.after_compaction?.(
+      {
+        messageCount: 1,
+        compactedCount: 1,
+      },
+      {},
+    );
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    const state = await readState(join(logDir, "state.json"));
+
+    expect(llmCalls).toBe(1);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.session).toBe("session-compaction-fallback");
+    expect(state.extractedSessions["session-compaction-fallback"]?.entries).toBe(1);
+    expect(state.compactionSessions["session-compaction-fallback"]?.status).toBe("extracted");
+    expect(state.compactionSessions["session-compaction-fallback"]?.sessionFile).toBe(transcriptPath);
+  });
+
+  test("after_compaction skips scoped session types", async () => {
+    const transcriptPath = join(tempDir, "compaction-skipped-session.jsonl");
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-compaction-skip","timestamp":"2026-02-22T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-22T00:01:00.000Z","message":{"role":"user","content":"Skip this extraction."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:02:00.000Z","message":{"role":"assistant","content":"Skipped."}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    let llmCalls = 0;
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () => {
+        llmCalls += 1;
+        return '{"type":"fact","content":"should not run"}';
+      },
+    });
+
+    await handlers.after_compaction?.(
+      {
+        messageCount: 1,
+        compactedCount: 2,
+        sessionFile: transcriptPath,
+      },
+      {
+        agentId: "agent-1",
+        sessionId: "session-compaction-skip",
+        sessionKey: "cron:daily",
+      },
+    );
+
+    const state = await readState(join(logDir, "state.json"));
+
+    expect(llmCalls).toBe(0);
+    expect(state.extractedSessions["session-compaction-skip"]).toBeUndefined();
+    expect(state.compactionSessions["session-compaction-skip"]?.status).toBe("skipped");
+    expect(state.compactionSessions["session-compaction-skip"]?.reason).toContain("session type excluded");
   });
 
   test("failed extraction is marked once and not retried after limit", async () => {
@@ -517,8 +743,8 @@ describe("extraction hooks", () => {
       infra: { display: "Infra", type: "system" },
     });
 
+    await seedMainSession(openclawHome, "agent-1", "session-context");
     const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-context.jsonl");
-    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
     await writeFile(
       transcriptPath,
       [
@@ -571,8 +797,8 @@ describe("extraction hooks", () => {
       "auth-migration": { display: "Auth Migration", type: "project" },
     });
 
+    await seedMainSession(openclawHome, "agent-1", "session-dup");
     const transcriptPath = join(openclawHome, "agents", "agent-1", "sessions", "session-dup.jsonl");
-    await mkdir(join(openclawHome, "agents", "agent-1", "sessions"), { recursive: true });
     await writeFile(
       transcriptPath,
       [
@@ -663,8 +889,9 @@ describe("extraction hooks", () => {
       "utf8",
     );
 
+    await seedMainSession(openclawHome, "agent-1", "session-h1");
+    await seedMainSession(openclawHome, "agent-1", "session-h2");
     const sessionsDir = join(openclawHome, "agents", "agent-1", "sessions");
-    await mkdir(sessionsDir, { recursive: true });
     await writeFile(
       join(sessionsDir, "session-h1.jsonl"),
       [
