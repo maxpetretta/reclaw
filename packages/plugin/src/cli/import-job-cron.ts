@@ -49,7 +49,7 @@ function buildImportWorkerCronJob(
         message: [
           "Execute exactly one command using the exec tool.",
           `Set exec timeout to ${IMPORT_WORKER_EXEC_TIMEOUT_SECONDS} seconds and wait for completion (do not background it).`,
-          `Command: openclaw reclaw import-worker --job ${jobId}`,
+          `Command: openclaw reclaw import run --job ${jobId}`,
           "After it completes, return a concise success/failure summary.",
         ].join("\n"),
         timeoutSeconds: IMPORT_WORKER_TIMEOUT_SECONDS,

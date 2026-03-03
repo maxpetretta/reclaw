@@ -386,9 +386,9 @@ export function registerImportCommands(
       clackOutro(`${result.stoppedJobIds.length} job(s) stopped.`);
     });
 
-  reclaw
-    .command("import-worker")
-    .description("Internal async import worker executor")
+  importCommand
+    .command("run")
+    .description("Run one queued import worker job")
     .option("--job <id>", "Import job id")
     .action(async (opts: unknown) => {
       const options = toObject(opts);
