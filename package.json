@@ -9,7 +9,8 @@
     "web:build": "bun run --cwd packages/website build",
     "web:preview": "bun run --cwd packages/website preview",
     "lint": "bun run --cwd packages/website lint",
-    "fix": "bun run --cwd packages/website fix"
+    "fix": "bun run --cwd packages/website fix",
+    "release:preflight": "./scripts/release-preflight.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.3",

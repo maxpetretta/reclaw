@@ -110,6 +110,10 @@ openclaw reclaw import resume     # resume an import job
 
 See [docs/SPECIFICATION.md](docs/SPECIFICATION.md) for the full event log architecture spec.
 
+## Releasing
+
+See [docs/RELEASING.md](docs/RELEASING.md) for npm + ClawHub release steps and preflight checks.
+
 ## License
 
 MIT
