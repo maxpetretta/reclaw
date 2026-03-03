@@ -12,7 +12,7 @@ const features = [
     icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
     title: "Permanent record",
     description:
-      "Facts, decisions, tasks, questions, and session handoffs — all stored in a structured log that never loses data.",
+      "Facts, decisions, tasks, questions, and session handoffs — all stored in a structured log you can search later.",
   },
   {
     icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5v3a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5z"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M12 22v-5"/><path d="M9 22h6"/></svg>`,
@@ -42,7 +42,7 @@ const features = [
     icon: `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
     title: "Import history",
     description:
-      "Bring in past conversations from ChatGPT, Claude, and Grok. Runs in the background, picks up where it left off.",
+      "Bring in past conversations from ChatGPT, Claude, Grok, or OpenClaw. Runs in the background, picks up where it left off.",
   },
 ]
 
@@ -178,7 +178,7 @@ const decayRows = [
           <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-orange-400 to-red-400">buried in old chats</span>
         </h1>
         <p class="hero-sub mt-7 text-base sm:text-xl text-muted-foreground max-w-xl mx-auto leading-relaxed">
-          Every conversation with your AI produces knowledge. Reclaw is an <a href="https://openclaw.com" target="_blank" rel="noopener" class="text-foreground/90 hover:text-amber-400 underline decoration-amber-500/30 underline-offset-2 transition-colors">OpenClaw</a> plugin that captures all of it, so your assistant remembers everything and picks up right where you left off.
+          Every conversation with your AI produces knowledge. Reclaw is an <a href="https://openclaw.com" target="_blank" rel="noopener" class="text-foreground/90 hover:text-amber-400 underline decoration-amber-500/30 underline-offset-2 transition-colors">OpenClaw</a> plugin that captures the important bits, so your assistant can pick up right where you left off.
         </p>
         <div class="hero-actions mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
           <div class="group relative">
@@ -218,7 +218,7 @@ const decayRows = [
           <span class="text-muted-foreground">Zero lasting memory.</span>
         </h2>
         <p class="mt-6 text-muted-foreground text-base sm:text-lg leading-relaxed max-w-lg mx-auto">
-          You&rsquo;ve spent hundreds of hours talking to AI — debugging, brainstorming, making decisions. All of it sits in separate apps; decaying, unsearchable, forgotten.
+          You&rsquo;ve spent hundreds of hours talking to AI — planning, brainstorming, making decisions. All of it sits in separate apps; decaying, unsearchable, forgotten.
         </p>
       </div>
 
@@ -328,7 +328,7 @@ const decayRows = [
       <!-- ════════════════════════════════════════════ HOW IT WORKS -->
       <section class="py-20" id="how">
         <p class="font-mono text-xs tracking-[0.2em] uppercase text-brand mb-4 reveal">How it works</p>
-        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-4 reveal">Three steps to <span class="hero-accent">total recall</span></h2>
+        <h2 class="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-4 reveal">Three steps to <span class="hero-accent">consistent memory</span></h2>
         <p class="text-muted-foreground leading-relaxed max-w-2xl mb-4 reveal">
           Reclaw gives OpenClaw a persistent memory that grows with every conversation. It captures the important parts automatically and keeps your assistant up to date overnight.
         </p>
@@ -337,7 +337,7 @@ const decayRows = [
           <span class="text-brand font-bold">&rarr;</span>
           <span>important details saved to memory</span>
           <span class="text-brand font-bold">&rarr;</span>
-          <span>assistant starts next session fully caught up</span>
+          <span>assistant starts next session with full context</span>
         </div>
 
         <div class="grid md:grid-cols-3 gap-8">
@@ -377,7 +377,7 @@ const decayRows = [
             </div>
             <h3 class="text-lg font-bold mt-5">Remember</h3>
             <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
-              Your facts, decisions, tasks, and open questions build up over time. Every night, your assistant&rsquo;s memory is refreshed &mdash; so it starts each session with full context.
+              Your facts, decisions, tasks, and open questions build up over time. Every night, your assistant&rsquo;s memory is refreshed &mdash; so it starts each session with the right context.
             </p>
           </article>
         </div>
@@ -406,7 +406,7 @@ const decayRows = [
           Bring your conversations with you
         </h2>
         <p class="text-muted-foreground leading-relaxed max-w-2xl mx-auto mb-14 reveal text-center">
-          Export from any major AI platform. Reclaw processes them into searchable memory in the background.
+          Import from ChatGPT, Claude, Grok, or OpenClaw exports. Reclaw processes them into searchable memory in the background.
         </p>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl mx-auto">
