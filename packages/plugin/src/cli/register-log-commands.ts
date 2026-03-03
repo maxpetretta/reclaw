@@ -14,6 +14,11 @@ interface TraceReport {
   chains: TraceChain[];
 }
 
+interface TraceRenderOptions {
+  focusId?: string;
+  limit?: number;
+}
+
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
@@ -54,6 +59,21 @@ function printEntries(entries: LogEntry[], total?: number): void {
   }
 }
 
+function readOptionalPositiveNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
+
+  return undefined;
+}
+
 export function buildTraceReport(entries: LogEntry[]): TraceReport {
   const bySubject = new Map<string, LogEntry[]>();
   for (const entry of entries) {
@@ -83,12 +103,43 @@ export function buildTraceReport(entries: LogEntry[]): TraceReport {
   };
 }
 
-function printTraceReport(entries: LogEntry[], report: TraceReport, focusId?: string): void {
+function selectTraceChains(report: TraceReport, focusId?: string): TraceChain[] {
+  return typeof focusId === "string" && focusId.trim().length > 0
+    ? report.chains.filter((chain) => chain.ids.includes(focusId.trim()))
+    : report.chains;
+}
+
+function printTraceSummary(entries: LogEntry[], report: TraceReport, focusId?: string): void {
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  const chainsToPrint =
-    typeof focusId === "string" && focusId.trim().length > 0
-      ? report.chains.filter((chain) => chain.ids.includes(focusId.trim()))
-      : report.chains;
+  const chainsToPrint = selectTraceChains(report, focusId);
+
+  if (chainsToPrint.length === 0) {
+    console.log("No chains found.");
+    return;
+  }
+
+  for (const [chainIndex, chain] of chainsToPrint.entries()) {
+    const subjectLabel = chain.subject === "__unscoped__" ? "unscoped" : chain.subject;
+    const entriesInChain = chain.ids
+      .map((id) => byId.get(id))
+      .filter((entry): entry is LogEntry => Boolean(entry));
+    const first = entriesInChain[0];
+    const last = entriesInChain[entriesInChain.length - 1];
+
+    if (!first || !last) {
+      console.log(`Chain ${chainIndex + 1} (${subjectLabel}): entries=${chain.ids.length}`);
+      continue;
+    }
+
+    console.log(
+      `Chain ${chainIndex + 1} (${subjectLabel}): entries=${chain.ids.length} first=${formatTimestamp(first.timestamp)} last=${formatTimestamp(last.timestamp)} latestId=${last.id}`,
+    );
+  }
+}
+
+function printTraceReport(entries: LogEntry[], report: TraceReport, options: TraceRenderOptions = {}): void {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const chainsToPrint = selectTraceChains(report, options.focusId);
 
   if (chainsToPrint.length === 0) {
     console.log("No chains found.");
@@ -98,7 +149,17 @@ function printTraceReport(entries: LogEntry[], report: TraceReport, focusId?: st
   chainsToPrint.forEach((chain, chainIndex) => {
     const subjectLabel = chain.subject === "__unscoped__" ? "unscoped" : chain.subject;
     console.log(`Chain ${chainIndex + 1} (${subjectLabel}):`);
-    chain.ids.forEach((id, index) => {
+
+    const displayIds =
+      typeof options.limit === "number" && options.limit > 0 && chain.ids.length > options.limit
+        ? chain.ids.slice(chain.ids.length - options.limit)
+        : chain.ids;
+
+    if (displayIds.length < chain.ids.length) {
+      console.log(`  ... (showing most recent ${displayIds.length} of ${chain.ids.length})`);
+    }
+
+    displayIds.forEach((id, index) => {
       const entry = byId.get(id);
       const prefix = index === 0 ? "  " : "  -> ";
       if (!entry) {
@@ -174,6 +235,10 @@ export function registerLogCommands(
     .command("trace [id]")
     .description("Trace chronological event sequences by subject")
     .option("--subject <slug>", "Filter by subject slug")
+    .option("--from <date>", "Start date/time (ISO-8601 or date string)")
+    .option("--to <date>", "End date/time (ISO-8601 or date string)")
+    .option("--limit <n>", "Max entries to print per chain")
+    .option("--summary", "Show one-line summary per chain", false)
     .action(async (id: unknown, opts: unknown) => {
       const options = toObject(opts);
       const paths = resolvePaths(params.config, params.workspaceDir);
@@ -181,9 +246,15 @@ export function registerLogCommands(
         typeof options.subject === "string" && options.subject.trim().length > 0
           ? options.subject.trim()
           : undefined;
+      const from = parseIsoDateInput(options.from);
+      const to = parseIsoDateInput(options.to);
+      const limit = readOptionalPositiveNumber(options.limit);
+      const summary = options.summary === true || options.summary === "true";
 
       const entries = await queryLog(paths.logPath, {
         ...(subject ? { subject } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
       });
 
       if (entries.length === 0) {
@@ -193,6 +264,14 @@ export function registerLogCommands(
 
       const report = buildTraceReport(entries);
       const focusId = typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
-      printTraceReport(entries, report, focusId);
+      if (summary) {
+        printTraceSummary(entries, report, focusId);
+        return;
+      }
+
+      printTraceReport(entries, report, {
+        focusId,
+        limit,
+      });
     });
 }

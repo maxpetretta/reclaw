@@ -85,6 +85,7 @@ openclaw reclaw uninstall         # revert config changes (log data preserved)
 openclaw reclaw log               # print recent log entries
 openclaw reclaw search            # search with filters (--type, --subject, --status)
 openclaw reclaw trace             # trace chronological subject history
+openclaw reclaw status            # list recent snapshots, extractions, and handoffs
 
 openclaw reclaw subjects list     # list all subjects
 openclaw reclaw subjects add      # add a subject

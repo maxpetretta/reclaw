@@ -62,17 +62,26 @@ describe("snapshot and handoff CLI commands", () => {
   let tempDir = "";
   let workspaceDir = "";
   let logDir = "";
+  let originalOpenClawHome: string | undefined;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "reclaw-snapshot-cli-"));
     workspaceDir = join(tempDir, "workspace");
     logDir = join(tempDir, "reclaw-store");
+    originalOpenClawHome = process.env.OPENCLAW_HOME;
+    process.env.OPENCLAW_HOME = tempDir;
 
     await mkdir(workspaceDir, { recursive: true });
     await mkdir(logDir, { recursive: true });
   });
 
   afterEach(async () => {
+    if (originalOpenClawHome === undefined) {
+      delete process.env.OPENCLAW_HOME;
+    } else {
+      process.env.OPENCLAW_HOME = originalOpenClawHome;
+    }
+
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -98,6 +107,173 @@ describe("snapshot and handoff CLI commands", () => {
     expect(handoff?.children.has("refresh")).toBe(true);
     expect(handoff?.children.has("list")).toBe(true);
     expect(handoff?.children.has("status [sessionId]")).toBe(true);
+
+    expect(root.children.has("status")).toBe(true);
+  });
+
+  test("status command prints recent snapshots, extractions, and handoffs", async () => {
+    const root = new MockCommand("reclaw");
+    registerBriefingCommands(root, {
+      config: createConfig(logDir),
+      workspaceDir,
+      api: { config: {} } as never,
+    });
+
+    await writeState(join(logDir, "state.json"), {
+      extractedSessions: {
+        "session-a": {
+          at: "2026-03-03T09:01:00.000Z",
+          entries: 3,
+          lastMessageAt: "2026-03-03T09:00:00.000Z",
+        },
+      },
+      failedSessions: {
+        "session-failed": {
+          at: "2026-03-03T09:03:00.000Z",
+          error: "extraction model returned non-empty output but no valid entries",
+          retries: 1,
+          sourceSessionKey: "agent:main:main:session-failed",
+          workerSessionKey: "agent:main:cron:job-9:run:worker-failed",
+        },
+      },
+      importedConversations: {},
+      eventUsage: {},
+      importJobs: {},
+      compactionSessions: {
+        "session-a": {
+          at: "2026-03-03T09:00:30.000Z",
+          messageCount: 24,
+          compactedCount: 12,
+          status: "extracted",
+          extractedAt: "2026-03-03T09:01:00.000Z",
+          entries: 3,
+        },
+        "session-failed": {
+          at: "2026-03-03T09:02:30.000Z",
+          messageCount: 18,
+          compactedCount: 7,
+          status: "failed",
+          error: "extraction model returned non-empty output but no valid entries",
+        },
+        "session-compaction-only": {
+          at: "2026-03-03T09:04:00.000Z",
+          messageCount: 12,
+          compactedCount: 5,
+          status: "skipped",
+          reason: "no new messages since last extraction",
+        },
+      },
+      snapshotRuns: [
+        {
+          at: "2026-03-03T09:05:00.000Z",
+          status: "success",
+          memoryMdPath: join(workspaceDir, "MEMORY.md"),
+          workerSessionId: "snapshot-worker-session-id",
+          workerSessionKey: "agent:main:cron:job-2:run:snapshot-worker-session-id",
+        },
+      ],
+    });
+
+    await writeFile(
+      join(logDir, "log.jsonl"),
+      '{"timestamp":"2026-03-03T09:02:00.000Z","id":"M3n4O5p6Q7r8","type":"handoff","subject":"reclaw","content":"Latest handoff content","session":"session-a"}\n',
+      "utf8",
+    );
+    await mkdir(join(tempDir, "agents", "main", "sessions"), { recursive: true });
+    await writeFile(
+      join(tempDir, "agents", "main", "sessions", "sessions.json"),
+      JSON.stringify({
+        "agent:main:main:session-a": {
+          sessionId: "session-a",
+        },
+        "agent:main:main:session-compaction-only": {
+          sessionId: "session-compaction-only",
+        },
+      }),
+      "utf8",
+    );
+
+    const handler = root.children.get("status")?.actionHandler;
+    expect(handler).toBeDefined();
+
+    const output: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+    };
+
+    try {
+      await handler?.({ limit: "5" });
+    } finally {
+      console.log = originalLog;
+    }
+
+    const rendered = output.join("\n");
+    expect(rendered).toContain("Reclaw status (recent 5)");
+    expect(rendered).toContain("Snapshots");
+    expect(rendered).toContain("status=success");
+    expect(rendered).toContain("workerSessionKey=agent:main:cron:job-2:run:snapshot-worker-session-id");
+    expect(rendered).toContain("Extractions");
+    expect(rendered).toContain("session=session-a result=success entries=3 compaction=extracted");
+    expect(rendered).toContain("sourceSessionKey=agent:main:main:session-a");
+    expect(rendered).toContain("workerSessionKey=n/a");
+    expect(rendered).toContain("session=session-failed result=failed retries=1 compaction=failed");
+    expect(rendered).toContain("error=extraction model returned non-empty output but no valid entries");
+    expect(rendered).toContain("sourceSessionKey=agent:main:main:session-failed");
+    expect(rendered).toContain("workerSessionKey=agent:main:cron:job-9:run:worker-failed");
+    expect(rendered).toContain("session=session-compaction-only result=none compaction=skipped");
+    expect(rendered).toContain("compactionDetail=no new messages since last extraction");
+    expect(rendered).toContain("Handoffs");
+    expect(rendered).toContain("session=session-a compact=extracted Latest handoff content");
+    expect(rendered).toContain("sourceSessionKey=agent:main:main:session-a");
+  });
+
+  test("status command --all ignores --limit", async () => {
+    const root = new MockCommand("reclaw");
+    registerBriefingCommands(root, {
+      config: createConfig(logDir),
+      workspaceDir,
+      api: { config: {} } as never,
+    });
+
+    await writeState(join(logDir, "state.json"), {
+      extractedSessions: {
+        "session-one": {
+          at: "2026-03-03T09:01:00.000Z",
+          entries: 1,
+        },
+        "session-two": {
+          at: "2026-03-03T09:02:00.000Z",
+          entries: 2,
+        },
+      },
+      failedSessions: {},
+      importedConversations: {},
+      eventUsage: {},
+      importJobs: {},
+      compactionSessions: {},
+      snapshotRuns: [],
+    });
+
+    const handler = root.children.get("status")?.actionHandler;
+    expect(handler).toBeDefined();
+
+    const output: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      output.push(args.map(String).join(" "));
+    };
+
+    try {
+      await handler?.({ limit: "1", all: true });
+    } finally {
+      console.log = originalLog;
+    }
+
+    const rendered = output.join("\n");
+    expect(rendered).toContain("Reclaw status (all)");
+    expect(rendered).toContain("session=session-one");
+    expect(rendered).toContain("session=session-two");
   });
 
 
@@ -193,10 +369,10 @@ describe("snapshot and handoff CLI commands", () => {
 
     expect(result.updated).toBe(true);
     const memoryText = await readFile(memoryPath, "utf8");
-    expect(memoryText).toContain("## Reclaw Session Handoff");
-    expect(memoryText).toContain("Session: s-3 (2026-03-01T00:03:00.000Z)");
+    expect(memoryText).toContain("## Previous Session Handoff (s-3)");
     expect(memoryText).toContain("Latest handoff");
-    expect(memoryText).toContain("Detail: Carry this forward");
+    expect(memoryText).toContain("### Details");
+    expect(memoryText).toContain("Carry this forward");
     expect(memoryText).not.toContain("Old handoff text");
   });
 

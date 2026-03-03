@@ -4,6 +4,7 @@ import { intro as clackIntro, log as clackLog, outro as clackOutro, spinner as c
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { generateBriefing } from "../briefing/generate";
 import type { PluginConfig } from "../config";
+import { listSessionCandidates } from "../hooks/session-discovery";
 import { isEnoent, isObject } from "../lib/guards";
 import { getLastHandoff, queryLog } from "../log/query";
 import { applyLastHandoffBlock } from "../memory/handoff";
@@ -70,6 +71,49 @@ function truncateText(value: string, max = 120): string {
   return `${value.slice(0, Math.max(1, max - 1))}...`;
 }
 
+function parseTimestampOrZero(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function pickPrimarySessionKey(keys: string[]): string | undefined {
+  if (keys.length === 0) {
+    return undefined;
+  }
+
+  const mainCandidate = keys.find((key) => /^agent:[^:]+:main(?:$|:)/u.test(key));
+  return mainCandidate ?? keys[0];
+}
+
+async function resolveSessionKeyLookup(sessionIds: string[]): Promise<Map<string, string | undefined>> {
+  const uniqueIds = [...new Set(sessionIds.map((sessionId) => sessionId.trim()).filter((sessionId) => sessionId.length > 0))];
+  if (uniqueIds.length === 0) {
+    return new Map();
+  }
+
+  const keyCandidatesBySessionId = new Map<string, Set<string>>();
+  for (const sessionId of uniqueIds) {
+    keyCandidatesBySessionId.set(sessionId, new Set());
+  }
+
+  for (const candidate of await listSessionCandidates()) {
+    if (!keyCandidatesBySessionId.has(candidate.sessionId) || !candidate.sessionKey) {
+      continue;
+    }
+
+    keyCandidatesBySessionId.get(candidate.sessionId)?.add(candidate.sessionKey);
+  }
+
+  const lookup = new Map<string, string | undefined>();
+  for (const sessionId of uniqueIds) {
+    const keySet = keyCandidatesBySessionId.get(sessionId);
+    const keys = keySet ? [...keySet] : [];
+    lookup.set(sessionId, pickPrimarySessionKey(keys));
+  }
+
+  return lookup;
+}
+
 export async function runSnapshotRefresh(params: SnapshotGenerateParams): Promise<string> {
   const paths = resolvePaths(params.config, params.workspaceDir);
   const apiToken =
@@ -80,9 +124,15 @@ export async function runSnapshotRefresh(params: SnapshotGenerateParams): Promis
     params.api.config.gateway.auth.token.trim().length > 0
       ? params.api.config.gateway.auth.token
       : undefined;
+  let generationResult:
+    | {
+      workerSessionId?: string;
+      workerSessionKey?: string;
+    }
+    | undefined;
 
   try {
-    await generateBriefing({
+    generationResult = await generateBriefing({
       logPath: paths.logPath,
       memoryMdPath: paths.memoryMdPath,
       config: params.config,
@@ -92,6 +142,8 @@ export async function runSnapshotRefresh(params: SnapshotGenerateParams): Promis
     await appendSnapshotRun(paths.statePath, {
       status: "success",
       memoryMdPath: paths.memoryMdPath,
+      ...(generationResult?.workerSessionId ? { workerSessionId: generationResult.workerSessionId } : {}),
+      ...(generationResult?.workerSessionKey ? { workerSessionKey: generationResult.workerSessionKey } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -99,6 +151,8 @@ export async function runSnapshotRefresh(params: SnapshotGenerateParams): Promis
       status: "failed",
       memoryMdPath: paths.memoryMdPath,
       error: message,
+      ...(generationResult?.workerSessionId ? { workerSessionId: generationResult.workerSessionId } : {}),
+      ...(generationResult?.workerSessionKey ? { workerSessionKey: generationResult.workerSessionKey } : {}),
     });
     throw error;
   }
@@ -114,12 +168,22 @@ export async function runSessionHandoffRefresh(
   params: SessionHandoffRefreshParams,
 ): Promise<SessionHandoffRefreshResult> {
   const paths = resolvePaths(params.config, params.workspaceDir);
-  const latestHandoff = await getLastHandoff(paths.logPath);
+  const [latestHandoff, state] = await Promise.all([
+    getLastHandoff(paths.logPath),
+    readState(paths.statePath),
+  ]);
   if (!latestHandoff) {
     return {
       updated: false,
       memoryMdPath: paths.memoryMdPath,
     };
+  }
+
+  let sourceSessionKey =
+    state.extractedSessions[latestHandoff.session]?.sourceSessionKey ??
+    state.failedSessions[latestHandoff.session]?.sourceSessionKey;
+  if (!sourceSessionKey) {
+    sourceSessionKey = (await resolveSessionKeyLookup([latestHandoff.session])).get(latestHandoff.session);
   }
 
   let memoryContent = "";
@@ -131,7 +195,9 @@ export async function runSessionHandoffRefresh(
     }
   }
 
-  const updatedMemory = applyLastHandoffBlock(memoryContent, latestHandoff);
+  const updatedMemory = applyLastHandoffBlock(memoryContent, latestHandoff, {
+    sessionKey: sourceSessionKey,
+  });
   await mkdir(dirname(paths.memoryMdPath), { recursive: true });
   await writeFile(paths.memoryMdPath, updatedMemory, "utf8");
 
@@ -196,8 +262,10 @@ async function printSnapshotList(
 
   for (const run of runs) {
     const detail = run.error ? ` | error=${run.error}` : "";
+    const workerSessionKey = run.workerSessionKey ? ` | workerSessionKey=${run.workerSessionKey}` : "";
+    const workerSessionId = run.workerSessionId ? ` | workerSessionId=${run.workerSessionId}` : "";
     console.log(
-      `[${formatTimestamp(run.at)}] status=${run.status} memory=${run.memoryMdPath}${detail}`,
+      `[${formatTimestamp(run.at)}] status=${run.status} memory=${run.memoryMdPath}${detail}${workerSessionKey}${workerSessionId}`,
     );
   }
 }
@@ -215,8 +283,14 @@ async function printSnapshotStatus(
     console.log("Latest snapshot run: none");
   } else {
     const latestDetail = status.latestRun.error ? ` error=${status.latestRun.error}` : "";
+    const workerSessionKey = status.latestRun.workerSessionKey
+      ? ` workerSessionKey=${status.latestRun.workerSessionKey}`
+      : "";
+    const workerSessionId = status.latestRun.workerSessionId
+      ? ` workerSessionId=${status.latestRun.workerSessionId}`
+      : "";
     console.log(
-      `Latest snapshot run: ${formatTimestamp(status.latestRun.at)} (${status.latestRun.status})${latestDetail}`,
+      `Latest snapshot run: ${formatTimestamp(status.latestRun.at)} (${status.latestRun.status})${latestDetail}${workerSessionKey}${workerSessionId}`,
     );
   }
 
@@ -322,6 +396,153 @@ async function printHandoffStatus(
 
   console.log(`Today handoffs: ${handoffsToday.length}`);
   console.log(`Today extracted sessions: ${extractedToday.length}`);
+}
+
+async function printUnifiedStatusList(
+  params: {
+    config: PluginConfig;
+    workspaceDir?: string;
+  },
+  limit: number,
+  opts: {
+    showAll?: boolean;
+  } = {},
+): Promise<void> {
+  const maxItems = opts.showAll ? Number.POSITIVE_INFINITY : limit;
+  const paths = resolvePaths(params.config, params.workspaceDir);
+  const [state, handoffs] = await Promise.all([
+    readState(paths.statePath),
+    queryLog(paths.logPath, { type: "handoff" }),
+  ]);
+
+  const extractionSessionIds = [...new Set([
+    ...Object.keys(state.extractedSessions),
+    ...Object.keys(state.failedSessions),
+    ...Object.keys(state.compactionSessions),
+  ])];
+
+  const extractionRows = extractionSessionIds
+    .map((sessionId) => {
+      const extracted = state.extractedSessions[sessionId];
+      const failed = state.failedSessions[sessionId];
+      const compaction = state.compactionSessions[sessionId];
+
+      const extractedAtMs = extracted ? parseTimestampOrZero(extracted.at) : Number.NEGATIVE_INFINITY;
+      const failedAtMs = failed ? parseTimestampOrZero(failed.at) : Number.NEGATIVE_INFINITY;
+      const compactionAtMs = compaction ? parseTimestampOrZero(compaction.at) : Number.NEGATIVE_INFINITY;
+      const latestAtMs = Math.max(extractedAtMs, failedAtMs, compactionAtMs);
+
+      const latestAt = latestAtMs === extractedAtMs && extracted
+        ? extracted.at
+        : latestAtMs === failedAtMs && failed
+          ? failed.at
+          : compaction?.at ?? extracted?.at ?? failed?.at ?? new Date(0).toISOString();
+
+      const latestWasFailure = failedAtMs > extractedAtMs;
+      const extractionStatus = extracted || failed
+        ? latestWasFailure ? "failed" : "success"
+        : "none";
+
+      const latestSourceSessionKey = latestWasFailure ? failed?.sourceSessionKey : extracted?.sourceSessionKey;
+      const sourceSessionKey = latestSourceSessionKey ?? extracted?.sourceSessionKey ?? failed?.sourceSessionKey;
+      const latestWorkerSessionKey = latestWasFailure ? failed?.workerSessionKey : extracted?.workerSessionKey;
+      const workerSessionKey = latestWorkerSessionKey ?? extracted?.workerSessionKey ?? failed?.workerSessionKey;
+      const latestWorkerSessionId = latestWasFailure ? failed?.workerSessionId : extracted?.workerSessionId;
+      const workerSessionId = latestWorkerSessionId ?? extracted?.workerSessionId ?? failed?.workerSessionId;
+      const lastMessageAt = latestWasFailure ? failed?.lastMessageAt : extracted?.lastMessageAt;
+
+      return {
+        sessionId,
+        at: latestAt,
+        atMs: latestAtMs,
+        extractionStatus,
+        extracted,
+        failed,
+        compaction,
+        sourceSessionKey,
+        workerSessionKey,
+        workerSessionId,
+        lastMessageAt,
+      };
+    })
+    .sort((left, right) => right.atMs - left.atMs)
+    .slice(0, maxItems);
+
+  const snapshotRuns = state.snapshotRuns.slice(0, maxItems);
+  const handoffRows = handoffs.slice(0, maxItems);
+  const sessionKeyLookup = await resolveSessionKeyLookup([
+    ...extractionRows.map((row) => row.sessionId),
+    ...handoffRows.map((entry) => entry.session),
+  ]);
+
+  console.log(opts.showAll ? "Reclaw status (all)" : `Reclaw status (recent ${limit})`);
+  console.log("");
+  console.log("Snapshots");
+  if (snapshotRuns.length === 0) {
+    console.log("- none");
+  } else {
+    for (const run of snapshotRuns) {
+      const detail = run.error ? ` | error=${run.error}` : "";
+      const workerSessionKey = run.workerSessionKey
+        ? ` | workerSessionKey=${run.workerSessionKey}`
+        : "";
+      const workerSessionId = run.workerSessionId
+        ? ` | workerSessionId=${run.workerSessionId}`
+        : "";
+      console.log(
+        `- [${formatTimestamp(run.at)}] status=${run.status} memory=${run.memoryMdPath}${detail}${workerSessionKey}${workerSessionId}`,
+      );
+    }
+  }
+
+  console.log("");
+  console.log("Extractions");
+  if (extractionRows.length === 0) {
+    console.log("- none");
+  } else {
+    for (const row of extractionRows) {
+      const lastMessage = row.lastMessageAt
+        ? ` | lastMessage=${formatTimestamp(row.lastMessageAt)}`
+        : "";
+      const sourceSessionKey = row.sourceSessionKey ?? sessionKeyLookup.get(row.sessionId);
+      const sourceSessionKeyText = ` | sourceSessionKey=${sourceSessionKey ?? "n/a"}`;
+      const workerSessionKeyText = ` | workerSessionKey=${row.workerSessionKey ?? "n/a"}`;
+      const workerSessionIdText = row.workerSessionId
+        ? ` | workerSessionId=${row.workerSessionId}`
+        : "";
+      const compactionStatus = row.compaction?.status ?? "n/a";
+      const compactionDetail = row.compaction?.reason ?? row.compaction?.error;
+      const compactionDetailText = compactionDetail ? ` | compactionDetail=${truncateText(compactionDetail, 120)}` : "";
+      const resultText = row.extractionStatus === "success"
+        ? `result=success entries=${row.extracted?.entries ?? 0}`
+        : row.extractionStatus === "failed"
+          ? `result=failed retries=${row.failed?.retries ?? 0}`
+          : "result=none";
+      const failureErrorText = row.extractionStatus === "failed" && row.failed?.error
+        ? ` | error=${truncateText(row.failed.error, 120)}`
+        : "";
+      console.log(
+        `- [${formatTimestamp(row.at)}] session=${row.sessionId} ${resultText} compaction=${compactionStatus}${sourceSessionKeyText}${workerSessionKeyText}${workerSessionIdText}${failureErrorText}${compactionDetailText}${lastMessage}`,
+      );
+    }
+  }
+
+  console.log("");
+  console.log("Handoffs");
+  if (handoffRows.length === 0) {
+    console.log("- none");
+  } else {
+    for (const handoff of handoffRows) {
+      const compactionStatus = state.compactionSessions[handoff.session]?.status ?? "n/a";
+      const sourceSessionKey = state.extractedSessions[handoff.session]?.sourceSessionKey ??
+        state.failedSessions[handoff.session]?.sourceSessionKey ??
+        sessionKeyLookup.get(handoff.session);
+      const sourceSessionKeyText = ` | sourceSessionKey=${sourceSessionKey ?? "n/a"}`;
+      console.log(
+        `- [${formatTimestamp(handoff.timestamp)}] session=${handoff.session} compact=${compactionStatus} ${truncateText(handoff.content, 90)}${sourceSessionKeyText}`,
+      );
+    }
+  }
 }
 
 export function registerBriefingCommands(
@@ -430,6 +651,26 @@ export function registerBriefingCommands(
           workspaceDir: params.workspaceDir,
         },
         typeof sessionId === "string" && sessionId.trim().length > 0 ? sessionId.trim() : undefined,
+      );
+    });
+
+  reclaw
+    .command("status")
+    .description("List recent snapshots, extractions (success/failed), and handoffs")
+    .option("--limit <n>", "Max items to print per section", 10)
+    .option("--all", "Show all items in each section", false)
+    .action(async (opts: unknown) => {
+      const options = toObject(opts);
+      const showAll = options.all === true || options.all === "true";
+      await printUnifiedStatusList(
+        {
+          config: params.config,
+          workspaceDir: params.workspaceDir,
+        },
+        readPositiveNumberOption(options.limit, 10),
+        {
+          showAll,
+        },
       );
     });
 }
