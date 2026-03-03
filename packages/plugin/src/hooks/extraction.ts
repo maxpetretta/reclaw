@@ -3,7 +3,7 @@ import { basename, dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { isObject, normalizeError } from "../lib/guards";
-import { extractFromTranscript } from "../lib/llm";
+import { extractFromTranscriptWithMeta } from "../lib/llm";
 import {
   readGatewayToken,
   resolveApiBaseUrlFromConfig,
@@ -41,7 +41,7 @@ export interface ExtractionHookDeps extends ExtractionPipelineDeps {}
 const COMPACTION_FALLBACK_WINDOW_MS = 10 * 60 * 1000;
 
 const DEFAULT_DEPS: ExtractionHookDeps = {
-  extractFromTranscript,
+  extractFromTranscript: extractFromTranscriptWithMeta,
   async readMemoryFile(path) {
     try {
       return await readFile(path, "utf8");
