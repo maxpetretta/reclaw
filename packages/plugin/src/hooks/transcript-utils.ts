@@ -29,7 +29,7 @@ export function selectMessagesAfterTimestamp(
     if (!Number.isFinite(messageTimestampMs)) {
       return true;
     }
-    return messageTimestampMs > cutoffMs;
+    return messageTimestampMs >= cutoffMs;
   });
 }
 

@@ -121,7 +121,7 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
     return;
   }
 
-  if (state.failedSessions[params.sessionId] && !shouldRetry(state, params.sessionId)) {
+  if (!params.force && state.failedSessions[params.sessionId] && !shouldRetry(state, params.sessionId)) {
     return;
   }
 
