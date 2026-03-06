@@ -98,6 +98,7 @@ describe("cli init helpers", () => {
       jobs?: Array<{ name?: string }>;
     };
     const memoryContent = await readFile(memoryPath, "utf8");
+    const projectionDirEntries = await readdir(join(workspaceDir, "reclaw-memory", "subjects"));
 
     expect(logExists).toBe(true);
     expect(subjectsText.trim()).toBe("{}");
@@ -123,6 +124,7 @@ describe("cli init helpers", () => {
     expect(memoryContent).toContain(BRIEFING_END_MARKER);
     expect(memoryContent).toContain(LAST_HANDOFF_BEGIN_MARKER);
     expect(memoryContent).toContain(LAST_HANDOFF_END_MARKER);
+    expect(projectionDirEntries).toEqual([]);
     expect(initResult.guidanceEvent.sent).toBe(true);
   });
 
@@ -136,6 +138,8 @@ describe("cli init helpers", () => {
       openClawConfigPath: join(openClawHome, "openclaw.json"),
       agentsMdPath: join(workspaceDir, "AGENTS.md"),
       memoryMdPath: join(workspaceDir, "MEMORY.md"),
+      projectionRootDir: join(workspaceDir, "reclaw-memory"),
+      subjectProjectionDir: join(workspaceDir, "reclaw-memory", "subjects"),
     };
 
     const eventText = await buildPostInitSystemEventText(paths);

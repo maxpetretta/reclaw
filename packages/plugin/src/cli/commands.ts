@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isEnoent, isObject } from "../lib/guards";
@@ -28,6 +28,7 @@ import { type InitPaths, resolvePaths } from "./paths";
 import { registerBriefingCommands } from "./register-briefing-commands";
 import { registerImportCommands } from "./register-import-commands";
 import { buildTraceReport, registerLogCommands } from "./register-log-commands";
+import { registerProjectionCommands } from "./register-projection-commands";
 import { registerSetupCommands } from "./register-setup-commands";
 import { registerSubjectCommands } from "./register-subject-commands";
 import {
@@ -39,6 +40,7 @@ import {
 import { parseInteractiveImportJobs } from "./import-ui";
 import { dispatchPostInitGuidanceEvent, type GuidanceEventResult } from "./post-init-guidance-event";
 import { toObject } from "./parse";
+import { ensureSubjectProjectionDir } from "../projections/subjects";
 
 const POST_INIT_EVENT_PROMPT = "post-init-system-event.md";
 const AGENTS_MEMORY_PROMPT = "agents-memory-guidance.md";
@@ -266,6 +268,7 @@ export async function runInit(
   await ensureLogStoreFiles(paths);
   await updateOpenClawConfigForInit(paths.openClawConfigPath);
   await ensureMemoryMarkers(paths.memoryMdPath);
+  await ensureSubjectProjectionDir(dirname(paths.memoryMdPath));
   await ensureBriefingCron(paths, config);
 
   const fireGuidanceEvent = deps.fireGuidanceEvent ?? firePostInitGuidanceEvent;
@@ -453,6 +456,17 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     addCheck("MEMORY.md", false, isEnoent(error) ? "missing" : String(error));
   }
 
+  try {
+    const projectionDirStat = await stat(paths.subjectProjectionDir);
+    addCheck(
+      "reclaw-memory/subjects",
+      projectionDirStat.isDirectory(),
+      projectionDirStat.isDirectory() ? "ok" : "not a directory",
+    );
+  } catch (error) {
+    addCheck("reclaw-memory/subjects", false, isEnoent(error) ? "missing" : String(error));
+  }
+
   // briefing cron
   try {
     const doc = await readCronJobsDocument(paths.cronJobsPath);
@@ -513,6 +527,10 @@ function registerReclawCliCommands(
     workspaceDir,
   });
   registerSubjectCommands(reclaw, {
+    config,
+    workspaceDir,
+  });
+  registerProjectionCommands(reclaw, {
     config,
     workspaceDir,
   });

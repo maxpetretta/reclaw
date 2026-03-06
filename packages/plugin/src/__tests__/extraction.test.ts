@@ -112,18 +112,26 @@ describe("extraction hooks", () => {
   let tempDir = "";
   let openclawHome = "";
   let logDir = "";
+  let workspaceDir = "";
   let originalOpenClawHome: string | undefined;
+  let originalCwd = "";
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "reclaw-extraction-"));
     openclawHome = join(tempDir, "openclaw");
     logDir = join(tempDir, "reclaw");
+    workspaceDir = join(tempDir, "workspace");
+    await mkdir(workspaceDir, { recursive: true });
 
     originalOpenClawHome = process.env.OPENCLAW_HOME;
     process.env.OPENCLAW_HOME = openclawHome;
+    originalCwd = process.cwd();
+    process.chdir(workspaceDir);
   });
 
   afterEach(async () => {
+    process.chdir(originalCwd);
+
     if (originalOpenClawHome === undefined) {
       delete process.env.OPENCLAW_HOME;
     } else {
@@ -938,6 +946,7 @@ describe("extraction hooks", () => {
         {
           role: "user",
           content: "Need memory extraction",
+          timestamp: "2026-03-01T00:00:00.000Z",
         },
       ],
     };

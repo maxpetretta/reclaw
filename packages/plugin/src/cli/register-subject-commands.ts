@@ -1,6 +1,8 @@
 import { log as clackLog } from "@clack/prompts";
+import { dirname } from "node:path";
 import type { PluginConfig } from "../config";
 import { ensureSubject, readRegistry, renameSubject, writeRegistry } from "../subjects/registry";
+import { refreshSubjectProjections, removeSubjectProjection } from "../projections/subjects";
 import { resolvePaths } from "./paths";
 import type { CommandLike } from "./command-like";
 import { toObject } from "./parse";
@@ -67,6 +69,19 @@ export function registerSubjectCommands(
         }
       }
 
+      try {
+        await refreshSubjectProjections({
+          workspaceDir: dirname(paths.memoryMdPath),
+          logPath: paths.logPath,
+          subjectsPath: paths.subjectsPath,
+          subjects: [normalizedSlug],
+        });
+      } catch (error) {
+        clackLog.warn(
+          `Subject projection refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
       clackLog.success(`Added subject: ${normalizedSlug} (${inferredType})`);
     });
 
@@ -85,6 +100,19 @@ export function registerSubjectCommands(
 
       const paths = resolvePaths(params.config, params.workspaceDir);
       await renameSubject(paths.subjectsPath, paths.logPath, oldSlug.trim(), newSlug.trim());
+      try {
+        await removeSubjectProjection(dirname(paths.memoryMdPath), oldSlug.trim());
+        await refreshSubjectProjections({
+          workspaceDir: dirname(paths.memoryMdPath),
+          logPath: paths.logPath,
+          subjectsPath: paths.subjectsPath,
+          subjects: [newSlug.trim()],
+        });
+      } catch (error) {
+        clackLog.warn(
+          `Subject projection refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       clackLog.success(`Renamed subject: ${oldSlug.trim()} → ${newSlug.trim()}`);
     });
 }

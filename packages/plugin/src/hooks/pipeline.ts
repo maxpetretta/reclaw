@@ -1,4 +1,5 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import { dirname } from "node:path";
 import type { PluginConfig } from "../config";
 import { normalizeError } from "../lib/guards";
 import {
@@ -10,6 +11,7 @@ import {
 import { queryByIds, queryExtractionContext } from "../log/query";
 import { appendEntry, finalizeEntry, type LogEntry } from "../log/schema";
 import { applyLastHandoffBlock } from "../memory/handoff";
+import { refreshSubjectProjections } from "../projections/subjects";
 import {
   compareTranscriptWatermarks,
   getExtractedSessionWatermark,
@@ -268,12 +270,14 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
 
     let appendedCount = 0;
     const appendedEntries: Array<ReturnType<typeof finalizeEntry>> = [];
+    const touchedSubjects = new Set<string>();
     const parsedEntries: ParsedExtractionEntry[] = validatedOutput.parsedEntries;
 
     for (const parsedEntry of parsedEntries) {
       const entry = finalizeEntry(parsedEntry.entry, { sessionId: params.sessionId });
       if (entry.subject) {
         await upsertSubjectFromExtraction(params.paths.subjectsPath, entry.subject, parsedEntry.subjectTypeHint);
+        touchedSubjects.add(entry.subject);
       }
 
       await appendEntry(params.paths.logPath, entry);
@@ -297,6 +301,19 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
         await params.deps.writeMemoryFile(params.memoryMdPath, updatedMemory);
       } catch (error) {
         params.logger.warn(`reclaw handoff write failed for ${params.sessionId}: ${normalizeError(error)}`);
+      }
+    }
+
+    if (touchedSubjects.size > 0) {
+      try {
+        await refreshSubjectProjections({
+          workspaceDir: dirname(params.memoryMdPath),
+          logPath: params.paths.logPath,
+          subjectsPath: params.paths.subjectsPath,
+          subjects: [...touchedSubjects],
+        });
+      } catch (error) {
+        params.logger.warn(`reclaw subject projection refresh failed for ${params.sessionId}: ${normalizeError(error)}`);
       }
     }
 

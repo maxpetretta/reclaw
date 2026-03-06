@@ -30,7 +30,7 @@ It provides a durable memory system built from four pieces:
 1. An append-only structured event log in `log.jsonl`
 2. A subject registry in `subjects.json`
 3. A state file in `state.json`
-4. Wrapped `memory_search` / `memory_get` tools plus derived `MEMORY.md` blocks
+4. Wrapped `memory_search` / `memory_get` tools plus derived markdown surfaces (`MEMORY.md` blocks and subject projections)
 
 The log is the source of truth. `MEMORY.md` is a derived cache that keeps the most useful current context in prompt-ready form.
 
@@ -46,8 +46,9 @@ Reclaw does not use legacy daily memory files such as `memory/YYYY-MM-DD.md`.
   - user-maintained manual context
   - a nightly generated memory snapshot block
   - a latest-session handoff block
+- Reclaw also maintains per-subject markdown projection files under the workspace so builtin markdown indexing can semantically search event-log content.
 - The event log is authoritative when `MEMORY.md` and the log disagree.
-- Semantic search applies to indexed markdown memory content surfaced through the builtin memory tool integration. The event log itself is searched with structured filters and keyword matching, not a vector index.
+- Semantic search applies to indexed markdown memory content surfaced through the builtin memory tool integration. Reclaw bridges event-log content into that leg through generated per-subject markdown projections; the raw `jsonl` log itself is still searched with structured filters and keyword matching, not a vector index.
 - Extraction only stores user-specific, durable information. Generic world knowledge and one-off browsing artifacts are filtered out.
 - Main-session traffic is the normal extraction scope. By default, session keys prefixed with `cron:`, `sub:`, or `hook:` are skipped.
 
@@ -98,6 +99,16 @@ Related provenance data lives in OpenClaw's transcript store:
 ```
 
 For imported history, Reclaw can also write OpenClaw transcript sessions under `~/.openclaw/agents/<agentId>/sessions/`. The default imported agent id is `main`.
+
+Workspace-visible derived markdown used for builtin semantic search lives under:
+
+```text
+<workspace>/
+  MEMORY.md
+  reclaw-memory/
+    subjects/
+      <subject-slug>.md
+```
 
 ## 6. Data Schemas
 
@@ -163,7 +174,56 @@ Subject contract:
 - Extraction can auto-create new subjects and can update an existing subject's type when a valid `subjectType` hint is returned.
 - CLI subject rename updates both `subjects.json` and historical `subject` values in `log.jsonl`.
 
-### 6.3 State file
+### 6.3 Subject markdown projections
+
+Reclaw maintains one generated markdown file per subject at:
+
+```text
+<workspace>/reclaw-memory/subjects/<slug>.md
+```
+
+Projection contract:
+
+- Projection files are derived from `log.jsonl` plus `subjects.json`; they are not a second source of truth.
+- Files are workspace-visible markdown specifically so OpenClaw's builtin markdown indexer can semantically search event-log content.
+- Manual edits to projection files are not preserved. Refresh rewrites the full file.
+- Projection refresh is best-effort. Projection write failures do not roll back successful log extraction/import writes.
+- A projection file may exist for a registry subject even when it has no events yet.
+
+Each file should contain:
+
+- the subject display name, slug, and subject type
+- a generated-at timestamp
+- a section for currently open items for that subject
+- a chronological event timeline with event ids preserved in the markdown
+
+Minimal shape:
+
+```markdown
+# Auth Migration
+
+- Subject: `auth-migration`
+- Type: `project`
+- Generated: `2026-03-06T12:00:00.000Z`
+
+## Open Items
+
+- [task/open] Write the backfill script (`Ht4vL_9qRx2D`)
+
+## Timeline
+
+- 2026-02-20T14:20:00.000Z [decision] Queue-based retries for webhook delivery instead of synchronous retries (`a3k9x_BmQ2yT`)
+- 2026-02-20T15:10:00.000Z [task/open] Write the backfill script for failed webhook jobs (`Ht4vL_9qRx2D`)
+```
+
+Refresh triggers:
+
+- after successful live extraction, regenerate the projections for all touched subjects
+- after successful non-dry-run import, refresh the full subject projection set
+- after subject add/rename operations, refresh the affected subject projections
+- on demand through CLI refresh commands
+
+### 6.4 State file
 
 `state.json` stores operational state in addition to memory content:
 
@@ -426,7 +486,7 @@ Contracts:
 
 - The log leg is structured + keyword only. There is no vector index over `log.jsonl`.
 - `memorySearchCount` is incremented for log-backed result ids returned by the search.
-- Semantic search is delegated to the builtin runtime helper and therefore follows OpenClaw's markdown indexing behavior.
+- Semantic search is delegated to the builtin runtime helper and therefore follows OpenClaw's markdown indexing behavior across `MEMORY.md` and generated subject projection files.
 
 ### 9.2 `memory_get`
 
@@ -506,12 +566,14 @@ Primary CLI groups:
 - `openclaw reclaw trace`
 - `openclaw reclaw status`
 - `openclaw reclaw subjects list|add|rename`
+- `openclaw reclaw projection refresh|generate|list`
 - `openclaw reclaw snapshot refresh|generate|list|status`
 - `openclaw reclaw handoff refresh|list|status`
 - `openclaw reclaw import ...`
 
 Notes:
 
+- `projection generate` is an alias for `projection refresh`
 - `snapshot generate` is an alias for `snapshot refresh`
 - the nightly cron uses `snapshot refresh`
 - `trace` groups event history by subject and renders chronological chains
@@ -551,6 +613,8 @@ reclaw:<platform>:<conversationId>
 
 When transcript writing is enabled, Reclaw also writes OpenClaw transcript sessions and registers them in `sessions.json`.
 
+After a successful non-dry-run import run, Reclaw refreshes the full subject projection set so imported memories become available to builtin markdown semantic search without requiring a separate manual rebuild.
+
 ### 11.3 Import job state
 
 Async import jobs track:
@@ -581,11 +645,12 @@ The codebase should remain organized around these responsibilities:
   - memory-tool wrappers
   - log schema and query helpers
   - subject registry management
+  - subject markdown projection rendering and refresh helpers
   - subject matching helpers for extraction context
   - `MEMORY.md` managed-block writers
   - state persistence and normalization
   - import adapters, extraction, and job orchestration
-  - CLI commands for setup, recall, snapshotting, subjects, and import
+  - CLI commands for setup, recall, projections, snapshotting, subjects, and import
 - `packages/skill`
   - an agent-facing skill that explains how to use Reclaw in conversation
 
@@ -612,6 +677,8 @@ A similar implementation should satisfy these checks:
 7. `memory_search` returns log-backed results with inline ids and combines them with builtin markdown semantic results when queried
 8. `memory_get` can read files, log entries by id, subject histories by `subject:<slug>`, and transcripts by `session:<id>`
 9. Extraction context can match subjects from transcript text beyond exact kebab-case slug mentions
-10. Subject add/rename flows update the registry, and rename also rewrites historical log subjects
-11. Async import jobs can be queued, inspected, resumed, stopped, and executed by worker runs
-12. Verify checks the fully initialized workspace, including guidance markers and memory notice markers
+10. Subject projection files are generated under `reclaw-memory/subjects/` and preserve event ids in markdown
+11. Successful live extraction refreshes touched subject projections, and successful non-dry-run import refreshes the projection set
+12. Subject add/rename flows update the registry, and rename also rewrites historical log subjects
+13. Async import jobs can be queued, inspected, resumed, stopped, and executed by worker runs
+14. Verify checks the fully initialized workspace, including guidance markers, memory notice markers, and the projection directory

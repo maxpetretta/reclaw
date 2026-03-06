@@ -34,6 +34,7 @@ import {
   clearDirectoryContents,
   ensureImportStoreFiles,
 } from "./import-file-ops";
+import { refreshSubjectProjections } from "../projections/subjects";
 
 interface ImportCommandDeps {
   ensureImportStoreFiles: (paths: InitPaths, statePath: string) => Promise<void>;
@@ -594,6 +595,20 @@ export async function runImportCommand(
     {},
     input.logger,
   );
+
+  if (!dryRun) {
+    try {
+      await refreshSubjectProjections({
+        workspaceDir: dirname(paths.memoryMdPath),
+        logPath: paths.logPath,
+        subjectsPath: paths.subjectsPath,
+      });
+    } catch (error) {
+      input.logger?.warn?.(
+        `projection refresh failed after import: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   let legacyMemoryCleared = false;
   if (isOpenClawMigration && !dryRun && !keepSource && shouldClearLegacyMemoryDir(summary)) {
