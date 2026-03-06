@@ -209,6 +209,7 @@ function normalizeExtractedSessions(raw: unknown): Record<string, ExtractedSessi
     }
 
     const lastMessageAt = readTimestamp(sessionValue.lastMessageAt);
+    const messageCount = readNonNegativeInt(sessionValue.messageCount);
     const sourceSessionKey = readTrimmedString(sessionValue.sourceSessionKey);
     const workerSessionId = readTrimmedString(sessionValue.workerSessionId);
     const workerSessionKey = readTrimmedString(sessionValue.workerSessionKey);
@@ -216,6 +217,7 @@ function normalizeExtractedSessions(raw: unknown): Record<string, ExtractedSessi
       at,
       entries,
       ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
+      ...(messageCount !== undefined ? { messageCount } : {}),
       ...(sourceSessionKey !== undefined ? { sourceSessionKey } : {}),
       ...(workerSessionId !== undefined ? { workerSessionId } : {}),
       ...(workerSessionKey !== undefined ? { workerSessionKey } : {}),
@@ -235,6 +237,7 @@ function normalizeFailedSessions(raw: unknown): Record<string, FailedSession> {
     }
 
     const lastMessageAt = readTimestamp(sessionValue.lastMessageAt);
+    const messageCount = readNonNegativeInt(sessionValue.messageCount);
     const sourceSessionKey = readTrimmedString(sessionValue.sourceSessionKey);
     const workerSessionId = readTrimmedString(sessionValue.workerSessionId);
     const workerSessionKey = readTrimmedString(sessionValue.workerSessionKey);
@@ -244,6 +247,7 @@ function normalizeFailedSessions(raw: unknown): Record<string, FailedSession> {
       error: sessionValue.error,
       retries: sessionValue.retries,
       ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
+      ...(messageCount !== undefined ? { messageCount } : {}),
       ...(sourceSessionKey !== undefined ? { sourceSessionKey } : {}),
       ...(workerSessionId !== undefined ? { workerSessionId } : {}),
       ...(workerSessionKey !== undefined ? { workerSessionKey } : {}),

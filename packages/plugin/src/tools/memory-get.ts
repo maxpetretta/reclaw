@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { AnyAgentTool, OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { isObject } from "../lib/guards";
-import { queryById, queryLog } from "../log/query";
+import { queryById, queryBySubjects, queryLog } from "../log/query";
 import { findTranscriptFile, readTranscript } from "../lib/transcript";
 import { incrementEventUsage } from "../state";
 import { textResult } from "./shared";
@@ -15,6 +15,7 @@ interface MemoryGetParams {
 
 interface MemoryGetDeps {
   queryById: typeof queryById;
+  queryBySubjects: typeof queryBySubjects;
   queryLog?: typeof queryLog;
   findTranscriptFile: typeof findTranscriptFile;
   readTranscript: typeof readTranscript;
@@ -25,6 +26,7 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
 const DEFAULT_DEPS: MemoryGetDeps = {
   queryById,
+  queryBySubjects,
   queryLog,
   findTranscriptFile,
   readTranscript,
@@ -67,6 +69,38 @@ function resolveAgentId(ctx: OpenClawPluginToolContext): string | undefined {
   }
 
   return undefined;
+}
+
+function sortEntriesChronologically(entries: LogEntry[]): LogEntry[] {
+  return [...entries].sort((left, right) => {
+    const leftTimestamp = Date.parse(left.timestamp);
+    const rightTimestamp = Date.parse(right.timestamp);
+    if (Number.isFinite(leftTimestamp) && Number.isFinite(rightTimestamp) && leftTimestamp !== rightTimestamp) {
+      return leftTimestamp - rightTimestamp;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function formatSubjectTimeline(subject: string, entries: LogEntry[]): string {
+  const ordered = sortEntriesChronologically(entries);
+  const renderedEntries = ordered.map((entry) => {
+    const header = [
+      entry.timestamp,
+      `[${entry.id}]`,
+      entry.type === "task" ? `${entry.type}/${entry.status}` : entry.type,
+      entry.content,
+    ].join(" ");
+
+    if (!entry.detail) {
+      return header;
+    }
+
+    return `${header}\n  detail: ${entry.detail}`;
+  });
+
+  return [`Subject timeline: ${subject}`, "", ...renderedEntries].join("\n");
 }
 
 export function createWrappedMemoryGetTool(
@@ -158,6 +192,29 @@ export function createWrappedMemoryGetTool(
         return textResult(transcript, {
           sessionId,
           transcriptPath,
+        });
+      }
+
+      if (path.startsWith("subject:")) {
+        const subject = path.slice("subject:".length).trim();
+        if (!subject) {
+          return textResult("Subject not found");
+        }
+
+        const entries = await resolvedDeps.queryBySubjects(logPath, [subject]);
+        if (entries.length === 0) {
+          return textResult(`Subject not found: ${subject}`);
+        }
+
+        await resolvedDeps.incrementEventUsage(
+          statePath,
+          entries.map((entry) => entry.id),
+          "memory_get",
+        );
+
+        return textResult(formatSubjectTimeline(subject, entries), {
+          subject,
+          entries: sortEntriesChronologically(entries),
         });
       }
 

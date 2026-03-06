@@ -51,10 +51,12 @@ describe("state", () => {
   test("markExtracted optionally records lastMessageAt watermark", async () => {
     await markExtracted(statePath, "session-watermark", 1, {
       lastMessageAt: "2026-03-01T10:00:00.000Z",
+      messageCount: 4,
     });
 
     const state = await readState(statePath);
     expect(state.extractedSessions["session-watermark"]?.lastMessageAt).toBe("2026-03-01T10:00:00.000Z");
+    expect(state.extractedSessions["session-watermark"]?.messageCount).toBe(4);
   });
 
   test("markExtracted optionally records source and worker session metadata", async () => {
@@ -112,6 +114,7 @@ describe("state", () => {
   test("markFailed optionally records source/worker metadata", async () => {
     await markFailed(statePath, "session-failed-meta", "parse error", {
       lastMessageAt: "2026-03-03T18:27:49.000Z",
+      messageCount: 7,
       sourceSessionKey: "agent:main:main:session-failed-meta",
       workerSessionId: "worker-failed-session-id",
       workerSessionKey: "agent:main:cron:job-9:run:worker-failed-session-id",
@@ -123,6 +126,7 @@ describe("state", () => {
     expect(failed?.error).toBe("parse error");
     expect(failed?.retries).toBe(1);
     expect(failed?.lastMessageAt).toBe("2026-03-03T18:27:49.000Z");
+    expect(failed?.messageCount).toBe(7);
     expect(failed?.sourceSessionKey).toBe("agent:main:main:session-failed-meta");
     expect(failed?.workerSessionId).toBe("worker-failed-session-id");
     expect(failed?.workerSessionKey).toBe("agent:main:cron:job-9:run:worker-failed-session-id");

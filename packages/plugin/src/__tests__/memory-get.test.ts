@@ -153,6 +153,49 @@ describe("memory-get", () => {
     expect(text).toContain("2026-02-20T00:01:00.000Z user: Need a handoff");
   });
 
+  test("subject: path returns a chronological subject timeline", async () => {
+    const usageCalls: string[][] = [];
+    const api = {
+      runtime: {
+        tools: {
+          createMemoryGetTool: () => null,
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const tool = createWrappedMemoryGetTool(api, createContext(), createConfig(), {
+      queryBySubjects: async () => [
+        createEntry({
+          id: "new000000001",
+          timestamp: "2026-02-22T00:00:00.000Z",
+          type: "task",
+          status: "open",
+          content: "Run the canary",
+          subject: "auth-migration",
+        }),
+        createEntry({
+          id: "old000000001",
+          timestamp: "2026-02-20T00:00:00.000Z",
+          type: "decision",
+          content: "Use queue retries",
+          subject: "auth-migration",
+        }),
+      ],
+      findTranscriptFile: async () => null,
+      readTranscript: async () => [],
+      incrementEventUsage: async (_statePath, ids) => {
+        usageCalls.push(ids);
+      },
+    });
+
+    const result = await tool.execute("call-subject", { path: "subject:auth-migration" });
+    const text = readResultText(result);
+
+    expect(text).toContain("Subject timeline: auth-migration");
+    expect(text.indexOf("old000000001")).toBeLessThan(text.indexOf("new000000001"));
+    expect(usageCalls).toEqual([["new000000001", "old000000001"]]);
+  });
+
   test("regular file path is delegated to builtin memory_get", async () => {
     let delegated = false;
 

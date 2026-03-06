@@ -24,6 +24,10 @@ type HookHandlers = {
     event: { messages?: unknown[]; sessionFile?: string },
     ctx: { agentId?: string; sessionId?: string; sessionKey?: string; workspaceDir?: string },
   ) => Promise<void>;
+  before_compaction?: (
+    event: { messages?: unknown[]; messageCount: number; compactedCount: number; tokenCount?: number; sessionFile?: string },
+    ctx: { agentId?: string; sessionId?: string; sessionKey?: string; workspaceDir?: string },
+  ) => Promise<void>;
   after_compaction?: (
     event: { messageCount: number; compactedCount: number; tokenCount?: number; sessionFile?: string },
     ctx: { agentId?: string; sessionId?: string; sessionKey?: string; workspaceDir?: string },
@@ -75,6 +79,21 @@ async function seedLogEntry(logDir: string, entry: LogEntry): Promise<void> {
 
 function mainSessionKey(agentId: string, sessionId: string): string {
   return `agent:${agentId}:main:${sessionId}`;
+}
+
+function liveHandoffLine(
+  content = "Carry current session state forward",
+  detail = "Use the latest extracted facts, tasks, and decisions in the next session",
+): string {
+  return JSON.stringify({
+    type: "handoff",
+    content,
+    detail,
+  });
+}
+
+function withLiveHandoff(entries: string[], handoff = liveHandoffLine()): string {
+  return [...entries, handoff].join("\n");
 }
 
 async function seedMainSession(openclawHome: string, agentId: string, sessionId: string): Promise<void> {
@@ -134,10 +153,10 @@ describe("extraction hooks", () => {
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () => {
         llmCalls += 1;
-        return [
+        return withLiveHandoff([
           '{"type":"decision","content":"Queue retries for webhooks","detail":"Avoid sync retry storms","subject":"auth-migration"}',
           "not-json",
-        ].join("\n");
+        ]);
       },
     });
 
@@ -164,10 +183,10 @@ describe("extraction hooks", () => {
     const registry = await readRegistry(join(logDir, "subjects.json"));
 
     expect(llmCalls).toBe(1);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.session).toBe("session-1");
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.session === "session-1")).toBe(true);
     expect(registry["auth-migration"]?.display).toBe("Auth Migration");
-    expect(state.extractedSessions["session-1"]?.entries).toBe(1);
+    expect(state.extractedSessions["session-1"]?.entries).toBe(2);
   });
 
   test("session_end skips non-main sessions from ctx.sessionKey", async () => {
@@ -230,11 +249,11 @@ describe("extraction hooks", () => {
 
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () =>
-        [
+        withLiveHandoff([
           '{"type":"fact","content":"Auth migration moved under platform systems","subject":"auth-migration","subjectType":"system"}',
           '{"type":"fact","content":"Pairing with Alice on rollout","subject":"alice-chen","subjectType":"person"}',
           '{"type":"fact","content":"Ops audit is queued","subject":"ops-audit","subjectType":"invalid"}',
-        ].join("\n"),
+        ]),
     });
 
     await handlers.session_end?.(
@@ -279,7 +298,7 @@ describe("extraction hooks", () => {
     const api = createMockApi({}, handlers);
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () =>
-        '{"type":"task","content":"Backfill failed jobs","status":"done","subject":"auth-migration"}',
+        withLiveHandoff(['{"type":"task","content":"Backfill failed jobs","status":"done","subject":"auth-migration"}']),
     });
 
     await handlers.session_end?.(
@@ -325,7 +344,7 @@ describe("extraction hooks", () => {
     const api = createMockApi({}, handlers);
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () =>
-        '{"type":"fact","content":"Rollout proceeding","subject":"auth-migration"}',
+        withLiveHandoff(['{"type":"fact","content":"Rollout proceeding","subject":"auth-migration"}']),
     });
 
     await handlers.session_end?.(
@@ -368,7 +387,9 @@ describe("extraction hooks", () => {
     const api = createMockApi({}, handlers);
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () =>
-        '{"type":"decision","content":"Queue retries for webhook failures","detail":"Now using exponential backoff and dead-letter queue","subject":"auth-migration"}',
+        withLiveHandoff([
+          '{"type":"decision","content":"Queue retries for webhook failures","detail":"Now using exponential backoff and dead-letter queue","subject":"auth-migration"}',
+        ]),
     });
 
     await handlers.session_end?.(
@@ -437,7 +458,7 @@ describe("extraction hooks", () => {
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () => {
         llmCalls += 1;
-        return '{"type":"fact","content":"Loaded from sessionFile fallback","subject":"auth-migration"}';
+        return withLiveHandoff(['{"type":"fact","content":"Loaded from sessionFile fallback","subject":"auth-migration"}']);
       },
     });
 
@@ -450,8 +471,48 @@ describe("extraction hooks", () => {
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     expect(llmCalls).toBe(1);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.content).toContain("sessionFile fallback");
+    expect(entries).toHaveLength(2);
+    expect(entries.some((entry) => entry.content.includes("sessionFile fallback"))).toBe(true);
+  });
+
+  test("before_compaction is registered and extracts from inline messages", async () => {
+    let llmCalls = 0;
+    const transcripts: string[] = [];
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async (opts) => {
+        llmCalls += 1;
+        transcripts.push(opts.transcript);
+        return withLiveHandoff(['{"type":"fact","content":"Before compaction extraction ran","subject":"auth-migration"}']);
+      },
+    });
+
+    expect(handlers.before_compaction).toBeDefined();
+
+    await handlers.before_compaction?.(
+      {
+        messageCount: 2,
+        compactedCount: 3,
+        messages: [
+          { role: "user", content: "Remember this before compaction." },
+          { role: "assistant", content: "Saved." },
+        ],
+      },
+      {
+        agentId: "agent-1",
+        sessionId: "session-before-compaction",
+        sessionKey: "agent:main",
+      },
+    );
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    const state = await readState(join(logDir, "state.json"));
+    expect(llmCalls).toBe(1);
+    expect(transcripts[0]).toContain("Remember this before compaction.");
+    expect(entries).toHaveLength(2);
+    expect(state.compactionSessions["session-before-compaction"]?.status).toBe("extracted");
   });
 
   test("after_compaction is registered, uses sessionFile, and writes handoff state", async () => {
@@ -535,7 +596,7 @@ describe("extraction hooks", () => {
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () => {
         llmCalls += 1;
-        return '{"type":"fact","content":"Compaction extraction ran","subject":"auth-migration"}';
+        return withLiveHandoff(['{"type":"fact","content":"Compaction extraction ran","subject":"auth-migration"}']);
       },
     });
 
@@ -557,9 +618,9 @@ describe("extraction hooks", () => {
     const state = await readState(join(logDir, "state.json"));
 
     expect(llmCalls).toBe(1);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.session).toBe("session-compaction-2");
-    expect(state.extractedSessions["session-compaction-2"]?.entries).toBe(1);
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.session === "session-compaction-2")).toBe(true);
+    expect(state.extractedSessions["session-compaction-2"]?.entries).toBe(2);
   });
 
   test("after_compaction extracts only transcript delta after last extracted timestamp", async () => {
@@ -586,8 +647,8 @@ describe("extraction hooks", () => {
         llmCalls += 1;
         transcripts.push(opts.transcript);
         return llmCalls === 1
-          ? '{"type":"fact","content":"First compaction extraction","subject":"auth-migration"}'
-          : '{"type":"fact","content":"Second compaction extraction","subject":"auth-migration"}';
+          ? withLiveHandoff(['{"type":"fact","content":"First compaction extraction","subject":"auth-migration"}'])
+          : withLiveHandoff(['{"type":"fact","content":"Second compaction extraction","subject":"auth-migration"}']);
       },
     });
 
@@ -621,7 +682,7 @@ describe("extraction hooks", () => {
     const state = await readState(join(logDir, "state.json"));
 
     expect(llmCalls).toBe(2);
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(4);
     expect(transcripts).toHaveLength(2);
     expect(transcripts[0]).toContain("Capture first update.");
     expect(transcripts[1]).toContain("Capture second update.");
@@ -653,8 +714,8 @@ describe("extraction hooks", () => {
         llmCalls += 1;
         transcripts.push(opts.transcript);
         return llmCalls === 1
-          ? '{"type":"fact","content":"First extraction","subject":"auth-migration"}'
-          : '{"type":"fact","content":"Second extraction same timestamp","subject":"auth-migration"}';
+          ? withLiveHandoff(['{"type":"fact","content":"First extraction","subject":"auth-migration"}'])
+          : withLiveHandoff(['{"type":"fact","content":"Second extraction same timestamp","subject":"auth-migration"}']);
       },
     });
 
@@ -686,11 +747,11 @@ describe("extraction hooks", () => {
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     expect(llmCalls).toBe(2);
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(4);
     expect(transcripts[1]).toContain("Same timestamp follow-up.");
   });
 
-  test("after_compaction force mode bypasses retry cap and can recover", async () => {
+  test("after_compaction respects retry cap for one watermark and retries after transcript advances", async () => {
     const sessionsDir = join(openclawHome, "agents", "agent-1", "sessions");
     const transcriptPath = join(sessionsDir, "session-compaction-retry-recover.jsonl");
     await mkdir(sessionsDir, { recursive: true });
@@ -709,13 +770,13 @@ describe("extraction hooks", () => {
     const api = createMockApi({}, handlers);
 
     registerExtractionHooks(api, createPluginConfig(logDir), {
-      extractFromTranscript: async () => {
+      extractFromTranscript: async (opts) => {
         llmCalls += 1;
-        if (llmCalls <= 2) {
+        if (!opts.transcript.includes("Advance watermark")) {
           throw new Error("temporary extraction failure");
         }
 
-        return '{"type":"fact","content":"Recovered extraction after retry cap","subject":"auth-migration"}';
+        return withLiveHandoff(['{"type":"fact","content":"Recovered extraction after transcript advance","subject":"auth-migration"}']);
       },
     });
 
@@ -734,14 +795,27 @@ describe("extraction hooks", () => {
     await handlers.after_compaction?.(event, ctx);
     await handlers.after_compaction?.(event, ctx);
 
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-compaction-retry-recover","timestamp":"2026-02-22T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-22T00:01:00.000Z","message":{"role":"user","content":"Recover after failures."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:02:00.000Z","message":{"role":"assistant","content":"Attempting extraction."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:03:00.000Z","message":{"role":"user","content":"Advance watermark and try again."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:04:00.000Z","message":{"role":"assistant","content":"Retrying with new context."}}',
+      ].join("\n"),
+      "utf8",
+    );
+    await handlers.after_compaction?.(event, ctx);
+
     const entries = await readLog(join(logDir, "log.jsonl"));
     const state = await readState(join(logDir, "state.json"));
 
     expect(llmCalls).toBe(3);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.session).toBe("session-compaction-retry-recover");
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.session === "session-compaction-retry-recover")).toBe(true);
     expect(state.failedSessions["session-compaction-retry-recover"]).toBeUndefined();
-    expect(state.extractedSessions["session-compaction-retry-recover"]?.entries).toBe(1);
+    expect(state.extractedSessions["session-compaction-retry-recover"]?.entries).toBe(2);
     expect(state.compactionSessions["session-compaction-retry-recover"]?.status).toBe("extracted");
   });
 
@@ -780,7 +854,7 @@ describe("extraction hooks", () => {
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () => {
         llmCalls += 1;
-        return '{"type":"fact","content":"Fallback compaction extraction ran","subject":"auth-migration"}';
+        return withLiveHandoff(['{"type":"fact","content":"Fallback compaction extraction ran","subject":"auth-migration"}']);
       },
     });
 
@@ -796,9 +870,9 @@ describe("extraction hooks", () => {
     const state = await readState(join(logDir, "state.json"));
 
     expect(llmCalls).toBe(1);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.session).toBe("session-compaction-fallback");
-    expect(state.extractedSessions["session-compaction-fallback"]?.entries).toBe(1);
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.session === "session-compaction-fallback")).toBe(true);
+    expect(state.extractedSessions["session-compaction-fallback"]?.entries).toBe(2);
     expect(state.compactionSessions["session-compaction-fallback"]?.status).toBe("extracted");
     expect(state.compactionSessions["session-compaction-fallback"]?.sessionFile).toBe(transcriptPath);
   });
@@ -914,6 +988,36 @@ describe("extraction hooks", () => {
     );
   });
 
+  test("live extraction repairs missing handoff by reprompting once", async () => {
+    let repairCalls = 0;
+    const handlers: HookHandlers = {};
+    const api = createMockApi({}, handlers);
+
+    registerExtractionHooks(api, createPluginConfig(logDir), {
+      extractFromTranscript: async () =>
+        '{"type":"fact","content":"Queue retries are enabled","subject":"auth-migration"}',
+      repairExtractionOutput: async () => {
+        repairCalls += 1;
+        return withLiveHandoff(['{"type":"fact","content":"Queue retries are enabled","subject":"auth-migration"}']);
+      },
+    });
+
+    await handlers.before_reset?.(
+      {
+        messages: [
+          { role: "user", content: "Store the latest retry status" },
+          { role: "assistant", content: "Done" },
+        ],
+      },
+      { sessionId: "session-repair-handoff", sessionKey: "agent:main" },
+    );
+
+    const entries = await readLog(join(logDir, "log.jsonl"));
+    expect(repairCalls).toBe(1);
+    expect(entries.some((entry) => entry.session === "session-repair-handoff" && entry.type === "fact")).toBe(true);
+    expect(entries.some((entry) => entry.session === "session-repair-handoff" && entry.type === "handoff")).toBe(true);
+  });
+
   test("passes transcript-relevant existing entries and open items to extraction model", async () => {
     await seedLogEntry(logDir, {
       id: "factold0001a",
@@ -960,7 +1064,7 @@ describe("extraction hooks", () => {
       transcriptPath,
       [
         '{"type":"session","id":"session-context","timestamp":"2026-02-20T00:00:00.000Z"}',
-        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"auth-migration update: backfill failed jobs is done"}}',
+        '{"type":"message","timestamp":"2026-02-20T00:01:00.000Z","message":{"role":"user","content":"Auth Migration update: backfill failed jobs is done"}}',
         '{"type":"message","timestamp":"2026-02-20T00:02:00.000Z","message":{"role":"assistant","content":"great, closing it"}}',
       ].join("\n"),
       "utf8",
@@ -973,7 +1077,7 @@ describe("extraction hooks", () => {
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async (opts) => {
         existingIds = (opts.existingEntries ?? []).map((entry) => entry.id);
-        return '{"type":"task","content":"Backfill failed jobs","status":"done","subject":"other-project"}';
+        return withLiveHandoff(['{"type":"task","content":"Backfill failed jobs","status":"done","subject":"other-project"}']);
       },
     });
 
@@ -1031,7 +1135,7 @@ describe("extraction hooks", () => {
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async (opts) => {
         existingIds = (opts.existingEntries ?? []).map((entry) => entry.id);
-        return "";
+        return withLiveHandoff([]);
       },
     });
 
@@ -1046,8 +1150,9 @@ describe("extraction hooks", () => {
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     expect(existingIds).toContain("factdup00001");
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.id).toBe("factdup00001");
+    expect(entries).toHaveLength(2);
+    expect(entries.some((entry) => entry.id === "factdup00001")).toBe(true);
+    expect(entries.some((entry) => entry.session === "session-dup" && entry.type === "handoff")).toBe(true);
   });
 
   test("session_end skips transcripts without user messages", async () => {

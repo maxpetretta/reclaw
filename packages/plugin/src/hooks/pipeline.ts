@@ -11,7 +11,9 @@ import { queryByIds, queryExtractionContext } from "../log/query";
 import { appendEntry, finalizeEntry, type LogEntry } from "../log/schema";
 import { applyLastHandoffBlock } from "../memory/handoff";
 import {
-  isExtracted,
+  compareTranscriptWatermarks,
+  getExtractedSessionWatermark,
+  getFailedSessionWatermark,
   incrementEventUsage,
   markExtracted,
   markFailed,
@@ -38,6 +40,16 @@ export interface ExtractionPipelineDeps {
     apiBaseUrl?: string;
     apiToken?: string;
   }) => Promise<string | ExtractionModelResult>;
+  repairExtractionOutput: (opts: {
+    transcript: string;
+    subjects: Awaited<ReturnType<typeof readRegistry>>;
+    existingEntries?: LogEntry[];
+    invalidOutput: string;
+    issue: string;
+    model: string;
+    apiBaseUrl?: string;
+    apiToken?: string;
+  }) => Promise<string | ExtractionModelResult>;
   readMemoryFile: (path: string) => Promise<string>;
   writeMemoryFile: (path: string, content: string) => Promise<void>;
 }
@@ -53,9 +65,13 @@ interface ExtractionPipelineParams {
   apiBaseUrl: string;
   apiToken?: string;
   sourceSessionKey?: string;
-  /** Skip the isExtracted guard (used by after_compaction delta extraction). */
-  force?: boolean;
+  transcriptMessageCount?: number;
 }
+
+export type ExtractionPipelineResult =
+  | { status: "skipped"; reason: "up_to_date" | "retry_cap" }
+  | { status: "extracted"; entries: number }
+  | { status: "failed"; error: string };
 
 const EVENT_ID_LENGTH = 12;
 const TRANSCRIPT_EVENT_ID_PATTERN = /\[([A-Za-z0-9_-]{12})\]/gu;
@@ -113,25 +129,103 @@ function findLatestMessageTimestamp(messages: TranscriptMessage[]): string | und
   return Number.isFinite(latestTimestampMs) ? new Date(latestTimestampMs).toISOString() : undefined;
 }
 
-export async function runExtractionPipeline(params: ExtractionPipelineParams): Promise<void> {
-  const state = await readState(params.paths.statePath);
-  const lastMessageAt = findLatestMessageTimestamp(params.messages);
+function toOutputRecord(output: string | ExtractionModelResult): ExtractionModelResult {
+  return typeof output === "string" ? { output } : output;
+}
 
-  if (!params.force && isExtracted(state, params.sessionId)) {
-    return;
+function describeLiveOutputIssue(parsedEntries: ParsedExtractionEntry[]): string | undefined {
+  const handoffCount = parsedEntries.filter((entry) => entry.entry.type === "handoff").length;
+  if (handoffCount !== 1) {
+    return `live extraction output must contain exactly one handoff event; found ${handoffCount}`;
   }
 
-  if (!params.force && state.failedSessions[params.sessionId] && !shouldRetry(state, params.sessionId)) {
-    return;
+  const lastEntry = parsedEntries[parsedEntries.length - 1];
+  if (!lastEntry || lastEntry.entry.type !== "handoff") {
+    return "live extraction output must end with the handoff event";
+  }
+
+  return undefined;
+}
+
+async function validateLiveExtractionOutput(params: {
+  sessionId: string;
+  transcript: string;
+  subjects: Awaited<ReturnType<typeof readRegistry>>;
+  existingEntries: LogEntry[];
+  outputRecord: ExtractionModelResult;
+  deps: ExtractionPipelineDeps;
+  model: string;
+  logger: OpenClawPluginApi["logger"];
+  apiBaseUrl: string;
+  apiToken?: string;
+}): Promise<{ parsedEntries: ParsedExtractionEntry[]; invalidLineCount: number; outputRecord: ExtractionModelResult }> {
+  let outputRecord = params.outputRecord;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const parsed = parseExtractionJsonl(outputRecord.output);
+    const issue = describeLiveOutputIssue(parsed.entries);
+    if (!issue) {
+      return {
+        parsedEntries: parsed.entries,
+        invalidLineCount: parsed.invalidLineCount,
+        outputRecord,
+      };
+    }
+
+    if (attempt > 0) {
+      throw new Error(`extraction repair failed: ${issue}`);
+    }
+
+    params.logger.warn(`reclaw extraction for ${params.sessionId}: repairing output (${issue})`);
+    outputRecord = toOutputRecord(await params.deps.repairExtractionOutput({
+      transcript: params.transcript,
+      subjects: params.subjects,
+      existingEntries: params.existingEntries,
+      invalidOutput: outputRecord.output,
+      issue,
+      model: params.model,
+      apiBaseUrl: params.apiBaseUrl,
+      apiToken: params.apiToken,
+    }));
+  }
+
+  throw new Error("extraction repair failed");
+}
+
+export async function runExtractionPipeline(params: ExtractionPipelineParams): Promise<ExtractionPipelineResult> {
+  const state = await readState(params.paths.statePath);
+  const lastMessageAt = findLatestMessageTimestamp(params.messages);
+  const transcriptMessageCount =
+    typeof params.transcriptMessageCount === "number" && Number.isFinite(params.transcriptMessageCount)
+      ? Math.max(0, Math.floor(params.transcriptMessageCount))
+      : params.messages.length;
+  const currentWatermark = {
+    ...(lastMessageAt ? { lastMessageAt } : {}),
+    messageCount: transcriptMessageCount,
+  };
+  const extractedWatermark = getExtractedSessionWatermark(state, params.sessionId);
+  const failedWatermark = getFailedSessionWatermark(state, params.sessionId);
+
+  if (
+    state.failedSessions[params.sessionId] &&
+    compareTranscriptWatermarks(currentWatermark, failedWatermark) <= 0 &&
+    !shouldRetry(state, params.sessionId)
+  ) {
+    return { status: "skipped", reason: "retry_cap" };
+  }
+
+  if (compareTranscriptWatermarks(currentWatermark, extractedWatermark) <= 0) {
+    return { status: "skipped", reason: "up_to_date" };
   }
 
   const transcript = formatTranscript(params.messages);
   if (!transcript.trim()) {
     await markExtracted(params.paths.statePath, params.sessionId, 0, {
       ...(lastMessageAt ? { lastMessageAt } : {}),
+      messageCount: transcriptMessageCount,
     });
     await pruneState(params.paths.statePath);
-    return;
+    return { status: "extracted", entries: 0 };
   }
 
   let workerSessionId: string | undefined;
@@ -153,24 +247,28 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
       apiBaseUrl: params.apiBaseUrl,
       apiToken: params.apiToken,
     });
-    const outputRecord =
-      typeof extractionModelResult === "string"
-        ? {
-          output: extractionModelResult,
-        }
-        : extractionModelResult;
+    const initialOutputRecord = toOutputRecord(extractionModelResult);
+    workerSessionId = initialOutputRecord.workerSessionId;
+    workerSessionKey = initialOutputRecord.workerSessionKey;
+    const validatedOutput = await validateLiveExtractionOutput({
+      sessionId: params.sessionId,
+      transcript,
+      subjects,
+      existingEntries,
+      outputRecord: initialOutputRecord,
+      deps: params.deps,
+      model: params.config.extraction.model,
+      logger: params.logger,
+      apiBaseUrl: params.apiBaseUrl,
+      apiToken: params.apiToken,
+    });
+    const outputRecord = validatedOutput.outputRecord;
     workerSessionId = outputRecord.workerSessionId;
     workerSessionKey = outputRecord.workerSessionKey;
-    const rawOutput = outputRecord.output;
 
     let appendedCount = 0;
     const appendedEntries: Array<ReturnType<typeof finalizeEntry>> = [];
-    const parsed = parseExtractionJsonl(rawOutput);
-    const parsedEntries: ParsedExtractionEntry[] = parsed.entries;
-
-    if (parsed.nonEmptyLines > 0 && parsedEntries.length === 0) {
-      throw new Error("extraction model returned non-empty output but no valid entries");
-    }
+    const parsedEntries: ParsedExtractionEntry[] = validatedOutput.parsedEntries;
 
     for (const parsedEntry of parsedEntries) {
       const entry = finalizeEntry(parsedEntry.entry, { sessionId: params.sessionId });
@@ -183,17 +281,17 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
       appendedCount += 1;
     }
 
-    if (parsed.invalidLineCount > 0) {
+    if (validatedOutput.invalidLineCount > 0) {
       params.logger.warn(
-        `reclaw extraction for ${params.sessionId}: ignored ${parsed.invalidLineCount} invalid entry line(s)`,
+        `reclaw extraction for ${params.sessionId}: ignored ${validatedOutput.invalidLineCount} invalid entry line(s)`,
       );
     }
 
-    const latestHandoff = [...appendedEntries].reverse().find((entry) => entry.type === "handoff");
-    if (latestHandoff) {
+    const finalHandoff = appendedEntries[appendedEntries.length - 1];
+    if (finalHandoff?.type === "handoff") {
       try {
         const memoryContent = await params.deps.readMemoryFile(params.memoryMdPath);
-        const updatedMemory = applyLastHandoffBlock(memoryContent, latestHandoff, {
+        const updatedMemory = applyLastHandoffBlock(memoryContent, finalHandoff, {
           sessionKey: params.sourceSessionKey,
         });
         await params.deps.writeMemoryFile(params.memoryMdPath, updatedMemory);
@@ -204,20 +302,24 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
 
     await markExtracted(params.paths.statePath, params.sessionId, appendedCount, {
       ...(lastMessageAt ? { lastMessageAt } : {}),
+      messageCount: transcriptMessageCount,
       ...(params.sourceSessionKey ? { sourceSessionKey: params.sourceSessionKey } : {}),
       ...(workerSessionId ? { workerSessionId } : {}),
       ...(workerSessionKey ? { workerSessionKey } : {}),
     });
     await pruneState(params.paths.statePath);
+    return { status: "extracted", entries: appendedCount };
   } catch (error) {
     const message = normalizeError(error);
     params.logger.warn(`reclaw extraction failed for ${params.sessionId}: ${message}`);
     await markFailed(params.paths.statePath, params.sessionId, message, {
       ...(lastMessageAt ? { lastMessageAt } : {}),
+      messageCount: transcriptMessageCount,
       ...(params.sourceSessionKey ? { sourceSessionKey: params.sourceSessionKey } : {}),
       ...(workerSessionId ? { workerSessionId } : {}),
       ...(workerSessionKey ? { workerSessionKey } : {}),
     });
     await pruneState(params.paths.statePath);
+    return { status: "failed", error: message };
   }
 }

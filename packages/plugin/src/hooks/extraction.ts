@@ -3,7 +3,7 @@ import { basename, dirname, join } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { isObject, normalizeError } from "../lib/guards";
-import { extractFromTranscriptWithMeta } from "../lib/llm";
+import { extractFromTranscriptWithMeta, repairExtractionOutputWithMeta } from "../lib/llm";
 import {
   readGatewayToken,
   resolveApiBaseUrlFromConfig,
@@ -14,6 +14,8 @@ import {
   readTranscript,
 } from "../lib/transcript";
 import {
+  getExtractedSessionWatermark,
+  hasTranscriptAdvanced,
   markCompactionObserved,
   markCompactionStatus,
   markFailed,
@@ -42,6 +44,7 @@ const COMPACTION_FALLBACK_WINDOW_MS = 10 * 60 * 1000;
 
 const DEFAULT_DEPS: ExtractionHookDeps = {
   extractFromTranscript: extractFromTranscriptWithMeta,
+  repairExtractionOutput: repairExtractionOutputWithMeta,
   async readMemoryFile(path) {
     try {
       return await readFile(path, "utf8");
@@ -178,6 +181,200 @@ async function findFallbackMainCompactionSession(skipPrefixes: string[]): Promis
   return isRecentEnough ? mostRecent : undefined;
 }
 
+function findLatestMessageTimestamp(messages: Awaited<ReturnType<typeof readTranscript>>): string | undefined {
+  let latestTimestampMs = Number.NEGATIVE_INFINITY;
+
+  for (const message of messages) {
+    const timestampMs = Date.parse(message.timestamp);
+    if (Number.isFinite(timestampMs) && timestampMs > latestTimestampMs) {
+      latestTimestampMs = timestampMs;
+    }
+  }
+
+  return Number.isFinite(latestTimestampMs) ? new Date(latestTimestampMs).toISOString() : undefined;
+}
+
+interface CompactionHookEvent {
+  messages?: unknown[];
+  messageCount: number;
+  compactedCount: number;
+  tokenCount?: number;
+  sessionFile?: string;
+}
+
+interface CompactionHookContext {
+  agentId?: string;
+  sessionId?: string;
+  sessionKey?: string;
+  workspaceDir?: string;
+}
+
+async function runCompactionExtraction(params: {
+  hookName: "before_compaction" | "after_compaction";
+  event: CompactionHookEvent;
+  ctx: CompactionHookContext;
+  api: OpenClawPluginApi;
+  config: PluginConfig;
+  paths: ExtractionPaths;
+  runtimeDeps: ExtractionHookDeps;
+  apiToken?: string;
+}): Promise<void> {
+  const { hookName, event, ctx, api, config, paths, runtimeDeps, apiToken } = params;
+  const sessionFile = readTrimmedString(event.sessionFile);
+  let sessionId = readTrimmedString(ctx.sessionId);
+  let agentId = readTrimmedString(ctx.agentId);
+  let sessionKey = readTrimmedString(ctx.sessionKey);
+  let transcriptFileHint = sessionFile;
+
+  api.logger.info(
+    `reclaw ${hookName} received: sessionId=${sessionId ?? "none"} agentId=${agentId ?? "none"} ` +
+    `sessionKey=${sessionKey ?? "none"} sessionFile=${sessionFile ?? "none"} ` +
+    `compacted=${event.compactedCount} remaining=${event.messageCount}`,
+  );
+
+  if (!sessionId && sessionFile) {
+    const parsedSessionId = parseSessionIdFromTranscriptFileName(basename(sessionFile));
+    if (parsedSessionId) {
+      sessionId = parsedSessionId;
+    }
+  }
+
+  if (sessionId && (!agentId || !sessionKey)) {
+    const matchingCandidate = await resolveCandidateBySessionId(sessionId);
+    if (matchingCandidate) {
+      agentId ??= matchingCandidate.agentId;
+      sessionKey ??= matchingCandidate.sessionKey;
+    }
+  }
+
+  if (!sessionId || !agentId) {
+    const fallbackCandidate = await findFallbackMainCompactionSession(config.extraction.skipSessionTypes);
+    if (fallbackCandidate) {
+      sessionId ??= fallbackCandidate.candidate.sessionId;
+      agentId ??= fallbackCandidate.candidate.agentId;
+      sessionKey ??= fallbackCandidate.candidate.sessionKey;
+      transcriptFileHint ??= fallbackCandidate.transcriptFile;
+      api.logger.info(
+        `reclaw ${hookName} fallback resolved: sessionId=${sessionId ?? "none"} ` +
+        `agentId=${agentId ?? "none"} sessionKey=${sessionKey ?? "none"} ` +
+        `sessionFile=${transcriptFileHint ?? "none"}`,
+      );
+    }
+  }
+
+  if (!sessionId) {
+    api.logger.warn(
+      `reclaw extraction skipped ${hookName}: missing sessionId and no fallback ` +
+      `(ctx.sessionId=${readTrimmedString(ctx.sessionId) ?? "none"}, sessionFile=${sessionFile ?? "none"})`,
+    );
+    return;
+  }
+
+  await markCompactionObserved(paths.statePath, sessionId, {
+    messageCount: event.messageCount,
+    compactedCount: event.compactedCount,
+    ...(typeof event.tokenCount === "number" && Number.isFinite(event.tokenCount)
+      ? { tokenCount: event.tokenCount }
+      : {}),
+    ...(transcriptFileHint ? { sessionFile: transcriptFileHint } : {}),
+  });
+
+  if (!agentId) {
+    api.logger.warn(`reclaw extraction skipped ${sessionId}: missing agentId`);
+    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+      reason: "missing agentId",
+    });
+    return;
+  }
+
+  const resolvedSessionKey =
+    sessionKey ??
+    (await findSessionKeyForSession(agentId, sessionId));
+  if (!shouldExtractSession(resolvedSessionKey, config.extraction.skipSessionTypes)) {
+    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+      reason: resolvedSessionKey
+        ? `session type excluded (${resolvedSessionKey})`
+        : "session key not resolvable",
+    });
+    return;
+  }
+
+  const allMessages = await loadBeforeResetMessages({
+    event: {
+      messages: event.messages,
+      sessionFile: transcriptFileHint,
+    },
+    ctx: {
+      agentId,
+      sessionId,
+    },
+  });
+  if (!hasUserMessage(allMessages)) {
+    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+      reason: "no user messages",
+    });
+    return;
+  }
+
+  const state = await readState(paths.statePath);
+  const previousSuccessWatermark = getExtractedSessionWatermark(state, sessionId);
+  const currentWatermark = {
+    ...(findLatestMessageTimestamp(allMessages) ? { lastMessageAt: findLatestMessageTimestamp(allMessages) } : {}),
+    messageCount: allMessages.length,
+  };
+
+  if (!hasTranscriptAdvanced(currentWatermark, previousSuccessWatermark)) {
+    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+      reason: "no new messages since last extraction",
+    });
+    return;
+  }
+
+  const deltaMessages = selectMessagesAfterTimestamp(allMessages, previousSuccessWatermark?.lastMessageAt);
+  if (!hasUserMessage(deltaMessages)) {
+    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+      reason: "no new user messages since last extraction",
+    });
+    return;
+  }
+
+  const result = await runExtractionPipeline({
+    sessionId,
+    messages: deltaMessages,
+    transcriptMessageCount: allMessages.length,
+    paths,
+    memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
+    config,
+    deps: runtimeDeps,
+    logger: api.logger,
+    apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
+    apiToken,
+    sourceSessionKey: resolvedSessionKey,
+  });
+
+  if (result.status === "extracted") {
+    api.logger.info(`reclaw ${hookName} extracted ${sessionId}: entries=${result.entries}`);
+    await markCompactionStatus(paths.statePath, sessionId, "extracted", {
+      entries: result.entries,
+    });
+    return;
+  }
+
+  if (result.status === "failed") {
+    api.logger.warn(`reclaw ${hookName} failed ${sessionId}: ${result.error}`);
+    await markCompactionStatus(paths.statePath, sessionId, "failed", {
+      error: result.error,
+    });
+    return;
+  }
+
+  await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+    reason: result.reason === "retry_cap"
+      ? "retry cap reached for current transcript watermark"
+      : "no extraction changes",
+  });
+}
+
 export { listSessionCandidates, findSessionKeyForSession };
 
 export function registerExtractionHooks(
@@ -190,6 +387,17 @@ export function registerExtractionHooks(
     ...DEFAULT_DEPS,
     ...deps,
   };
+  if (deps.extractFromTranscript && !deps.repairExtractionOutput) {
+    runtimeDeps.repairExtractionOutput = async (opts) =>
+      deps.extractFromTranscript!({
+        transcript: opts.transcript,
+        subjects: opts.subjects,
+        existingEntries: opts.existingEntries,
+        model: opts.model,
+        apiBaseUrl: opts.apiBaseUrl,
+        apiToken: opts.apiToken,
+      });
+  }
 
   const apiToken = readGatewayToken(api.config);
 
@@ -269,176 +477,29 @@ export function registerExtractionHooks(
     });
   });
 
-  api.on("after_compaction", async (event, ctx) => {
-    const sessionFile = readTrimmedString(event.sessionFile);
-    let sessionId = readTrimmedString(ctx.sessionId);
-    let agentId = readTrimmedString(ctx.agentId);
-    let sessionKey = readTrimmedString(ctx.sessionKey);
-    let transcriptFileHint = sessionFile;
-    api.logger.info(
-      `reclaw after_compaction received: sessionId=${sessionId ?? "none"} agentId=${agentId ?? "none"} ` +
-      `sessionKey=${sessionKey ?? "none"} sessionFile=${sessionFile ?? "none"} ` +
-      `compacted=${event.compactedCount} remaining=${event.messageCount}`,
-    );
-
-    if (!sessionId && sessionFile) {
-      const parsedSessionId = parseSessionIdFromTranscriptFileName(basename(sessionFile));
-      if (parsedSessionId) {
-        sessionId = parsedSessionId;
-      }
-    }
-
-    if (sessionId && (!agentId || !sessionKey)) {
-      const matchingCandidate = await resolveCandidateBySessionId(sessionId);
-      if (matchingCandidate) {
-        agentId ??= matchingCandidate.agentId;
-        sessionKey ??= matchingCandidate.sessionKey;
-      }
-    }
-
-    if (!sessionId || !agentId) {
-      const fallbackCandidate = await findFallbackMainCompactionSession(config.extraction.skipSessionTypes);
-      if (fallbackCandidate) {
-        sessionId ??= fallbackCandidate.candidate.sessionId;
-        agentId ??= fallbackCandidate.candidate.agentId;
-        sessionKey ??= fallbackCandidate.candidate.sessionKey;
-        transcriptFileHint ??= fallbackCandidate.transcriptFile;
-        api.logger.info(
-          `reclaw after_compaction fallback resolved: sessionId=${sessionId ?? "none"} ` +
-          `agentId=${agentId ?? "none"} sessionKey=${sessionKey ?? "none"} ` +
-          `sessionFile=${transcriptFileHint ?? "none"}`,
-        );
-      }
-    }
-
-    if (!sessionId) {
-      api.logger.warn(
-        `reclaw extraction skipped after_compaction: missing sessionId and no fallback ` +
-        `(ctx.sessionId=${readTrimmedString(ctx.sessionId) ?? "none"}, sessionFile=${sessionFile ?? "none"})`,
-      );
-      return;
-    }
-
-    await markCompactionObserved(paths.statePath, sessionId, {
-      messageCount: event.messageCount,
-      compactedCount: event.compactedCount,
-      ...(typeof event.tokenCount === "number" && Number.isFinite(event.tokenCount)
-        ? { tokenCount: event.tokenCount }
-        : {}),
-      ...(transcriptFileHint ? { sessionFile: transcriptFileHint } : {}),
-    });
-
-    if (!agentId) {
-      api.logger.warn(`reclaw extraction skipped ${sessionId}: missing agentId`);
-      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-        reason: "missing agentId",
-      });
-      return;
-    }
-
-    const resolvedSessionKey =
-      sessionKey ??
-      (await findSessionKeyForSession(agentId, sessionId));
-    if (!shouldExtractSession(resolvedSessionKey, config.extraction.skipSessionTypes)) {
-      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-        reason: resolvedSessionKey
-          ? `session type excluded (${resolvedSessionKey})`
-          : "session key not resolvable",
-      });
-      return;
-    }
-
-    // Compaction keeps the same session id, so we run delta extraction using
-    // only transcript messages newer than the last successful extraction.
-
-    const transcriptFile = transcriptFileHint ?? (await findTranscriptFile(agentId, sessionId));
-    if (!transcriptFile) {
-      const message = "transcript file not found";
-      api.logger.warn(`reclaw after_compaction failed ${sessionId}: ${message}`);
-      await markFailed(paths.statePath, sessionId, message);
-      await markCompactionStatus(paths.statePath, sessionId, "failed", {
-        error: message,
-      });
-      return;
-    }
-
-    let messages;
-    try {
-      messages = await readTranscript(transcriptFile);
-    } catch (error) {
-      const message = normalizeError(error);
-      api.logger.warn(`reclaw after_compaction failed ${sessionId}: unable to read transcript (${message})`);
-      await markFailed(paths.statePath, sessionId, message);
-      await markCompactionStatus(paths.statePath, sessionId, "failed", {
-        error: message,
-      });
-      return;
-    }
-
-    if (!hasUserMessage(messages)) {
-      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-        reason: "no user messages",
-      });
-      return;
-    }
-
-    const stateBefore = await readState(paths.statePath);
-    const extractedBeforeAt = stateBefore.extractedSessions[sessionId]?.at;
-    const failedBeforeAt = stateBefore.failedSessions[sessionId]?.at;
-    const extractionWatermark =
-      stateBefore.extractedSessions[sessionId]?.lastMessageAt ?? stateBefore.extractedSessions[sessionId]?.at;
-    const deltaMessages = selectMessagesAfterTimestamp(messages, extractionWatermark);
-    if (deltaMessages.length === 0) {
-      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-        reason: "no new messages since last extraction",
-      });
-      return;
-    }
-
-    if (!hasUserMessage(deltaMessages)) {
-      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-        reason: "no new user messages since last extraction",
-      });
-      return;
-    }
-
-    await runExtractionPipeline({
-      sessionId,
-      messages: deltaMessages,
-      paths,
-      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
+  api.on("before_compaction", async (event, ctx) => {
+    await runCompactionExtraction({
+      hookName: "before_compaction",
+      event,
+      ctx,
+      api,
       config,
-      deps: runtimeDeps,
-      logger: api.logger,
-      apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
+      paths,
+      runtimeDeps,
       apiToken,
-      sourceSessionKey: resolvedSessionKey,
-      force: true,
     });
+  });
 
-    const stateAfter = await readState(paths.statePath);
-    const extractedAfter = stateAfter.extractedSessions[sessionId];
-    if (extractedAfter && extractedAfter.at !== extractedBeforeAt) {
-      api.logger.info(
-        `reclaw after_compaction extracted ${sessionId}: entries=${extractedAfter.entries ?? 0}`,
-      );
-      await markCompactionStatus(paths.statePath, sessionId, "extracted", {
-        entries: extractedAfter.entries ?? 0,
-      });
-      return;
-    }
-
-    const failedAfter = stateAfter.failedSessions[sessionId];
-    if (failedAfter && failedAfter.at !== failedBeforeAt) {
-      api.logger.warn(`reclaw after_compaction failed ${sessionId}: ${failedAfter.error}`);
-      await markCompactionStatus(paths.statePath, sessionId, "failed", {
-        error: failedAfter.error,
-      });
-      return;
-    }
-
-    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-      reason: "no extraction changes",
+  api.on("after_compaction", async (event, ctx) => {
+    await runCompactionExtraction({
+      hookName: "after_compaction",
+      event,
+      ctx,
+      api,
+      config,
+      paths,
+      runtimeDeps,
+      apiToken,
     });
   });
 

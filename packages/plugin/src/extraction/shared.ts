@@ -22,6 +22,25 @@ export interface ParsedExtractionOutput {
   processableLines: number;
 }
 
+function buildSubjectMatchPattern(candidate: string): RegExp | undefined {
+  const normalizedCandidate = candidate.trim().toLowerCase();
+  if (!normalizedCandidate) {
+    return undefined;
+  }
+
+  const tokenPattern = normalizedCandidate
+    .split(/[-_\s]+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0)
+    .map((token) => escapeRegex(token))
+    .join("[-_\\s]*");
+  if (!tokenPattern) {
+    return undefined;
+  }
+
+  return new RegExp(`(^|[^a-z0-9])${tokenPattern}([^a-z0-9]|$)`, "u");
+}
+
 export function findMentionedSubjects(transcript: string, subjects: SubjectRegistry): string[] {
   if (!transcript.trim()) {
     return [];
@@ -36,8 +55,14 @@ export function findMentionedSubjects(transcript: string, subjects: SubjectRegis
       continue;
     }
 
-    const pattern = new RegExp(`(^|[^a-z0-9-])${escapeRegex(normalizedSlug)}([^a-z0-9-]|$)`, "u");
-    if (pattern.test(transcriptLower)) {
+    const subject = subjects[slug];
+    const patterns = [
+      buildSubjectMatchPattern(normalizedSlug),
+      buildSubjectMatchPattern(normalizedSlug.replace(/[-_]+/gu, " ")),
+      buildSubjectMatchPattern(subject?.display ?? ""),
+    ].filter((pattern): pattern is RegExp => pattern instanceof RegExp);
+
+    if (patterns.some((pattern) => pattern.test(transcriptLower))) {
       matched.push(slug);
     }
   }
