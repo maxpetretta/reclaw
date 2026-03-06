@@ -199,7 +199,9 @@ export function registerExtractionHooks(
       return;
     }
 
-    const sessionKey = await findSessionKeyForSession(ctx.agentId, event.sessionId);
+    const sessionKey =
+      readTrimmedString(ctx.sessionKey) ??
+      (await findSessionKeyForSession(ctx.agentId, event.sessionId));
     if (!shouldExtractSession(sessionKey, config.extraction.skipSessionTypes)) {
       return;
     }

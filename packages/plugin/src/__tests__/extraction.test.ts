@@ -18,7 +18,7 @@ import { readRegistry, writeRegistry } from "../subjects/registry";
 type HookHandlers = {
   session_end?: (
     event: { sessionId: string; messageCount: number },
-    ctx: { agentId?: string; sessionId: string; workspaceDir?: string },
+    ctx: { agentId?: string; sessionId: string; sessionKey?: string; workspaceDir?: string },
   ) => Promise<void>;
   before_reset?: (
     event: { messages?: unknown[]; sessionFile?: string },
@@ -73,6 +73,10 @@ async function seedLogEntry(logDir: string, entry: LogEntry): Promise<void> {
   await appendEntry(join(logDir, "log.jsonl"), entry);
 }
 
+function mainSessionKey(agentId: string, sessionId: string): string {
+  return `agent:${agentId}:main:${sessionId}`;
+}
+
 async function seedMainSession(openclawHome: string, agentId: string, sessionId: string): Promise<void> {
   const sessionsDir = join(openclawHome, "agents", agentId, "sessions");
   await mkdir(sessionsDir, { recursive: true });
@@ -81,7 +85,7 @@ async function seedMainSession(openclawHome: string, agentId: string, sessionId:
   try {
     store = JSON.parse(await readFile(storePath, "utf8")) as Record<string, unknown>;
   } catch {}
-  store[`agent:${agentId}:main:${sessionId}`] = { sessionId };
+  store[mainSessionKey(agentId, sessionId)] = { sessionId };
   await writeFile(storePath, JSON.stringify(store, null, 2), "utf8");
 }
 
@@ -139,12 +143,20 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-1", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-1" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-1",
+        sessionKey: mainSessionKey("agent-1", "session-1"),
+      },
     );
 
     await handlers.session_end?.(
       { sessionId: "session-1", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-1" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-1",
+        sessionKey: mainSessionKey("agent-1", "session-1"),
+      },
     );
 
     const entries = await readLog(join(logDir, "log.jsonl"));
@@ -158,7 +170,7 @@ describe("extraction hooks", () => {
     expect(state.extractedSessions["session-1"]?.entries).toBe(1);
   });
 
-  test("session_end skips non-main sessions discovered from sessions.json key", async () => {
+  test("session_end skips non-main sessions from ctx.sessionKey", async () => {
     const sessionsDir = join(openclawHome, "agents", "agent-1", "sessions");
     await mkdir(sessionsDir, { recursive: true });
     await writeFile(
@@ -170,20 +182,6 @@ describe("extraction hooks", () => {
       ].join("\n"),
       "utf8",
     );
-    await writeFile(
-      join(sessionsDir, "sessions.json"),
-      JSON.stringify(
-        {
-          "sub:worker:agent-1": {
-            sessionId: "session-sub",
-          },
-        },
-        null,
-        2,
-      ),
-      "utf8",
-    );
-
     let llmCalls = 0;
     const handlers: HookHandlers = {};
     const api = createMockApi({}, handlers);
@@ -197,7 +195,11 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-sub", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-sub" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-sub",
+        sessionKey: "sub:worker:agent-1",
+      },
     );
 
     const state = await readState(join(logDir, "state.json"));
@@ -237,7 +239,11 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-types", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-types" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-types",
+        sessionKey: mainSessionKey("agent-1", "session-types"),
+      },
     );
 
     const registry = await readRegistry(join(logDir, "subjects.json"));
@@ -278,7 +284,11 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-cited-id", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-cited-id" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-cited-id",
+        sessionKey: mainSessionKey("agent-1", "session-cited-id"),
+      },
     );
 
     const entries = await readLog(join(logDir, "log.jsonl"));
@@ -320,7 +330,11 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-cite-usage", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-cite-usage" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-cite-usage",
+        sessionKey: mainSessionKey("agent-1", "session-cite-usage"),
+      },
     );
 
     const state = await readState(join(logDir, "state.json"));
@@ -359,7 +373,11 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-search-link", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-search-link" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-search-link",
+        sessionKey: mainSessionKey("agent-1", "session-search-link"),
+      },
     );
 
     const entries = await readLog(join(logDir, "log.jsonl"));
@@ -961,7 +979,11 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-context", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-context" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-context",
+        sessionKey: mainSessionKey("agent-1", "session-context"),
+      },
     );
 
     expect(existingIds).toContain("factold0001a");
@@ -1015,7 +1037,11 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-dup", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-dup" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-dup",
+        sessionKey: mainSessionKey("agent-1", "session-dup"),
+      },
     );
 
     const entries = await readLog(join(logDir, "log.jsonl"));
@@ -1048,7 +1074,11 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-no-user", messageCount: 2 },
-      { agentId: "agent-1", sessionId: "session-no-user" },
+      {
+        agentId: "agent-1",
+        sessionId: "session-no-user",
+        sessionKey: mainSessionKey("agent-1", "session-no-user"),
+      },
     );
 
     const state = await readState(join(logDir, "state.json"));
@@ -1120,7 +1150,12 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-h1", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-h1", workspaceDir },
+      {
+        agentId: "agent-1",
+        sessionId: "session-h1",
+        sessionKey: mainSessionKey("agent-1", "session-h1"),
+        workspaceDir,
+      },
     );
 
     const firstMemory = await readFile(memoryPath, "utf8");
@@ -1132,7 +1167,12 @@ describe("extraction hooks", () => {
 
     await handlers.session_end?.(
       { sessionId: "session-h2", messageCount: 5 },
-      { agentId: "agent-1", sessionId: "session-h2", workspaceDir },
+      {
+        agentId: "agent-1",
+        sessionId: "session-h2",
+        sessionKey: mainSessionKey("agent-1", "session-h2"),
+        workspaceDir,
+      },
     );
 
     const secondMemory = await readFile(memoryPath, "utf8");
