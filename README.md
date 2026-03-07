@@ -109,7 +109,7 @@ openclaw reclaw import resume     # resume an import job
 
 ## Architecture
 
-See [docs/SPECIFICATION.md](docs/SPECIFICATION.md) for the full event log architecture spec.
+See [docs/SPEC.md](docs/SPEC.md) for the full event log architecture spec.
 
 ## Releasing
 

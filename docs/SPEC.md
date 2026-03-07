@@ -315,7 +315,6 @@ Reclaw registers these lifecycle hooks:
 
 - `session_end`: primary full-session extraction path
 - `before_reset`: extraction before reset/new-session flows, using inline messages when available
-- `before_compaction`: preferred pre-compaction delta-extraction path when the runtime emits it
 - `after_compaction`: delta extraction for new transcript content after compaction
 - `gateway_start`: startup sweep for unextracted or failed sessions
 
@@ -330,7 +329,6 @@ By trigger:
 
 - `session_end`: reads the session transcript file
 - `before_reset`: prefers inline `messages[]`, then `sessionFile`, then transcript lookup by `(agentId, sessionId)`
-- `before_compaction`: prefers inline `messages[]`, then `sessionFile`, then transcript lookup by `(agentId, sessionId)`
 - `after_compaction`: uses the compaction event's `sessionFile` when possible, otherwise resolves the session and transcript by context or fallback discovery
 - `gateway_start`: scans known transcript sessions at startup
 
@@ -351,7 +349,9 @@ Existing subject history is capped per subject to keep prompt size bounded.
 
 - Extraction state is watermark-based, not simply "this session ran once already".
 - A later extraction for the same session id is allowed when the transcript has moved forward beyond the most recent successful or failed extraction watermark.
-- `before_compaction` and `after_compaction` are delta-oriented paths for long-running sessions that keep the same session id across compactions.
+- `after_compaction` is the delta-oriented path for long-running sessions that keep the same session id across compactions.
+- Compaction-triggered extraction must not block the compaction lifecycle; hook handlers return immediately and continue extraction work in the background.
+- Overlapping compaction events for the same session are coalesced so only one extraction runs at a time.
 - Failed extraction attempts are retried once for a given watermark. Newer transcript content may trigger a later extraction attempt.
 - State entries older than 30 days are pruned from extraction, failure, compaction, and snapshot-run bookkeeping.
 
