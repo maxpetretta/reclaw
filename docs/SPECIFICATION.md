@@ -188,13 +188,15 @@ Projection contract:
 - Manual edits to projection files are not preserved. Refresh rewrites the full file.
 - Projection refresh is best-effort. Projection write failures do not roll back successful log extraction/import writes.
 - A projection file may exist for a registry subject even when it has no events yet.
+- Each subject stays in a single markdown file; Reclaw does not split one subject across multiple projection files.
 
 Each file should contain:
 
 - the subject display name, slug, and subject type
 - a generated-at timestamp
-- a section for currently open items for that subject
-- a chronological event timeline with event ids preserved in the markdown
+- a single generic events section
+- one deterministic markdown block per log event for that subject, preserving the event id in the heading
+- event content rendered directly from the log without any summarization or reasoning layer
 
 Minimal shape:
 
@@ -205,14 +207,17 @@ Minimal shape:
 - Type: `project`
 - Generated: `2026-03-06T12:00:00.000Z`
 
-## Open Items
+## Events
 
-- [task/open] Write the backfill script (`Ht4vL_9qRx2D`)
+### Decision | 2026-02-20 | a3k9x_BmQ2yT
 
-## Timeline
+Queue-based retries for webhook delivery instead of synchronous retries.
 
-- 2026-02-20T14:20:00.000Z [decision] Queue-based retries for webhook delivery instead of synchronous retries (`a3k9x_BmQ2yT`)
-- 2026-02-20T15:10:00.000Z [task/open] Write the backfill script for failed webhook jobs (`Ht4vL_9qRx2D`)
+### Task/Open | 2026-02-20 | Ht4vL_9qRx2D
+
+Write the backfill script for failed webhook jobs.
+
+Detail: Watch error rates during the canary rollout.
 ```
 
 Refresh triggers:
@@ -679,7 +684,7 @@ A similar implementation should satisfy these checks:
 7. `memory_search` returns log-backed results with inline ids and combines them with builtin markdown semantic results when queried
 8. `memory_get` can read files, log entries by id, subject histories by `subject:<slug>`, and transcripts by `session:<id>`
 9. Extraction context can match subjects from transcript text beyond exact kebab-case slug mentions
-10. Subject projection files are generated under `<logDir>/memory/` and preserve event ids in markdown
+10. Subject projection files are generated under `<logDir>/memory/`, with one markdown file per subject and event ids preserved in the event headings
 11. Successful live extraction refreshes touched subject projections, and successful non-dry-run import refreshes the projection set
 12. Subject add/rename flows update the registry, and rename also rewrites historical log subjects
 13. Async import jobs can be queued, inspected, resumed, stopped, and executed by worker runs

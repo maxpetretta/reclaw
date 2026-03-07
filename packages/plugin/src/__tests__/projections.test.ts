@@ -69,13 +69,18 @@ describe("subject projections", () => {
 
     const authProjection = await readFile(resolveSubjectProjectionFilePath(projectionDir, "auth-migration"), "utf8");
     expect(authProjection).toContain("# Auth Migration");
-    expect(authProjection).toContain("## Open Items");
+    expect(authProjection).toContain("## Events");
+    expect(authProjection).toContain("### Fact | 2026-03-01 | factauth0001");
+    expect(authProjection).toContain("### Task/Open | 2026-03-02 | taskauth0001");
     expect(authProjection).toContain("Run the canary");
-    expect(authProjection).toContain("`taskauth0001`");
-    expect(authProjection).toContain("## Timeline");
+    expect(authProjection).toContain("Detail: Watch error rates");
+    expect(authProjection).not.toContain("## Open Items");
+    expect(authProjection).not.toContain("## Timeline");
+    expect(authProjection.split("Run the canary")).toHaveLength(2);
 
     const emptyProjection = await readFile(resolveSubjectProjectionFilePath(projectionDir, "empty-subject"), "utf8");
     expect(emptyProjection).toContain("# Empty Subject");
+    expect(emptyProjection).toContain("## Events");
     expect(emptyProjection).toContain("No events recorded yet.");
   });
 

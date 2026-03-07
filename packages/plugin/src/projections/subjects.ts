@@ -1,7 +1,6 @@
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { isEnoent } from "../lib/guards";
-import { isOpenItem } from "../log/query";
 import { readLog, type LogEntry } from "../log/schema";
 import { readRegistry, slugToDisplay, type SubjectRegistry } from "../subjects/registry";
 
@@ -47,26 +46,29 @@ function readSubjectType(slug: string, registry: SubjectRegistry): string {
   return registry[slug]?.type ?? "topic";
 }
 
-function renderOpenItems(entries: LogEntry[]): string[] {
-  const openItems = sortEntriesChronologically(entries.filter(isOpenItem));
-  if (openItems.length === 0) {
-    return ["- No open items recorded."];
+function formatProjectionEntryType(entry: LogEntry): string {
+  if (entry.type === "task") {
+    return entry.status === "done" ? "Task/Done" : "Task/Open";
   }
 
-  return openItems.map((entry) => {
-    const typeLabel = entry.type === "task" ? `${entry.type}/${entry.status}` : entry.type;
-    return `- [${typeLabel}] ${entry.content} (\`${entry.id}\`)`;
-  });
+  return `${entry.type.charAt(0).toUpperCase()}${entry.type.slice(1)}`;
 }
 
-function renderTimelineEntry(entry: LogEntry): string[] {
-  const typeLabel = entry.type === "task" ? `${entry.type}/${entry.status}` : entry.type;
-  const lines = [`- ${entry.timestamp} [${typeLabel}] ${entry.content} (\`${entry.id}\`)`];
-
-  if (entry.detail) {
-    lines.push(`  - Detail: ${entry.detail}`);
+function formatProjectionEntryDate(timestamp: string): string {
+  const parsedTimestamp = Date.parse(timestamp);
+  if (!Number.isFinite(parsedTimestamp)) {
+    return timestamp.trim();
   }
 
+  return new Date(parsedTimestamp).toISOString().slice(0, 10);
+}
+
+function renderEventBlock(entry: LogEntry): string[] {
+  const lines = [`### ${formatProjectionEntryType(entry)} | ${formatProjectionEntryDate(entry.timestamp)} | ${entry.id}`, ""];
+  lines.push(entry.content);
+  if (entry.detail) {
+    lines.push("", `Detail: ${entry.detail}`);
+  }
   return lines;
 }
 
@@ -78,10 +80,16 @@ export function renderSubjectProjectionMarkdown(params: {
 }): string {
   const generatedAt = params.generatedAt ?? new Date().toISOString();
   const orderedEntries = sortEntriesChronologically(params.entries);
-  const timelineLines =
+  const eventLines =
     orderedEntries.length > 0
-      ? orderedEntries.flatMap((entry) => renderTimelineEntry(entry))
-      : ["- No events recorded yet."];
+      ? orderedEntries.flatMap((entry, index) => {
+          const blockLines = renderEventBlock(entry);
+          if (index < orderedEntries.length - 1) {
+            blockLines.push("");
+          }
+          return blockLines;
+        })
+      : ["No events recorded yet."];
 
   return [
     `# ${readSubjectHeading(params.slug, params.registry)}`,
@@ -90,13 +98,9 @@ export function renderSubjectProjectionMarkdown(params: {
     `- Type: \`${readSubjectType(params.slug, params.registry)}\``,
     `- Generated: \`${generatedAt}\``,
     "",
-    "## Open Items",
+    "## Events",
     "",
-    ...renderOpenItems(orderedEntries),
-    "",
-    "## Timeline",
-    "",
-    ...timelineLines,
+    ...eventLines,
     "",
   ].join("\n");
 }
