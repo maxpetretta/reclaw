@@ -46,9 +46,9 @@ Reclaw does not use legacy daily memory files such as `memory/YYYY-MM-DD.md`.
   - user-maintained manual context
   - a nightly generated memory snapshot block
   - a latest-session handoff block
-- Reclaw also maintains per-subject markdown projection files under the workspace so builtin markdown indexing can semantically search event-log content.
+- Reclaw also maintains per-subject markdown projection files under its store directory so builtin markdown indexing can semantically search event-log content.
 - The event log is authoritative when `MEMORY.md` and the log disagree.
-- Semantic search applies to indexed markdown memory content surfaced through the builtin memory tool integration. Reclaw bridges event-log content into that leg through generated per-subject markdown projections; the raw `jsonl` log itself is still searched with structured filters and keyword matching, not a vector index.
+- Semantic search applies to indexed markdown memory content surfaced through the builtin memory tool integration. Reclaw bridges event-log content into that leg through generated per-subject markdown projections and registers the projection directory in `agents.defaults.memorySearch.extraPaths`; the raw `jsonl` log itself is still searched with structured filters and keyword matching, not a vector index.
 - Extraction only stores user-specific, durable information. Generic world knowledge and one-off browsing artifacts are filtered out.
 - Main-session traffic is the normal extraction scope. By default, session keys prefixed with `cron:`, `sub:`, or `hook:` are skipped.
 
@@ -80,6 +80,7 @@ Notes:
 
 - `cron.timezone` defaults to the local machine timezone when unset.
 - OpenClaw's existing `agents.defaults.memorySearch` settings remain the search/embedding config used by the builtin markdown search leg.
+- Reclaw appends `<logDir>/memory` to `agents.defaults.memorySearch.extraPaths` so builtin semantic search indexes generated subject projections.
 
 ## 5. On-Disk Layout
 
@@ -100,14 +101,12 @@ Related provenance data lives in OpenClaw's transcript store:
 
 For imported history, Reclaw can also write OpenClaw transcript sessions under `~/.openclaw/agents/<agentId>/sessions/`. The default imported agent id is `main`.
 
-Workspace-visible derived markdown used for builtin semantic search lives under:
+Generated markdown used for builtin semantic search lives under the Reclaw store:
 
 ```text
-<workspace>/
-  MEMORY.md
-  reclaw-memory/
-    subjects/
-      <subject-slug>.md
+~/.openclaw/reclaw/
+  memory/
+    <subject-slug>.md
 ```
 
 ## 6. Data Schemas
@@ -179,13 +178,13 @@ Subject contract:
 Reclaw maintains one generated markdown file per subject at:
 
 ```text
-<workspace>/reclaw-memory/subjects/<slug>.md
+<logDir>/memory/<slug>.md
 ```
 
 Projection contract:
 
 - Projection files are derived from `log.jsonl` plus `subjects.json`; they are not a second source of truth.
-- Files are workspace-visible markdown specifically so OpenClaw's builtin markdown indexer can semantically search event-log content.
+- Files live in a plugin-owned markdown directory that Reclaw adds to `agents.defaults.memorySearch.extraPaths` so OpenClaw's builtin markdown indexer can semantically search event-log content.
 - Manual edits to projection files are not preserved. Refresh rewrites the full file.
 - Projection refresh is best-effort. Projection write failures do not roll back successful log extraction/import writes.
 - A projection file may exist for a registry subject even when it has no events yet.
@@ -534,9 +533,11 @@ Example event-id response:
    - `session.maintenance.maxEntries = 100000`
    - `session.maintenance.resetArchiveRetention = false`
 6. Disables the bundled `session-memory` hook
-7. Ensures the snapshot and handoff markers exist in `MEMORY.md`
-8. Registers or updates the nightly snapshot cron job
-9. Fires a post-init system event instructing the main session to update `AGENTS.md` and `MEMORY.md` guidance blocks
+7. Adds `<logDir>/memory` to `agents.defaults.memorySearch.extraPaths`
+8. Ensures the snapshot and handoff markers exist in `MEMORY.md`
+9. Ensures the projection directory exists at `<logDir>/memory`
+10. Registers or updates the nightly snapshot cron job
+11. Fires a post-init system event instructing the main session to update `AGENTS.md` and `MEMORY.md` guidance blocks
 
 Important: `init` does not directly rewrite `AGENTS.md` or inject the `RECLAW MEMORY NOTICE` block into `MEMORY.md`. That is delegated to the post-init guidance flow.
 
@@ -552,9 +553,10 @@ It does not fully scrub all handoff or guidance content from the workspace.
 `openclaw reclaw verify` checks:
 
 - store files exist and are parseable
-- `openclaw.json` contains the expected slot, session-retention, hook, and memory-flush settings
+- `openclaw.json` contains the expected slot, session-retention, hook, memory-flush, and `memorySearch.extraPaths` settings
 - `AGENTS.md` contains Reclaw guidance markers
 - `MEMORY.md` contains snapshot markers, handoff markers, and the Reclaw notice block
+- the projection directory exists under `<logDir>/memory`
 - the nightly snapshot cron job exists and is enabled
 
 ### 10.2 Operational commands
@@ -677,8 +679,8 @@ A similar implementation should satisfy these checks:
 7. `memory_search` returns log-backed results with inline ids and combines them with builtin markdown semantic results when queried
 8. `memory_get` can read files, log entries by id, subject histories by `subject:<slug>`, and transcripts by `session:<id>`
 9. Extraction context can match subjects from transcript text beyond exact kebab-case slug mentions
-10. Subject projection files are generated under `reclaw-memory/subjects/` and preserve event ids in markdown
+10. Subject projection files are generated under `<logDir>/memory/` and preserve event ids in markdown
 11. Successful live extraction refreshes touched subject projections, and successful non-dry-run import refreshes the projection set
 12. Subject add/rename flows update the registry, and rename also rewrites historical log subjects
 13. Async import jobs can be queued, inspected, resumed, stopped, and executed by worker runs
-14. Verify checks the fully initialized workspace, including guidance markers, memory notice markers, and the projection directory
+14. Verify checks the fully initialized workspace and store, including guidance markers, memory notice markers, the projection directory, and the configured semantic-search extra path

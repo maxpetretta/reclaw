@@ -108,16 +108,54 @@ function removeSessionMemoryHook(root: Record<string, unknown>): void {
   delete entries["session-memory"];
 }
 
-export async function updateOpenClawConfigForInit(configPath: string): Promise<void> {
+function readStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function ensureProjectionMemoryPath(root: Record<string, unknown>, projectionDir: string): void {
+  const agents = getOrCreateObject(root, "agents");
+  const defaults = getOrCreateObject(agents, "defaults");
+  const memorySearch = getOrCreateObject(defaults, "memorySearch");
+  const extraPaths = readStringList(memorySearch.extraPaths);
+
+  if (!extraPaths.includes(projectionDir)) {
+    extraPaths.push(projectionDir);
+  }
+
+  memorySearch.extraPaths = extraPaths;
+}
+
+function removeProjectionMemoryPath(root: Record<string, unknown>, projectionDir: string): void {
+  const agents = getOrCreateObject(root, "agents");
+  const defaults = getOrCreateObject(agents, "defaults");
+  const memorySearch = getOrCreateObject(defaults, "memorySearch");
+  const extraPaths = readStringList(memorySearch.extraPaths).filter((entry) => entry !== projectionDir);
+
+  if (extraPaths.length > 0) {
+    memorySearch.extraPaths = extraPaths;
+  } else {
+    delete memorySearch.extraPaths;
+  }
+}
+
+export async function updateOpenClawConfigForInit(configPath: string, projectionDir: string): Promise<void> {
   const root = await readConfigObject(configPath);
   ensurePluginMemorySlot(root);
   ensureAgentMemoryFlushDisabled(root);
   ensureSessionRetentionForever(root);
   ensureSessionMemoryHookDisabled(root);
+  ensureProjectionMemoryPath(root, projectionDir);
   await writeConfigObject(configPath, root);
 }
 
-export async function updateOpenClawConfigForUninstall(configPath: string): Promise<void> {
+export async function updateOpenClawConfigForUninstall(configPath: string, projectionDir: string): Promise<void> {
   const root = await readConfigObjectOrEmpty(configPath);
   if (!root) {
     return;
@@ -127,5 +165,6 @@ export async function updateOpenClawConfigForUninstall(configPath: string): Prom
   removeAgentMemoryFlush(root);
   removeSessionRetention(root);
   removeSessionMemoryHook(root);
+  removeProjectionMemoryPath(root, projectionDir);
   await writeConfigObject(configPath, root);
 }

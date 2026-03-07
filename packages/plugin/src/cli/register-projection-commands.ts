@@ -1,5 +1,4 @@
 import { intro as clackIntro, log as clackLog, outro as clackOutro, spinner as clackSpinner } from "@clack/prompts";
-import { dirname } from "node:path";
 import type { PluginConfig } from "../config";
 import {
   listSubjectProjectionFiles,
@@ -17,7 +16,7 @@ export async function runProjectionRefresh(params: {
 }): Promise<Awaited<ReturnType<typeof refreshSubjectProjections>>> {
   const paths = resolvePaths(params.config, params.workspaceDir);
   return await refreshSubjectProjections({
-    workspaceDir: dirname(paths.memoryMdPath),
+    projectionDir: paths.projectionDir,
     logPath: paths.logPath,
     subjectsPath: paths.subjectsPath,
     ...(params.subject ? { subjects: [params.subject] } : {}),
@@ -29,7 +28,7 @@ export async function printProjectionList(params: {
   workspaceDir?: string;
 }): Promise<void> {
   const paths = resolvePaths(params.config, params.workspaceDir);
-  const files = await listSubjectProjectionFiles(dirname(paths.memoryMdPath));
+  const files = await listSubjectProjectionFiles(paths.projectionDir);
   if (files.length === 0) {
     console.log("No subject projection files.");
     return;
@@ -62,7 +61,7 @@ export function registerProjectionCommands(
     if (result.removedSubjects.length > 0) {
       clackLog.step(`Removed stale projections: ${result.removedSubjects.join(", ")}`);
     }
-    clackOutro(`Projection directory: ${result.subjectProjectionDir}`);
+    clackOutro(`Projection directory: ${result.projectionDir}`);
   };
 
   projection

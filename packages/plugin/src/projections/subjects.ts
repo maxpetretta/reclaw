@@ -5,16 +5,10 @@ import { isOpenItem } from "../log/query";
 import { readLog, type LogEntry } from "../log/schema";
 import { readRegistry, slugToDisplay, type SubjectRegistry } from "../subjects/registry";
 
-export const SUBJECT_PROJECTION_ROOT_DIRNAME = "reclaw-memory";
-export const SUBJECT_PROJECTION_SUBDIR = "subjects";
-
-export interface SubjectProjectionPaths {
-  projectionRootDir: string;
-  subjectProjectionDir: string;
-}
+export const SUBJECT_PROJECTION_DIRNAME = "memory";
 
 export interface SubjectProjectionRefreshResult {
-  subjectProjectionDir: string;
+  projectionDir: string;
   refreshedSubjects: string[];
   removedSubjects: string[];
 }
@@ -24,10 +18,10 @@ export interface SubjectProjectionFile {
   path: string;
 }
 
-function normalizeWorkspaceDir(workspaceDir: string): string {
-  const normalized = workspaceDir.trim();
+function normalizeProjectionDir(projectionDir: string): string {
+  const normalized = projectionDir.trim();
   if (!normalized) {
-    throw new Error("workspaceDir must be a non-empty string");
+    throw new Error("projectionDir must be a non-empty string");
   }
 
   return normalized;
@@ -124,9 +118,9 @@ function groupEntriesBySubject(entries: LogEntry[]): Map<string, LogEntry[]> {
   return grouped;
 }
 
-async function listProjectionSlugs(subjectProjectionDir: string): Promise<string[]> {
+async function listProjectionSlugs(projectionDir: string): Promise<string[]> {
   try {
-    const items = await readdir(subjectProjectionDir, { withFileTypes: true });
+    const items = await readdir(projectionDir, { withFileTypes: true });
     return items
       .filter((item) => item.isFile() && extname(item.name) === ".md")
       .map((item) => basename(item.name, ".md"))
@@ -140,28 +134,19 @@ async function listProjectionSlugs(subjectProjectionDir: string): Promise<string
   }
 }
 
-export function resolveSubjectProjectionPaths(workspaceDir: string): SubjectProjectionPaths {
-  const normalizedWorkspaceDir = normalizeWorkspaceDir(workspaceDir);
-  const projectionRootDir = join(normalizedWorkspaceDir, SUBJECT_PROJECTION_ROOT_DIRNAME);
-  return {
-    projectionRootDir,
-    subjectProjectionDir: join(projectionRootDir, SUBJECT_PROJECTION_SUBDIR),
-  };
+export function resolveSubjectProjectionFilePath(projectionDir: string, slug: string): string {
+  return join(normalizeProjectionDir(projectionDir), `${slug}.md`);
 }
 
-export function resolveSubjectProjectionFilePath(workspaceDir: string, slug: string): string {
-  return join(resolveSubjectProjectionPaths(workspaceDir).subjectProjectionDir, `${slug}.md`);
+export async function ensureSubjectProjectionDir(projectionDir: string): Promise<string> {
+  const normalizedProjectionDir = normalizeProjectionDir(projectionDir);
+  await mkdir(normalizedProjectionDir, { recursive: true });
+  return normalizedProjectionDir;
 }
 
-export async function ensureSubjectProjectionDir(workspaceDir: string): Promise<string> {
-  const { subjectProjectionDir } = resolveSubjectProjectionPaths(workspaceDir);
-  await mkdir(subjectProjectionDir, { recursive: true });
-  return subjectProjectionDir;
-}
-
-export async function removeSubjectProjection(workspaceDir: string, slug: string): Promise<void> {
+export async function removeSubjectProjection(projectionDir: string, slug: string): Promise<void> {
   try {
-    await rm(resolveSubjectProjectionFilePath(workspaceDir, slug));
+    await rm(resolveSubjectProjectionFilePath(projectionDir, slug));
   } catch (error) {
     if (isEnoent(error)) {
       return;
@@ -171,23 +156,22 @@ export async function removeSubjectProjection(workspaceDir: string, slug: string
   }
 }
 
-export async function listSubjectProjectionFiles(workspaceDir: string): Promise<SubjectProjectionFile[]> {
-  const { subjectProjectionDir } = resolveSubjectProjectionPaths(workspaceDir);
-  return (await listProjectionSlugs(subjectProjectionDir)).map((slug) => ({
+export async function listSubjectProjectionFiles(projectionDir: string): Promise<SubjectProjectionFile[]> {
+  const normalizedProjectionDir = normalizeProjectionDir(projectionDir);
+  return (await listProjectionSlugs(normalizedProjectionDir)).map((slug) => ({
     slug,
-    path: join(subjectProjectionDir, `${slug}.md`),
+    path: join(normalizedProjectionDir, `${slug}.md`),
   }));
 }
 
 export async function refreshSubjectProjections(params: {
-  workspaceDir: string;
+  projectionDir: string;
   logPath: string;
   subjectsPath: string;
   subjects?: string[];
 }): Promise<SubjectProjectionRefreshResult> {
-  const normalizedWorkspaceDir = normalizeWorkspaceDir(params.workspaceDir);
-  const { subjectProjectionDir } = resolveSubjectProjectionPaths(normalizedWorkspaceDir);
-  await mkdir(subjectProjectionDir, { recursive: true });
+  const normalizedProjectionDir = normalizeProjectionDir(params.projectionDir);
+  await mkdir(normalizedProjectionDir, { recursive: true });
 
   const [registry, entries] = await Promise.all([
     readRegistry(params.subjectsPath),
@@ -216,26 +200,26 @@ export async function refreshSubjectProjections(params: {
       entries: entriesBySubject.get(subject) ?? [],
       generatedAt,
     });
-    await writeFile(resolveSubjectProjectionFilePath(normalizedWorkspaceDir, subject), projection, "utf8");
+    await writeFile(resolveSubjectProjectionFilePath(normalizedProjectionDir, subject), projection, "utf8");
     refreshedSubjects.push(subject);
   }
 
   const removedSubjects: string[] = [];
   if (!Array.isArray(params.subjects) || params.subjects.length === 0) {
-    const existingProjectionSlugs = await listProjectionSlugs(subjectProjectionDir);
+    const existingProjectionSlugs = await listProjectionSlugs(normalizedProjectionDir);
     const expectedSubjects = new Set(targetSubjects);
     for (const slug of existingProjectionSlugs) {
       if (expectedSubjects.has(slug)) {
         continue;
       }
 
-      await removeSubjectProjection(normalizedWorkspaceDir, slug);
+      await removeSubjectProjection(normalizedProjectionDir, slug);
       removedSubjects.push(slug);
     }
   }
 
   return {
-    subjectProjectionDir,
+    projectionDir: normalizedProjectionDir,
     refreshedSubjects,
     removedSubjects,
   };

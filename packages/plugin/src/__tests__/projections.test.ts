@@ -12,18 +12,17 @@ import { writeRegistry } from "../subjects/registry";
 
 describe("subject projections", () => {
   let tempDir = "";
-  let workspaceDir = "";
+  let projectionDir = "";
   let logDir = "";
   let logPath = "";
   let subjectsPath = "";
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "reclaw-projections-"));
-    workspaceDir = join(tempDir, "workspace");
     logDir = join(tempDir, "reclaw");
     logPath = join(logDir, "log.jsonl");
     subjectsPath = join(logDir, "subjects.json");
-    await mkdir(workspaceDir, { recursive: true });
+    projectionDir = join(logDir, "memory");
     await mkdir(logDir, { recursive: true });
   });
 
@@ -55,12 +54,12 @@ describe("subject projections", () => {
       session: "session-2",
     });
 
-    const stalePath = resolveSubjectProjectionFilePath(workspaceDir, "stale-subject");
-    await mkdir(join(workspaceDir, "reclaw-memory", "subjects"), { recursive: true });
+    const stalePath = resolveSubjectProjectionFilePath(projectionDir, "stale-subject");
+    await mkdir(projectionDir, { recursive: true });
     await writeFile(stalePath, "# stale\n", "utf8");
 
     const result = await refreshSubjectProjections({
-      workspaceDir,
+      projectionDir,
       logPath,
       subjectsPath,
     });
@@ -68,14 +67,14 @@ describe("subject projections", () => {
     expect(result.refreshedSubjects).toEqual(["auth-migration", "empty-subject"]);
     expect(result.removedSubjects).toEqual(["stale-subject"]);
 
-    const authProjection = await readFile(resolveSubjectProjectionFilePath(workspaceDir, "auth-migration"), "utf8");
+    const authProjection = await readFile(resolveSubjectProjectionFilePath(projectionDir, "auth-migration"), "utf8");
     expect(authProjection).toContain("# Auth Migration");
     expect(authProjection).toContain("## Open Items");
     expect(authProjection).toContain("Run the canary");
     expect(authProjection).toContain("`taskauth0001`");
     expect(authProjection).toContain("## Timeline");
 
-    const emptyProjection = await readFile(resolveSubjectProjectionFilePath(workspaceDir, "empty-subject"), "utf8");
+    const emptyProjection = await readFile(resolveSubjectProjectionFilePath(projectionDir, "empty-subject"), "utf8");
     expect(emptyProjection).toContain("# Empty Subject");
     expect(emptyProjection).toContain("No events recorded yet.");
   });
@@ -85,14 +84,14 @@ describe("subject projections", () => {
       "auth-migration": { display: "Auth Migration", type: "project" },
     });
     await refreshSubjectProjections({
-      workspaceDir,
+      projectionDir,
       logPath,
       subjectsPath,
     });
 
-    const files = await listSubjectProjectionFiles(workspaceDir);
+    const files = await listSubjectProjectionFiles(projectionDir);
     expect(files).toHaveLength(1);
     expect(files[0]?.slug).toBe("auth-migration");
-    expect(files[0]?.path).toBe(resolveSubjectProjectionFilePath(workspaceDir, "auth-migration"));
+    expect(files[0]?.path).toBe(resolveSubjectProjectionFilePath(projectionDir, "auth-migration"));
   });
 });

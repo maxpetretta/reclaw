@@ -98,13 +98,18 @@ describe("cli init helpers", () => {
       jobs?: Array<{ name?: string }>;
     };
     const memoryContent = await readFile(memoryPath, "utf8");
-    const projectionDirEntries = await readdir(join(workspaceDir, "reclaw-memory", "subjects"));
+    const projectionDirEntries = await readdir(join(logDir, "memory"));
 
     expect(logExists).toBe(true);
     expect(subjectsText.trim()).toBe("{}");
     expect(stateText).toContain("extractedSessions");
     expect((openClawConfig.plugins as { slots?: { memory?: string } }).slots?.memory).toBe("reclaw");
     expect((openClawConfig.plugins as { allow?: string[] }).allow).toContain("reclaw");
+    expect(
+      (
+        openClawConfig.agents as { defaults?: { memorySearch?: { extraPaths?: string[] } } }
+      ).defaults?.memorySearch?.extraPaths,
+    ).toContain(join(logDir, "memory"));
     expect(
       (
         openClawConfig.agents as { defaults?: { compaction?: { memoryFlush?: { enabled?: unknown } } } }
@@ -138,8 +143,7 @@ describe("cli init helpers", () => {
       openClawConfigPath: join(openClawHome, "openclaw.json"),
       agentsMdPath: join(workspaceDir, "AGENTS.md"),
       memoryMdPath: join(workspaceDir, "MEMORY.md"),
-      projectionRootDir: join(workspaceDir, "reclaw-memory"),
-      subjectProjectionDir: join(workspaceDir, "reclaw-memory", "subjects"),
+      projectionDir: join(logDir, "memory"),
     };
 
     const eventText = await buildPostInitSystemEventText(paths);
@@ -178,7 +182,7 @@ describe("cli init helpers", () => {
 
     const openClawConfig = JSON.parse(await readFile(join(openClawHome, "openclaw.json"), "utf8")) as {
       plugins?: { slots?: Record<string, unknown> };
-      agents?: { defaults?: { compaction?: Record<string, unknown> } };
+      agents?: { defaults?: { compaction?: Record<string, unknown>; memorySearch?: { extraPaths?: string[] } } };
     };
     const memoryContent = await readFile(memoryPath, "utf8");
     const logExists = await Bun.file(join(logDir, "log.jsonl")).exists();
@@ -187,6 +191,7 @@ describe("cli init helpers", () => {
 
     expect(openClawConfig.plugins?.slots?.memory).toBeUndefined();
     expect(openClawConfig.agents?.defaults?.compaction?.memoryFlush).toBeUndefined();
+    expect(openClawConfig.agents?.defaults?.memorySearch?.extraPaths ?? []).not.toContain(join(logDir, "memory"));
 
     expect(memoryContent).not.toContain(BRIEFING_BEGIN_MARKER);
     expect(memoryContent).not.toContain(BRIEFING_END_MARKER);

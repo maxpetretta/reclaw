@@ -1,5 +1,4 @@
 import { log as clackLog } from "@clack/prompts";
-import { dirname } from "node:path";
 import type { PluginConfig } from "../config";
 import { ensureSubject, readRegistry, renameSubject, writeRegistry } from "../subjects/registry";
 import { refreshSubjectProjections, removeSubjectProjection } from "../projections/subjects";
@@ -71,7 +70,7 @@ export function registerSubjectCommands(
 
       try {
         await refreshSubjectProjections({
-          workspaceDir: dirname(paths.memoryMdPath),
+          projectionDir: paths.projectionDir,
           logPath: paths.logPath,
           subjectsPath: paths.subjectsPath,
           subjects: [normalizedSlug],
@@ -101,9 +100,9 @@ export function registerSubjectCommands(
       const paths = resolvePaths(params.config, params.workspaceDir);
       await renameSubject(paths.subjectsPath, paths.logPath, oldSlug.trim(), newSlug.trim());
       try {
-        await removeSubjectProjection(dirname(paths.memoryMdPath), oldSlug.trim());
+        await removeSubjectProjection(paths.projectionDir, oldSlug.trim());
         await refreshSubjectProjections({
-          workspaceDir: dirname(paths.memoryMdPath),
+          projectionDir: paths.projectionDir,
           logPath: paths.logPath,
           subjectsPath: paths.subjectsPath,
           subjects: [newSlug.trim()],
