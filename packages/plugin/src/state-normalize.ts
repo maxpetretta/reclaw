@@ -14,7 +14,7 @@ import type {
   ReclawState,
   SnapshotRunState,
   SnapshotRunStatus,
-} from "./state";
+} from "./state/types";
 
 const IMPORTED_PLATFORM_SET = new Set(["chatgpt", "claude", "grok", "openclaw"]);
 const IMPORT_JOB_STATUS_SET: ReadonlySet<ImportJobStatus> = new Set([

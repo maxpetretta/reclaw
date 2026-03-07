@@ -1,22 +1,16 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { dirname } from "node:path";
 import type { PluginConfig } from "../config";
 import { normalizeError } from "../lib/guards";
 import {
   DEFAULT_EXTRACTION_CONTEXT_MAX_PER_SUBJECT,
   findMentionedSubjects,
-  parseExtractionJsonl,
-  type ParsedExtractionEntry,
 } from "../extraction/shared";
-import { queryByIds, queryExtractionContext } from "../log/query";
+import { queryExtractionContext } from "../log/query";
 import { appendEntry, finalizeEntry, type LogEntry } from "../log/schema";
-import { applyLastHandoffBlock } from "../memory/handoff";
-import { refreshSubjectProjections } from "../projections/subjects";
 import {
   compareTranscriptWatermarks,
   getExtractedSessionWatermark,
   getFailedSessionWatermark,
-  incrementEventUsage,
   markExtracted,
   markFailed,
   pruneState,
@@ -26,11 +20,18 @@ import {
 import { readRegistry, upsertSubjectFromExtraction } from "../subjects/registry";
 import { formatTranscript, type TranscriptMessage } from "../lib/transcript";
 import { extractFromTranscript, type ExtractionModelResult } from "../lib/llm";
+import { validateLiveExtractionOutput } from "./pipeline-output";
+import {
+  recordTranscriptCitationUsage,
+  refreshTouchedSubjectProjections,
+  writeLatestHandoff,
+} from "./pipeline-side-effects";
 
 export interface ExtractionPaths {
   logPath: string;
   subjectsPath: string;
   statePath: string;
+  projectionDir: string;
 }
 
 export interface ExtractionPipelineDeps {
@@ -75,49 +76,6 @@ export type ExtractionPipelineResult =
   | { status: "extracted"; entries: number }
   | { status: "failed"; error: string };
 
-const EVENT_ID_LENGTH = 12;
-const TRANSCRIPT_EVENT_ID_PATTERN = /\[([A-Za-z0-9_-]{12})\]/gu;
-
-function extractReferencedEventIds(transcript: string): string[] {
-  if (!transcript.trim()) {
-    return [];
-  }
-
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  const tryPush = (candidate: string): void => {
-    if (candidate.length !== EVENT_ID_LENGTH || seen.has(candidate)) {
-      return;
-    }
-    seen.add(candidate);
-    ids.push(candidate);
-  };
-
-  const bracketMatches = transcript.matchAll(TRANSCRIPT_EVENT_ID_PATTERN);
-  for (const match of bracketMatches) {
-    if (match[1]) {
-      tryPush(match[1]);
-    }
-  }
-
-  return ids;
-}
-
-async function recordTranscriptCitationUsage(statePath: string, logPath: string, transcript: string): Promise<void> {
-  const transcriptEventIds = extractReferencedEventIds(transcript);
-  if (transcriptEventIds.length === 0) {
-    return;
-  }
-
-  const existingCitedEntries = await queryByIds(logPath, transcriptEventIds);
-  if (existingCitedEntries.length === 0) {
-    return;
-  }
-
-  const citedIds = [...new Set(existingCitedEntries.map((entry) => entry.id))];
-  await incrementEventUsage(statePath, citedIds, "citation");
-}
-
 function findLatestMessageTimestamp(messages: TranscriptMessage[]): string | undefined {
   let latestTimestampMs = Number.NEGATIVE_INFINITY;
 
@@ -129,69 +87,6 @@ function findLatestMessageTimestamp(messages: TranscriptMessage[]): string | und
   }
 
   return Number.isFinite(latestTimestampMs) ? new Date(latestTimestampMs).toISOString() : undefined;
-}
-
-function toOutputRecord(output: string | ExtractionModelResult): ExtractionModelResult {
-  return typeof output === "string" ? { output } : output;
-}
-
-function describeLiveOutputIssue(parsedEntries: ParsedExtractionEntry[]): string | undefined {
-  const handoffCount = parsedEntries.filter((entry) => entry.entry.type === "handoff").length;
-  if (handoffCount !== 1) {
-    return `live extraction output must contain exactly one handoff event; found ${handoffCount}`;
-  }
-
-  const lastEntry = parsedEntries[parsedEntries.length - 1];
-  if (!lastEntry || lastEntry.entry.type !== "handoff") {
-    return "live extraction output must end with the handoff event";
-  }
-
-  return undefined;
-}
-
-async function validateLiveExtractionOutput(params: {
-  sessionId: string;
-  transcript: string;
-  subjects: Awaited<ReturnType<typeof readRegistry>>;
-  existingEntries: LogEntry[];
-  outputRecord: ExtractionModelResult;
-  deps: ExtractionPipelineDeps;
-  model: string;
-  logger: OpenClawPluginApi["logger"];
-  apiBaseUrl: string;
-  apiToken?: string;
-}): Promise<{ parsedEntries: ParsedExtractionEntry[]; invalidLineCount: number; outputRecord: ExtractionModelResult }> {
-  let outputRecord = params.outputRecord;
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const parsed = parseExtractionJsonl(outputRecord.output);
-    const issue = describeLiveOutputIssue(parsed.entries);
-    if (!issue) {
-      return {
-        parsedEntries: parsed.entries,
-        invalidLineCount: parsed.invalidLineCount,
-        outputRecord,
-      };
-    }
-
-    if (attempt > 0) {
-      throw new Error(`extraction repair failed: ${issue}`);
-    }
-
-    params.logger.warn(`reclaw extraction for ${params.sessionId}: repairing output (${issue})`);
-    outputRecord = toOutputRecord(await params.deps.repairExtractionOutput({
-      transcript: params.transcript,
-      subjects: params.subjects,
-      existingEntries: params.existingEntries,
-      invalidOutput: outputRecord.output,
-      issue,
-      model: params.model,
-      apiBaseUrl: params.apiBaseUrl,
-      apiToken: params.apiToken,
-    }));
-  }
-
-  throw new Error("extraction repair failed");
 }
 
 export async function runExtractionPipeline(params: ExtractionPipelineParams): Promise<ExtractionPipelineResult> {
@@ -234,7 +129,11 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
   let workerSessionKey: string | undefined;
 
   try {
-    await recordTranscriptCitationUsage(params.paths.statePath, params.paths.logPath, transcript);
+    await recordTranscriptCitationUsage({
+      statePath: params.paths.statePath,
+      logPath: params.paths.logPath,
+      transcript,
+    });
 
     const subjects = await readRegistry(params.paths.subjectsPath);
     const transcriptSubjects = findMentionedSubjects(transcript, subjects);
@@ -249,7 +148,8 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
       apiBaseUrl: params.apiBaseUrl,
       apiToken: params.apiToken,
     });
-    const initialOutputRecord = toOutputRecord(extractionModelResult);
+    const initialOutputRecord =
+      typeof extractionModelResult === "string" ? { output: extractionModelResult } : extractionModelResult;
     workerSessionId = initialOutputRecord.workerSessionId;
     workerSessionKey = initialOutputRecord.workerSessionKey;
     const validatedOutput = await validateLiveExtractionOutput({
@@ -258,7 +158,7 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
       subjects,
       existingEntries,
       outputRecord: initialOutputRecord,
-      deps: params.deps,
+      repairExtractionOutput: params.deps.repairExtractionOutput,
       model: params.config.extraction.model,
       logger: params.logger,
       apiBaseUrl: params.apiBaseUrl,
@@ -271,7 +171,7 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
     let appendedCount = 0;
     const appendedEntries: Array<ReturnType<typeof finalizeEntry>> = [];
     const touchedSubjects = new Set<string>();
-    const parsedEntries: ParsedExtractionEntry[] = validatedOutput.parsedEntries;
+    const parsedEntries = validatedOutput.parsedEntries;
 
     for (const parsedEntry of parsedEntries) {
       const entry = finalizeEntry(parsedEntry.entry, { sessionId: params.sessionId });
@@ -292,30 +192,23 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
     }
 
     const finalHandoff = appendedEntries[appendedEntries.length - 1];
-    if (finalHandoff?.type === "handoff") {
-      try {
-        const memoryContent = await params.deps.readMemoryFile(params.memoryMdPath);
-        const updatedMemory = applyLastHandoffBlock(memoryContent, finalHandoff, {
-          sessionKey: params.sourceSessionKey,
-        });
-        await params.deps.writeMemoryFile(params.memoryMdPath, updatedMemory);
-      } catch (error) {
-        params.logger.warn(`reclaw handoff write failed for ${params.sessionId}: ${normalizeError(error)}`);
-      }
-    }
-
-    if (touchedSubjects.size > 0) {
-      try {
-        await refreshSubjectProjections({
-          workspaceDir: dirname(params.memoryMdPath),
-          logPath: params.paths.logPath,
-          subjectsPath: params.paths.subjectsPath,
-          subjects: [...touchedSubjects],
-        });
-      } catch (error) {
-        params.logger.warn(`reclaw subject projection refresh failed for ${params.sessionId}: ${normalizeError(error)}`);
-      }
-    }
+    await writeLatestHandoff({
+      sessionId: params.sessionId,
+      finalHandoff,
+      memoryMdPath: params.memoryMdPath,
+      sourceSessionKey: params.sourceSessionKey,
+      readMemoryFile: params.deps.readMemoryFile,
+      writeMemoryFile: params.deps.writeMemoryFile,
+      logger: params.logger,
+    });
+    await refreshTouchedSubjectProjections({
+      sessionId: params.sessionId,
+      projectionDir: params.paths.projectionDir,
+      logPath: params.paths.logPath,
+      subjectsPath: params.paths.subjectsPath,
+      touchedSubjects,
+      logger: params.logger,
+    });
 
     await markExtracted(params.paths.statePath, params.sessionId, appendedCount, {
       ...(lastMessageAt ? { lastMessageAt } : {}),
