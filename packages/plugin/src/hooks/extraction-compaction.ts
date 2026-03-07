@@ -35,6 +35,7 @@ import {
 } from "./extraction-common";
 
 const COMPACTION_FALLBACK_WINDOW_MS = 10 * 60 * 1000;
+const ACTIVE_COMPACTION_EXTRACTIONS = new Set<string>();
 
 interface CandidateWithTranscript {
   candidate: SessionCandidate;
@@ -142,7 +143,7 @@ export interface CompactionHookContext {
 }
 
 export async function runCompactionExtraction(params: {
-  hookName: "before_compaction" | "after_compaction";
+  hookName: "after_compaction";
   event: CompactionHookEvent;
   ctx: CompactionHookContext;
   api: OpenClawPluginApi;
@@ -211,98 +212,112 @@ export async function runCompactionExtraction(params: {
     ...(transcriptFileHint ? { sessionFile: transcriptFileHint } : {}),
   });
 
-  if (!agentId) {
-    api.logger.warn(`reclaw extraction skipped ${sessionId}: missing agentId`);
+  if (ACTIVE_COMPACTION_EXTRACTIONS.has(sessionId)) {
+    api.logger.info(`reclaw ${hookName} skipped ${sessionId}: extraction already in progress`);
     await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-      reason: "missing agentId",
+      reason: "extraction already in progress",
     });
     return;
   }
 
-  const resolvedSessionKey =
-    sessionKey ??
-    (await findSessionKeyForSession(agentId, sessionId));
-  if (!shouldExtractSession(resolvedSessionKey, config.extraction.skipSessionTypes)) {
-    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-      reason: resolvedSessionKey
-        ? `session type excluded (${resolvedSessionKey})`
-        : "session key not resolvable",
-    });
-    return;
-  }
+  ACTIVE_COMPACTION_EXTRACTIONS.add(sessionId);
 
-  const allMessages = await loadBeforeResetMessages({
-    event: {
-      messages: event.messages,
-      sessionFile: transcriptFileHint,
-    },
-    ctx: {
-      agentId,
+  try {
+    if (!agentId) {
+      api.logger.warn(`reclaw extraction skipped ${sessionId}: missing agentId`);
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: "missing agentId",
+      });
+      return;
+    }
+
+    const resolvedSessionKey =
+      sessionKey ??
+      (await findSessionKeyForSession(agentId, sessionId));
+    if (!shouldExtractSession(resolvedSessionKey, config.extraction.skipSessionTypes)) {
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: resolvedSessionKey
+          ? `session type excluded (${resolvedSessionKey})`
+          : "session key not resolvable",
+      });
+      return;
+    }
+
+    const allMessages = await loadBeforeResetMessages({
+      event: {
+        messages: event.messages,
+        sessionFile: transcriptFileHint,
+      },
+      ctx: {
+        agentId,
+        sessionId,
+      },
+    });
+    if (!hasUserMessage(allMessages)) {
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: "no user messages",
+      });
+      return;
+    }
+
+    const state = await readState(paths.statePath);
+    const previousSuccessWatermark = getExtractedSessionWatermark(state, sessionId);
+    const currentWatermark = {
+      ...(findLatestMessageTimestamp(allMessages) ? { lastMessageAt: findLatestMessageTimestamp(allMessages) } : {}),
+      messageCount: allMessages.length,
+    };
+
+    if (!hasTranscriptAdvanced(currentWatermark, previousSuccessWatermark)) {
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: "no new messages since last extraction",
+      });
+      return;
+    }
+
+    const deltaMessages = selectMessagesAfterTimestamp(allMessages, previousSuccessWatermark?.lastMessageAt);
+    if (!hasUserMessage(deltaMessages)) {
+      await markCompactionStatus(paths.statePath, sessionId, "skipped", {
+        reason: "no new user messages since last extraction",
+      });
+      return;
+    }
+
+    const result = await runExtractionPipeline({
       sessionId,
-    },
-  });
-  if (!hasUserMessage(allMessages)) {
+      messages: deltaMessages,
+      transcriptMessageCount: allMessages.length,
+      paths,
+      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
+      config,
+      deps: runtimeDeps,
+      logger: api.logger,
+      apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
+      apiToken,
+      sourceSessionKey: resolvedSessionKey,
+    });
+
+    if (result.status === "extracted") {
+      api.logger.info(`reclaw ${hookName} extracted ${sessionId}: entries=${result.entries}`);
+      await markCompactionStatus(paths.statePath, sessionId, "extracted", {
+        entries: result.entries,
+      });
+      return;
+    }
+
+    if (result.status === "failed") {
+      api.logger.warn(`reclaw ${hookName} failed ${sessionId}: ${result.error}`);
+      await markCompactionStatus(paths.statePath, sessionId, "failed", {
+        error: result.error,
+      });
+      return;
+    }
+
     await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-      reason: "no user messages",
+      reason: result.reason === "retry_cap"
+        ? "retry cap reached for current transcript watermark"
+        : "no extraction changes",
     });
-    return;
+  } finally {
+    ACTIVE_COMPACTION_EXTRACTIONS.delete(sessionId);
   }
-
-  const state = await readState(paths.statePath);
-  const previousSuccessWatermark = getExtractedSessionWatermark(state, sessionId);
-  const currentWatermark = {
-    ...(findLatestMessageTimestamp(allMessages) ? { lastMessageAt: findLatestMessageTimestamp(allMessages) } : {}),
-    messageCount: allMessages.length,
-  };
-
-  if (!hasTranscriptAdvanced(currentWatermark, previousSuccessWatermark)) {
-    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-      reason: "no new messages since last extraction",
-    });
-    return;
-  }
-
-  const deltaMessages = selectMessagesAfterTimestamp(allMessages, previousSuccessWatermark?.lastMessageAt);
-  if (!hasUserMessage(deltaMessages)) {
-    await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-      reason: "no new user messages since last extraction",
-    });
-    return;
-  }
-
-  const result = await runExtractionPipeline({
-    sessionId,
-    messages: deltaMessages,
-    transcriptMessageCount: allMessages.length,
-    paths,
-    memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
-    config,
-    deps: runtimeDeps,
-    logger: api.logger,
-    apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
-    apiToken,
-    sourceSessionKey: resolvedSessionKey,
-  });
-
-  if (result.status === "extracted") {
-    api.logger.info(`reclaw ${hookName} extracted ${sessionId}: entries=${result.entries}`);
-    await markCompactionStatus(paths.statePath, sessionId, "extracted", {
-      entries: result.entries,
-    });
-    return;
-  }
-
-  if (result.status === "failed") {
-    api.logger.warn(`reclaw ${hookName} failed ${sessionId}: ${result.error}`);
-    await markCompactionStatus(paths.statePath, sessionId, "failed", {
-      error: result.error,
-    });
-    return;
-  }
-
-  await markCompactionStatus(paths.statePath, sessionId, "skipped", {
-    reason: result.reason === "retry_cap"
-      ? "retry cap reached for current transcript watermark"
-      : "no extraction changes",
-  });
 }

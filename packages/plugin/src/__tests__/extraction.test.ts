@@ -19,20 +19,16 @@ type HookHandlers = {
   session_end?: (
     event: { sessionId: string; messageCount: number },
     ctx: { agentId?: string; sessionId: string; sessionKey?: string; workspaceDir?: string },
-  ) => Promise<void>;
+  ) => void | Promise<void>;
   before_reset?: (
     event: { messages?: unknown[]; sessionFile?: string },
     ctx: { agentId?: string; sessionId?: string; sessionKey?: string; workspaceDir?: string },
-  ) => Promise<void>;
-  before_compaction?: (
+  ) => void | Promise<void>;
+  after_compaction?: (
     event: { messages?: unknown[]; messageCount: number; compactedCount: number; tokenCount?: number; sessionFile?: string },
     ctx: { agentId?: string; sessionId?: string; sessionKey?: string; workspaceDir?: string },
-  ) => Promise<void>;
-  after_compaction?: (
-    event: { messageCount: number; compactedCount: number; tokenCount?: number; sessionFile?: string },
-    ctx: { agentId?: string; sessionId?: string; sessionKey?: string; workspaceDir?: string },
-  ) => Promise<void>;
-  gateway_start?: (event: { port: number }) => Promise<void>;
+  ) => void | Promise<void>;
+  gateway_start?: (event: { port: number }) => void | Promise<void>;
 };
 
 function createMockApi(config: unknown, handlers: HookHandlers): OpenClawPluginApi {
@@ -45,8 +41,8 @@ function createMockApi(config: unknown, handlers: HookHandlers): OpenClawPluginA
       debug() {},
     },
     registerHook() {},
-    on(hookName: string, handler: (...args: unknown[]) => Promise<void>) {
-      (handlers as Record<string, (...args: unknown[]) => Promise<void>>)[hookName] = handler;
+    on(hookName: string, handler: (...args: unknown[]) => void | Promise<void>) {
+      (handlers as Record<string, (...args: unknown[]) => void | Promise<void>>)[hookName] = handler;
     },
   };
 
@@ -94,6 +90,31 @@ function liveHandoffLine(
 
 function withLiveHandoff(entries: string[], handoff = liveHandoffLine()): string {
   return [...entries, handoff].join("\n");
+}
+
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
+async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 1_000): Promise<void> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await check()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error("timed out waiting for condition");
 }
 
 async function seedMainSession(openclawHome: string, agentId: string, sessionId: string): Promise<void> {
@@ -483,44 +504,86 @@ describe("extraction hooks", () => {
     expect(entries.some((entry) => entry.content.includes("sessionFile fallback"))).toBe(true);
   });
 
-  test("before_compaction is registered and extracts from inline messages", async () => {
+  test("after_compaction returns immediately and skips overlapping extractions", async () => {
+    const transcriptPath = join(tempDir, "compaction-overlap.jsonl");
+    await writeFile(
+      transcriptPath,
+      [
+        '{"type":"session","id":"session-compaction-overlap","timestamp":"2026-02-22T00:00:00.000Z"}',
+        '{"type":"message","timestamp":"2026-02-22T00:01:00.000Z","message":{"role":"user","content":"Capture overlapping compaction updates."}}',
+        '{"type":"message","timestamp":"2026-02-22T00:02:00.000Z","message":{"role":"assistant","content":"Captured."}}',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const blocker = createDeferred();
     let llmCalls = 0;
-    const transcripts: string[] = [];
     const handlers: HookHandlers = {};
     const api = createMockApi({}, handlers);
 
     registerExtractionHooks(api, createPluginConfig(logDir), {
-      extractFromTranscript: async (opts) => {
+      extractFromTranscript: async () => {
         llmCalls += 1;
-        transcripts.push(opts.transcript);
-        return withLiveHandoff(['{"type":"fact","content":"Before compaction extraction ran","subject":"auth-migration"}']);
+        await blocker.promise;
+        return withLiveHandoff([
+          '{"type":"fact","content":"Compaction extraction completed once","subject":"auth-migration"}',
+        ]);
       },
     });
 
-    expect(handlers.before_compaction).toBeDefined();
+    const afterResult = await Promise.race([
+      Promise.resolve(
+        handlers.after_compaction?.(
+          {
+            messageCount: 2,
+            compactedCount: 4,
+            messages: [
+              { role: "user", content: "Capture overlapping compaction updates." },
+              { role: "assistant", content: "Captured." },
+            ],
+          },
+          {
+            agentId: "agent-1",
+            sessionId: "session-compaction-overlap",
+            sessionKey: "agent:agent-1:main",
+          },
+        ),
+      ).then(() => "returned"),
+      new Promise((resolve) => setTimeout(() => resolve("blocked"), 50)),
+    ]);
 
-    await handlers.before_compaction?.(
+    expect(afterResult).toBe("returned");
+
+    await handlers.after_compaction?.(
       {
         messageCount: 2,
-        compactedCount: 3,
-        messages: [
-          { role: "user", content: "Remember this before compaction." },
-          { role: "assistant", content: "Saved." },
-        ],
+        compactedCount: 4,
+        sessionFile: transcriptPath,
       },
       {
         agentId: "agent-1",
-        sessionId: "session-before-compaction",
-        sessionKey: "agent:main",
+        sessionId: "session-compaction-overlap",
+        sessionKey: "agent:agent-1:main",
       },
     );
 
+    await waitFor(() => llmCalls >= 1);
+    expect(llmCalls).toBe(1);
+
+    blocker.resolve();
+
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.compactionSessions["session-compaction-overlap"]?.status === "extracted";
+    });
+
     const entries = await readLog(join(logDir, "log.jsonl"));
     const state = await readState(join(logDir, "state.json"));
+
     expect(llmCalls).toBe(1);
-    expect(transcripts[0]).toContain("Remember this before compaction.");
     expect(entries).toHaveLength(2);
-    expect(state.compactionSessions["session-before-compaction"]?.status).toBe("extracted");
+    expect(entries.every((entry) => entry.session === "session-compaction-overlap")).toBe(true);
+    expect(state.compactionSessions["session-compaction-overlap"]?.status).toBe("extracted");
   });
 
   test("after_compaction is registered, uses sessionFile, and writes handoff state", async () => {
@@ -566,6 +629,11 @@ describe("extraction hooks", () => {
         workspaceDir,
       },
     );
+
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.compactionSessions["session-compaction-1"]?.status === "extracted";
+    });
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     const state = await readState(join(logDir, "state.json"));
@@ -622,6 +690,11 @@ describe("extraction hooks", () => {
     await handlers.after_compaction?.(event, ctx);
     await handlers.after_compaction?.(event, ctx);
 
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.compactionSessions["session-compaction-2"]?.status === "extracted";
+    });
+
     const entries = await readLog(join(logDir, "log.jsonl"));
     const state = await readState(join(logDir, "state.json"));
 
@@ -673,6 +746,11 @@ describe("extraction hooks", () => {
 
     await handlers.after_compaction?.(event, ctx);
 
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.extractedSessions["session-compaction-delta"]?.lastMessageAt === "2026-02-22T00:02:00.000Z";
+    });
+
     await writeFile(
       transcriptPath,
       [
@@ -685,6 +763,11 @@ describe("extraction hooks", () => {
       "utf8",
     );
     await handlers.after_compaction?.(event, ctx);
+
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.extractedSessions["session-compaction-delta"]?.lastMessageAt === "2026-02-22T00:04:00.000Z";
+    });
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     const state = await readState(join(logDir, "state.json"));
@@ -740,6 +823,11 @@ describe("extraction hooks", () => {
 
     await handlers.after_compaction?.(event, ctx);
 
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.extractedSessions["session-compaction-same-ts"]?.lastMessageAt === "2026-02-22T00:02:00.000Z";
+    });
+
     await writeFile(
       transcriptPath,
       [
@@ -752,6 +840,11 @@ describe("extraction hooks", () => {
       "utf8",
     );
     await handlers.after_compaction?.(event, ctx);
+
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.extractedSessions["session-compaction-same-ts"]?.messageCount === 4;
+    });
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     expect(llmCalls).toBe(2);
@@ -800,8 +893,20 @@ describe("extraction hooks", () => {
     };
 
     await handlers.after_compaction?.(event, ctx);
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.failedSessions["session-compaction-retry-recover"]?.retries === 1;
+    });
     await handlers.after_compaction?.(event, ctx);
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.failedSessions["session-compaction-retry-recover"]?.retries === 2;
+    });
     await handlers.after_compaction?.(event, ctx);
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.compactionSessions["session-compaction-retry-recover"]?.reason === "retry cap reached for current transcript watermark";
+    });
 
     await writeFile(
       transcriptPath,
@@ -815,6 +920,11 @@ describe("extraction hooks", () => {
       "utf8",
     );
     await handlers.after_compaction?.(event, ctx);
+
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.compactionSessions["session-compaction-retry-recover"]?.status === "extracted";
+    });
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     const state = await readState(join(logDir, "state.json"));
@@ -874,6 +984,11 @@ describe("extraction hooks", () => {
       {},
     );
 
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.compactionSessions["session-compaction-fallback"]?.status === "extracted";
+    });
+
     const entries = await readLog(join(logDir, "log.jsonl"));
     const state = await readState(join(logDir, "state.json"));
 
@@ -920,6 +1035,11 @@ describe("extraction hooks", () => {
         sessionKey: "cron:daily",
       },
     );
+
+    await waitFor(async () => {
+      const state = await readState(join(logDir, "state.json"));
+      return state.compactionSessions["session-compaction-skip"]?.status === "skipped";
+    });
 
     const state = await readState(join(logDir, "state.json"));
 
