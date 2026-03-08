@@ -16,10 +16,11 @@ Reclaw is an append-only event log that replaces daily memory files. All memory 
 
 1. **MEMORY.md** is auto-loaded into every session. It has a manual section (goals, preferences) and a generated Reclaw memory snapshot updated nightly.
 2. **Reclaw session handoff** is written into MEMORY.md after each session extraction.
-3. **`memory_search`** finds entries by keyword, type, subject, or status.
-4. **`memory_get`** retrieves a specific entry by ID, reads MEMORY.md, or fetches a full session transcript.
+3. **Subject markdown projections** are generated under `~/.openclaw/reclaw/memory/` so OpenClaw can semantically index event-log content through its builtin markdown memory path.
+4. **`memory_search`** finds entries by keyword, type, subject, or status, and can hit semantic results from `MEMORY.md` plus generated subject projections.
+5. **`memory_get`** retrieves a specific entry by ID, reads MEMORY.md, or fetches a full session transcript.
 
-Start with what's already in context (steps 1-2). Only call tools when you need something specific.
+Start with what's already in context (steps 1-3). Only call tools when you need something specific.
 
 ## Entry Types
 
@@ -51,7 +52,7 @@ openclaw reclaw subjects rename old-slug new-slug
 
 ## Using `memory_search`
 
-Combines structured log filters with keyword search and MEMORY.md semantic search.
+Combines structured log filters with keyword search and semantic search over `MEMORY.md` plus generated subject projections.
 
 ```
 # Keyword search
@@ -67,6 +68,15 @@ memory_search({"query": "backoff", "type": "fact", "subject": "auth-migration"})
 ```
 
 At least one of `query`, `type`, `subject`, or `status` is required.
+
+## Markdown Projections
+
+Reclaw keeps one generated markdown file per subject under `~/.openclaw/reclaw/memory/`. These files are derived from `log.jsonl` and exist so OpenClaw's builtin markdown indexer can semantically search event-log content.
+
+- Treat projection files as generated output — don't manually edit them
+- Successful live extraction refreshes touched subject projections automatically
+- Successful non-dry-run imports refresh the full projection set automatically
+- If the index seems stale, rebuild with `openclaw reclaw projection refresh`
 
 ## Using `memory_get`
 
@@ -123,6 +133,10 @@ openclaw reclaw trace <entry-id>
 openclaw reclaw subjects list
 openclaw reclaw subjects add <slug> --type <project|person|system|topic>
 openclaw reclaw subjects rename <old-slug> <new-slug>
+
+# Refresh generated subject markdown projections
+openclaw reclaw projection refresh
+openclaw reclaw projection list
 
 # Regenerate the MEMORY.md memory snapshot now
 openclaw reclaw snapshot generate

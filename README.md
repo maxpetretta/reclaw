@@ -11,7 +11,7 @@ openclaw plugins install reclaw
 openclaw reclaw init
 ```
 
-`init` creates the log directory, sets the memory slot, registers the nightly snapshot cron, and adds managed blocks to `MEMORY.md`.
+`init` creates the log directory, sets the memory slot, registers the nightly snapshot cron, creates the subject projection directory, and adds managed blocks to `MEMORY.md`. It also adds the projection directory to `agents.defaults.memorySearch.extraPaths` so OpenClaw can semantically index derived memory markdown.
 
 ## How It Works
 
@@ -21,6 +21,8 @@ Session ends  →  Extraction hook reads transcript
               LLM extracts structured entries (facts, decisions, tasks, questions, handoff)
                       ↓
               Entries appended to log.jsonl, subjects upserted in subjects.json
+                      ↓
+              Touched subject markdown projections refreshed under <logDir>/memory
                       ↓
               Handoff block updated in MEMORY.md
                       ↓
@@ -43,7 +45,7 @@ All content passes a hard filter: only user-specific knowledge enters the log. G
 
 Reclaw wraps OpenClaw's builtin `memory_search` and `memory_get` with structured log awareness:
 
-- **`memory_search`** — keyword + structured filters (type, subject, status) over the log, plus semantic search over `MEMORY.md`
+- **`memory_search`** — keyword + structured filters (type, subject, status) over the log, plus semantic search over `MEMORY.md` and generated subject markdown projections
 - **`memory_get`** — read entries by ID, `MEMORY.md` by path, or transcripts by session ID
 
 ### Subjects
@@ -56,6 +58,15 @@ openclaw reclaw subjects add auth-migration
 openclaw reclaw subjects add alice-chen --type person
 openclaw reclaw subjects rename old-slug new-slug
 ```
+
+### Markdown projections
+
+Reclaw maintains one generated markdown file per subject under `<logDir>/memory/`. These files are derived from the append-only log and let OpenClaw's builtin markdown indexer semantically search event-log content through `memory_search`.
+
+- Projection files are generated output, not source of truth — don't edit them manually
+- Successful live extraction refreshes touched subject projections automatically
+- Successful non-dry-run imports refresh the full projection set automatically
+- Rebuild or inspect them with `openclaw reclaw projection refresh` and `openclaw reclaw projection list`
 
 ## Import
 
@@ -90,6 +101,9 @@ openclaw reclaw status            # list recent snapshots, extractions, and hand
 openclaw reclaw subjects list     # list all subjects
 openclaw reclaw subjects add      # add a subject
 openclaw reclaw subjects rename   # rename a subject (updates registry + log)
+
+openclaw reclaw projection refresh # rebuild generated subject markdown projections
+openclaw reclaw projection list    # list generated projection files
 
 openclaw reclaw snapshot generate # run snapshot generation now
 openclaw reclaw handoff refresh   # refresh handoff block from latest log entry
