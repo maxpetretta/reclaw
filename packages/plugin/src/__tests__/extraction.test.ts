@@ -518,8 +518,10 @@ describe("extraction hooks", () => {
 
     const blocker = createDeferred();
     let llmCalls = 0;
+    const warnings: string[] = [];
     const handlers: HookHandlers = {};
     const api = createMockApi({}, handlers);
+    api.logger.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
 
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () => {
@@ -531,6 +533,7 @@ describe("extraction hooks", () => {
       },
     });
 
+    // First call: fire-and-forget, should return immediately.
     const afterResult = await Promise.race([
       Promise.resolve(
         handlers.after_compaction?.(
@@ -554,6 +557,12 @@ describe("extraction hooks", () => {
 
     expect(afterResult).toBe("returned");
 
+    // Wait for the first extraction to actually reach extractFromTranscript
+    // before firing the second call, so the ACTIVE set is guaranteed populated.
+    await waitFor(() => llmCalls >= 1, 10_000);
+    expect(warnings.filter((w) => w.includes("background extraction failed"))).toHaveLength(0);
+
+    // Second call: same sessionId, should be skipped because first is in progress.
     await handlers.after_compaction?.(
       {
         messageCount: 2,
@@ -567,7 +576,6 @@ describe("extraction hooks", () => {
       },
     );
 
-    await waitFor(() => llmCalls >= 1, 5_000);
     expect(llmCalls).toBe(1);
 
     blocker.resolve();
@@ -575,7 +583,7 @@ describe("extraction hooks", () => {
     await waitFor(async () => {
       const state = await readState(join(logDir, "state.json"));
       return state.compactionSessions["session-compaction-overlap"]?.status === "extracted";
-    }, 5_000);
+    }, 10_000);
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     const state = await readState(join(logDir, "state.json"));
