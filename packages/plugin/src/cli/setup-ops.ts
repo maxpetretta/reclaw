@@ -19,6 +19,10 @@ import {
   removeCronJobsByName,
   writeCronJobsDocument,
 } from "../lib/cron-jobs-store";
+import {
+  ensureQmdCollection,
+  type EnsureQmdCollectionResult,
+} from "../lib/qmd";
 import { dispatchPostInitGuidanceEvent, type GuidanceEventResult } from "./post-init-guidance-event";
 import { updateOpenClawConfigForInit, updateOpenClawConfigForUninstall } from "./openclaw-config";
 import { type InitPaths, resolvePaths } from "./paths";
@@ -35,11 +39,13 @@ const LEGACY_CRON_NAMES = [
 
 interface InitDeps {
   fireGuidanceEvent?: (paths: InitPaths) => Promise<GuidanceEventResult>;
+  ensureQmdCollection?: (projectionDir: string) => Promise<EnsureQmdCollectionResult> | EnsureQmdCollectionResult;
 }
 
 export interface InitResult {
   paths: InitPaths;
   guidanceEvent: GuidanceEventResult;
+  qmd: EnsureQmdCollectionResult;
 }
 
 function resolvePluginPromptsDir(): string {
@@ -237,6 +243,7 @@ export async function runInit(
   await updateOpenClawConfigForInit(paths.openClawConfigPath, paths.projectionDir);
   await ensureMemoryMarkers(paths.memoryMdPath);
   await ensureSubjectProjectionDir(paths.projectionDir);
+  const qmd = await (deps.ensureQmdCollection ?? ensureQmdCollection)(paths.projectionDir);
   await ensureBriefingCron(paths, config);
 
   const fireGuidanceEvent = deps.fireGuidanceEvent ?? firePostInitGuidanceEvent;
@@ -245,6 +252,7 @@ export async function runInit(
   return {
     paths,
     guidanceEvent,
+    qmd,
   };
 }
 

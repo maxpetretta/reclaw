@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { log as clackLog } from "@clack/prompts";
 import type { PluginConfig } from "../config";
 import { isEnoent, isObject } from "../lib/guards";
+import { listQmdCollections, RECLAW_QMD_COLLECTION_NAME } from "../lib/qmd";
 import {
   AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
   AGENTS_MEMORY_GUIDANCE_END_MARKER,
@@ -30,6 +31,27 @@ export interface VerifyResult {
   ok: boolean;
   checks: VerifyCheck[];
   paths: InitPaths;
+}
+
+function summarizeQmdIssue(message: string | undefined, missingBinary: boolean | undefined): string {
+  if (missingBinary) {
+    return "qmd not installed";
+  }
+
+  if (!message) {
+    return "qmd unavailable";
+  }
+
+  if (message.includes("ERR_DLOPEN_FAILED") || message.includes("better_sqlite3.node")) {
+    return "QMD native module failed to load; reinstall QMD for the current Node version";
+  }
+
+  const firstLine = message
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+  return firstLine ?? "qmd unavailable";
 }
 
 export async function verifySetup(config: PluginConfig, workspaceDir?: string): Promise<VerifyResult> {
@@ -217,6 +239,18 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     );
   } catch (error) {
     addCheck("reclaw projection dir", false, isEnoent(error) ? "missing" : String(error));
+  }
+
+  const qmdCollections = listQmdCollections();
+  if (!qmdCollections.ok) {
+    addCheck(`qmd:${RECLAW_QMD_COLLECTION_NAME}`, false, summarizeQmdIssue(qmdCollections.message, qmdCollections.missingBinary));
+  } else {
+    const hasReclawCollection = qmdCollections.names.includes(RECLAW_QMD_COLLECTION_NAME);
+    addCheck(
+      `qmd:${RECLAW_QMD_COLLECTION_NAME}`,
+      hasReclawCollection,
+      hasReclawCollection ? "ok" : `missing collection "${RECLAW_QMD_COLLECTION_NAME}"`,
+    );
   }
 
   try {

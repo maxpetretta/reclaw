@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import type { PluginConfig } from "../config";
@@ -50,6 +50,68 @@ function createConfig(logDir: string): PluginConfig {
   };
 }
 
+function createQmdResult(projectionDir: string) {
+  return {
+    collection: {
+      name: "reclaw-memory",
+      path: projectionDir,
+      mask: "**/*.md",
+    },
+    configured: true as const,
+    skipped: false as const,
+  };
+}
+
+async function writeExecutable(path: string, contents: string): Promise<void> {
+  await writeFile(path, contents, "utf8");
+  await chmod(path, 0o755);
+}
+
+async function withEnv<T>(overrides: Record<string, string | undefined>, run: () => Promise<T> | T): Promise<T> {
+  const previous = new Map<string, string | undefined>();
+
+  for (const [key, value] of Object.entries(overrides)) {
+    previous.set(key, process.env[key]);
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  try {
+    return await run();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+async function writeQmdListBinary(binDir: string, collectionNames: string[]): Promise<void> {
+  const lines = collectionNames
+    .map((name) => `  printf '%s\\n' '${name} (qmd://reclaw/${name})'`)
+    .join("\n");
+
+  await writeExecutable(
+    join(binDir, "qmd"),
+    `#!/bin/sh
+if [ "$1" = "collection" ] && [ "$2" = "list" ]; then
+${lines}
+  exit 0
+fi
+if [ "$1" = "--help" ]; then
+  exit 0
+fi
+exit 1
+`,
+  );
+}
+
 describe("cli init helpers", () => {
   let tempDir = "";
   let openClawHome = "";
@@ -81,6 +143,7 @@ describe("cli init helpers", () => {
   });
 
   const fakeGuidanceEvent = async () => ({ sent: true as const });
+  const fakeEnsureQmdCollection = async (projectionDir: string) => createQmdResult(projectionDir);
 
   test("runInit creates log files, updates config, and adds MEMORY.md markers", async () => {
     const memoryPath = join(workspaceDir, "MEMORY.md");
@@ -88,6 +151,7 @@ describe("cli init helpers", () => {
 
     const initResult = await runInit(createConfig(logDir), workspaceDir, {
       fireGuidanceEvent: fakeGuidanceEvent,
+      ensureQmdCollection: fakeEnsureQmdCollection,
     });
 
     const logExists = await Bun.file(join(logDir, "log.jsonl")).exists();
@@ -131,6 +195,7 @@ describe("cli init helpers", () => {
     expect(memoryContent).toContain(LAST_HANDOFF_END_MARKER);
     expect(projectionDirEntries).toEqual([]);
     expect(initResult.guidanceEvent.sent).toBe(true);
+    expect(initResult.qmd).toEqual(createQmdResult(join(logDir, "memory")));
   });
 
   test("buildPostInitSystemEventText renders AGENTS/MEMORY excerpts and target paths", async () => {
@@ -159,6 +224,7 @@ describe("cli init helpers", () => {
 
     await runInit(createConfig(logDir), workspaceDir, {
       fireGuidanceEvent: fakeGuidanceEvent,
+      ensureQmdCollection: fakeEnsureQmdCollection,
     });
 
     await writeFile(
@@ -206,85 +272,148 @@ describe("cli init helpers", () => {
   test("runVerify passes after runInit", async () => {
     const agentsPath = join(workspaceDir, "AGENTS.md");
     const memoryPath = join(workspaceDir, "MEMORY.md");
+    const binDir = join(tempDir, "bin-pass");
+    await mkdir(binDir, { recursive: true });
+    await writeQmdListBinary(binDir, ["reclaw-memory"]);
 
-    await runInit(createConfig(logDir), workspaceDir, {
-      fireGuidanceEvent: fakeGuidanceEvent,
+    await withEnv({ PATH: `${binDir}:${process.env.PATH ?? ""}` }, async () => {
+      await runInit(createConfig(logDir), workspaceDir, {
+        fireGuidanceEvent: fakeGuidanceEvent,
+        ensureQmdCollection: fakeEnsureQmdCollection,
+      });
+      await writeFile(
+        agentsPath,
+        [
+          "## Workspace Rules",
+          "",
+          AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
+          "## Memory System (Reclaw)",
+          AGENTS_MEMORY_GUIDANCE_END_MARKER,
+        ].join("\n"),
+        "utf8",
+      );
+
+      const existingMemory = await readFile(memoryPath, "utf8");
+      await writeFile(
+        memoryPath,
+        [
+          MEMORY_NOTICE_BEGIN_MARKER,
+          "## Reclaw Memory Mode",
+          MEMORY_NOTICE_END_MARKER,
+          "",
+          existingMemory.trim(),
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runVerify(createConfig(logDir), workspaceDir);
+      expect(result.ok).toBe(true);
+      const qmdCheck = result.checks.find((check) => check.name === "qmd:reclaw-memory");
+      expect(qmdCheck).toEqual({ name: "qmd:reclaw-memory", ok: true, detail: "ok" });
     });
-    await writeFile(
-      agentsPath,
-      [
-        "## Workspace Rules",
-        "",
-        AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
-        "## Memory System (Reclaw)",
-        AGENTS_MEMORY_GUIDANCE_END_MARKER,
-      ].join("\n"),
-      "utf8",
-    );
-
-    const existingMemory = await readFile(memoryPath, "utf8");
-    await writeFile(
-      memoryPath,
-      [
-        MEMORY_NOTICE_BEGIN_MARKER,
-        "## Reclaw Memory Mode",
-        MEMORY_NOTICE_END_MARKER,
-        "",
-        existingMemory.trim(),
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-
-    const result = await runVerify(createConfig(logDir), workspaceDir);
-    expect(result.ok).toBe(true);
   });
 
   test("runVerify accepts legacy state.json without eventUsage", async () => {
     const agentsPath = join(workspaceDir, "AGENTS.md");
     const memoryPath = join(workspaceDir, "MEMORY.md");
     const statePath = join(logDir, "state.json");
+    const binDir = join(tempDir, "bin-legacy");
+    await mkdir(binDir, { recursive: true });
+    await writeQmdListBinary(binDir, ["reclaw-memory"]);
 
-    await runInit(createConfig(logDir), workspaceDir, {
-      fireGuidanceEvent: fakeGuidanceEvent,
+    await withEnv({ PATH: `${binDir}:${process.env.PATH ?? ""}` }, async () => {
+      await runInit(createConfig(logDir), workspaceDir, {
+        fireGuidanceEvent: fakeGuidanceEvent,
+        ensureQmdCollection: fakeEnsureQmdCollection,
+      });
+
+      const stateRaw = await readFile(statePath, "utf8");
+      const parsedState = JSON.parse(stateRaw) as Record<string, unknown>;
+      delete parsedState.eventUsage;
+      await writeFile(statePath, `${JSON.stringify(parsedState, null, 2)}\n`, "utf8");
+
+      await writeFile(
+        agentsPath,
+        [
+          "## Workspace Rules",
+          "",
+          AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
+          "## Memory System (Reclaw)",
+          AGENTS_MEMORY_GUIDANCE_END_MARKER,
+        ].join("\n"),
+        "utf8",
+      );
+
+      const existingMemory = await readFile(memoryPath, "utf8");
+      await writeFile(
+        memoryPath,
+        [
+          MEMORY_NOTICE_BEGIN_MARKER,
+          "## Reclaw Memory Mode",
+          MEMORY_NOTICE_END_MARKER,
+          "",
+          existingMemory.trim(),
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runVerify(createConfig(logDir), workspaceDir);
+      expect(result.ok).toBe(true);
+      const stateCheck = result.checks.find((check) => check.name === "state.json");
+      expect(stateCheck?.ok).toBe(true);
+      expect(stateCheck?.detail).toContain("legacy state");
     });
+  });
 
-    const stateRaw = await readFile(statePath, "utf8");
-    const parsedState = JSON.parse(stateRaw) as Record<string, unknown>;
-    delete parsedState.eventUsage;
-    await writeFile(statePath, `${JSON.stringify(parsedState, null, 2)}\n`, "utf8");
+  test("verifySetup fails when the reclaw qmd collection is missing", async () => {
+    const agentsPath = join(workspaceDir, "AGENTS.md");
+    const memoryPath = join(workspaceDir, "MEMORY.md");
+    const binDir = join(tempDir, "bin-missing");
+    await mkdir(binDir, { recursive: true });
+    await writeQmdListBinary(binDir, ["other-collection"]);
 
-    await writeFile(
-      agentsPath,
-      [
-        "## Workspace Rules",
-        "",
-        AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
-        "## Memory System (Reclaw)",
-        AGENTS_MEMORY_GUIDANCE_END_MARKER,
-      ].join("\n"),
-      "utf8",
-    );
+    await withEnv({ PATH: `${binDir}:${process.env.PATH ?? ""}` }, async () => {
+      await runInit(createConfig(logDir), workspaceDir, {
+        fireGuidanceEvent: fakeGuidanceEvent,
+        ensureQmdCollection: fakeEnsureQmdCollection,
+      });
+      await writeFile(
+        agentsPath,
+        [
+          "## Workspace Rules",
+          "",
+          AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
+          "## Memory System (Reclaw)",
+          AGENTS_MEMORY_GUIDANCE_END_MARKER,
+        ].join("\n"),
+        "utf8",
+      );
 
-    const existingMemory = await readFile(memoryPath, "utf8");
-    await writeFile(
-      memoryPath,
-      [
-        MEMORY_NOTICE_BEGIN_MARKER,
-        "## Reclaw Memory Mode",
-        MEMORY_NOTICE_END_MARKER,
-        "",
-        existingMemory.trim(),
-        "",
-      ].join("\n"),
-      "utf8",
-    );
+      const existingMemory = await readFile(memoryPath, "utf8");
+      await writeFile(
+        memoryPath,
+        [
+          MEMORY_NOTICE_BEGIN_MARKER,
+          "## Reclaw Memory Mode",
+          MEMORY_NOTICE_END_MARKER,
+          "",
+          existingMemory.trim(),
+          "",
+        ].join("\n"),
+        "utf8",
+      );
 
-    const result = await runVerify(createConfig(logDir), workspaceDir);
-    expect(result.ok).toBe(true);
-    const stateCheck = result.checks.find((check) => check.name === "state.json");
-    expect(stateCheck?.ok).toBe(true);
-    expect(stateCheck?.detail).toContain("legacy state");
+      const result = await verifySetup(createConfig(logDir), workspaceDir);
+      expect(result.ok).toBe(false);
+      const qmdCheck = result.checks.find((check) => check.name === "qmd:reclaw-memory");
+      expect(qmdCheck).toEqual({
+        name: "qmd:reclaw-memory",
+        ok: false,
+        detail: 'missing collection "reclaw-memory"',
+      });
+    });
   });
 
   test("verifySetup fails before initialization", async () => {

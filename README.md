@@ -11,7 +11,7 @@ openclaw plugins install reclaw
 openclaw reclaw init
 ```
 
-`init` creates the log directory, sets the memory slot, registers the nightly snapshot cron, creates the subject projection directory, and adds managed blocks to `MEMORY.md`. It also adds the projection directory to `agents.defaults.memorySearch.extraPaths` so OpenClaw can semantically index derived memory markdown.
+`init` creates the log directory, sets the memory slot, registers the nightly snapshot cron, creates the subject projection directory, and adds managed blocks to `MEMORY.md`. It also adds the projection directory to `agents.defaults.memorySearch.extraPaths` so OpenClaw can semantically index derived memory markdown, and configures a `reclaw-memory` QMD collection when `qmd` is available. If `qmd` is missing, `init` prompts to install it globally.
 
 ## How It Works
 
@@ -61,7 +61,7 @@ openclaw reclaw subjects rename old-slug new-slug
 
 ### Markdown projections
 
-Reclaw maintains one generated markdown file per subject under `<logDir>/memory/`. These files are derived from the append-only log and let OpenClaw's builtin markdown indexer semantically search event-log content through `memory_search`.
+Reclaw maintains one generated markdown file per subject under `<logDir>/memory/`. These files are derived from the append-only log and let OpenClaw's builtin markdown indexer semantically search event-log content through `memory_search`. When QMD is installed, `openclaw reclaw init` also registers this folder as the `reclaw-memory` collection for direct QMD search.
 
 - Projection files are generated output, not source of truth — don't edit them manually
 - Successful live extraction refreshes touched subject projections automatically

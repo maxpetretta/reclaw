@@ -1,5 +1,6 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
+import { ensureQmdCollection, installQmdGlobal } from "../lib/qmd";
 import { normalizeCliInputPath } from "../lib/path";
 import type { CommandLike } from "./command-like";
 import { detectImportSources, resolveImportPathForPlatform } from "./import-detect";
@@ -37,6 +38,8 @@ function registerReclawCliCommands(
     config,
     workspaceDir,
     runInit,
+    ensureQmdCollection,
+    installQmdGlobal,
     runUninstall,
     runVerify,
   });
