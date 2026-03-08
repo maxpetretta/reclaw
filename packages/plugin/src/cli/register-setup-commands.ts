@@ -3,7 +3,7 @@ import type { PluginConfig } from "../config";
 import type { CommandLike } from "./command-like";
 import type { InitPaths } from "./paths";
 
-const BANNER = "🦞 Reclaw - Reclaim your AI conversations";
+const BANNER = "🦞 Reclaw - Long-term memory for your Claw";
 
 interface InitResult {
   paths: InitPaths;

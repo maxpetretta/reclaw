@@ -7,7 +7,7 @@ import {
 import type { CommandLike } from "./command-like";
 import { resolvePaths } from "./paths";
 
-const BANNER = "🦞 Reclaw - Reclaim your AI conversations";
+const BANNER = "🦞 Reclaw - Long-term memory for your Claw";
 
 export async function runProjectionRefresh(params: {
   config: PluginConfig;

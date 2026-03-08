@@ -553,7 +553,7 @@ export function registerBriefingCommands(
     workspaceDir?: string;
   },
 ): void {
-  const BANNER = "🦞 Reclaw - Reclaim your AI conversations";
+  const BANNER = "🦞 Reclaw - Long-term memory for your Claw";
 
   const runSnapshotRefreshAction = async (): Promise<void> => {
     clackIntro(BANNER);

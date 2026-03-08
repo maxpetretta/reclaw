@@ -236,7 +236,7 @@ export function registerImportCommands(
           return;
         }
 
-        clackIntro("🦞 Reclaw - Reclaim your AI conversations");
+        clackIntro("🦞 Reclaw - Long-term memory for your Claw");
         const queued = await queueImportJob({
           config: params.config,
           workspaceDir: params.workspaceDir,
@@ -320,7 +320,7 @@ export function registerImportCommands(
     .command("resume [jobId]")
     .description("Re-queue failed/queued async import jobs")
     .action(async (jobId: unknown) => {
-      clackIntro("🦞 Reclaw - Reclaim your AI conversations");
+      clackIntro("🦞 Reclaw - Long-term memory for your Claw");
       const result = await resumeImportJobs({
         config: params.config,
         workspaceDir: params.workspaceDir,
@@ -353,7 +353,7 @@ export function registerImportCommands(
     .command("stop [jobId]")
     .description("Stop running/queued async import jobs")
     .action(async (jobId: unknown) => {
-      clackIntro("🦞 Reclaw - Reclaim your AI conversations");
+      clackIntro("🦞 Reclaw - Long-term memory for your Claw");
       const result = await stopImportJobs({
         config: params.config,
         workspaceDir: params.workspaceDir,

@@ -1,6 +1,6 @@
 # Reclaw
 
-> Reclaim your AI conversations.
+> Long-term memory for your Claw.
 
 A durable memory system for [OpenClaw](https://openclaw.com). Reclaw replaces the default `memory-core` plugin with an append-only event log, structured extraction, and a nightly memory snapshot — so your agent remembers what matters across sessions.
 
