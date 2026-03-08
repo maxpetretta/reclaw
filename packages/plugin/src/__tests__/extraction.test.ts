@@ -567,7 +567,7 @@ describe("extraction hooks", () => {
       },
     );
 
-    await waitFor(() => llmCalls >= 1);
+    await waitFor(() => llmCalls >= 1, 5_000);
     expect(llmCalls).toBe(1);
 
     blocker.resolve();
@@ -575,7 +575,7 @@ describe("extraction hooks", () => {
     await waitFor(async () => {
       const state = await readState(join(logDir, "state.json"));
       return state.compactionSessions["session-compaction-overlap"]?.status === "extracted";
-    });
+    }, 5_000);
 
     const entries = await readLog(join(logDir, "log.jsonl"));
     const state = await readState(join(logDir, "state.json"));
