@@ -11,7 +11,7 @@
     },
     "packages/plugin": {
       "name": "reclaw",
-      "version": "2026.3.2",
+      "version": "2026.3.7",
       "dependencies": {
         "@clack/prompts": "1.0.1",
         "nanoid": "^5.1.5",
@@ -25,11 +25,11 @@
     },
     "packages/skill": {
       "name": "@reclaw/skill",
-      "version": "2026.3.2",
+      "version": "2026.3.7",
     },
     "packages/website": {
       "name": "@reclaw/website",
-      "version": "2026.3.2",
+      "version": "2026.3.7",
       "dependencies": {
         "@astrojs/sitemap": "3.6.0",
         "@astrojs/vercel": "8.0.4",

@@ -27,7 +27,7 @@ Examples:
   scripts/switch-openclaw-reclaw.sh local
   scripts/switch-openclaw-reclaw.sh local --copy
   scripts/switch-openclaw-reclaw.sh latest
-  scripts/switch-openclaw-reclaw.sh latest --spec reclaw@2026.3.2
+  scripts/switch-openclaw-reclaw.sh latest --spec reclaw@2026.3.7
   scripts/switch-openclaw-reclaw.sh status
 EOF
 }

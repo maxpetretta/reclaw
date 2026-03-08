@@ -40,7 +40,7 @@ export function registerSetupCommands(
           `Could not notify main session (${initResult.guidanceEvent.message ?? "unknown error"})`,
         );
       }
-      clackOutro("Ready. Your next session will extract memory automatically.");
+      clackOutro("Ready! Your next session will extract memory automatically.");
     });
 
   reclaw

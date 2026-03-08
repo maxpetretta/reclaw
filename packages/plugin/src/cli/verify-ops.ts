@@ -1,4 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
+import { log as clackLog } from "@clack/prompts";
 import type { PluginConfig } from "../config";
 import { isEnoent, isObject } from "../lib/guards";
 import {
@@ -241,9 +242,11 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
 export async function runVerify(config: PluginConfig, workspaceDir?: string): Promise<VerifyResult> {
   const result = await verifySetup(config, workspaceDir);
 
-  for (const check of result.checks) {
-    console.log(`${check.ok ? "✅" : "❌"} ${check.name}: ${check.detail}`);
-  }
+  clackLog.message(
+    result.checks
+      .map((check) => `${check.ok ? "✅" : "❌"} ${check.name}: ${check.detail}`)
+      .join("\n"),
+  );
 
   if (!result.ok) {
     throw new Error("Reclaw verify failed");
