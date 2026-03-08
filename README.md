@@ -1,4 +1,4 @@
-# Reclaw
+# Reclaw 🦞
 
 > Long-term memory for your Claw.
 
