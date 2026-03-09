@@ -124,7 +124,7 @@ describe("import extraction", () => {
     expect(entries[0]?.entry.timestamp).toBe("2024-01-05T15:00:00.000Z");
   });
 
-  test("falls back to unknown subject when model omits subject on non-handoff entries", async () => {
+  test("falls back to unknown subject when model omits subject", async () => {
     const entries = await extractImportedConversation(
       {
         conversation: makeConversation("2024-01-02T12:34:56.000Z"),
@@ -340,7 +340,7 @@ describe("import extraction", () => {
     expect(capturedSystemPrompt).toContain("menus, store addresses/hours");
   });
 
-  test("drops handoff entries emitted by the extraction model", async () => {
+  test("drops invalid entry types emitted by the extraction model", async () => {
     const entries = await extractImportedConversation(
       {
         conversation: makeConversation("2024-01-02T12:34:56.000Z"),
@@ -352,7 +352,7 @@ describe("import extraction", () => {
       {
         callModel: async () =>
           [
-            '{"type":"handoff","content":"Import session complete","detail":"Should be ignored"}',
+            '{"type":"invalid_type","content":"Should be ignored","detail":"Not a valid entry type"}',
             '{"type":"fact","content":"Durable imported fact","subject":"imports"}',
           ].join("\n"),
       },
@@ -363,22 +363,22 @@ describe("import extraction", () => {
     expect(entries[0]?.entry.content).toContain("Durable imported fact");
   });
 
-  test("treats handoff-only output as empty import output", async () => {
-    const entries = await extractImportedConversation(
-      {
-        conversation: makeConversation("2024-01-02T12:34:56.000Z"),
-        sessionId: "reclaw:chatgpt:conv-1",
-        subjectsPath,
-        logPath,
-        model: "anthropic/claude-haiku-4-5",
-      },
-      {
-        callModel: async () =>
-          '{"type":"handoff","content":"Import handoff only","detail":"No durable events"}',
-      },
-    );
-
-    expect(entries).toEqual([]);
+  test("throws when output contains only invalid entry types", async () => {
+    await expect(
+      extractImportedConversation(
+        {
+          conversation: makeConversation("2024-01-02T12:34:56.000Z"),
+          sessionId: "reclaw:chatgpt:conv-1",
+          subjectsPath,
+          logPath,
+          model: "anthropic/claude-haiku-4-5",
+        },
+        {
+          callModel: async () =>
+            '{"type":"invalid_type","content":"No valid events","detail":"Not a valid entry type"}',
+        },
+      ),
+    ).rejects.toThrow("extraction output did not contain any valid JSONL entries");
   });
 
   test("runs a quality repair pass when severe quality issues are detected", async () => {
