@@ -57,42 +57,32 @@ function readPositiveInt(value: unknown): number | undefined {
   return n !== undefined && n > 0 ? Math.floor(n) : undefined;
 }
 
+function assignDefined<T extends Record<string, unknown>, K extends keyof T>(
+  target: T,
+  key: K,
+  value: T[K] | undefined,
+): void {
+  if (value !== undefined) {
+    target[key] = value;
+  }
+}
+
 function normalizeImportJobOptions(raw: unknown): ImportJobOptionsState {
   if (!isObject(raw)) {
     return {};
   }
 
   const options: ImportJobOptionsState = {};
-
-  const after = readTimestamp(raw.after);
-  if (after !== undefined) options.after = after;
-
-  const before = readTimestamp(raw.before);
-  if (before !== undefined) options.before = before;
-
-  const minMessages = readPositiveInt(raw.minMessages);
-  if (minMessages !== undefined) options.minMessages = minMessages;
-
-  const jobs = readPositiveInt(raw.jobs);
-  if (jobs !== undefined) options.jobs = jobs;
-
-  const model = readTrimmedString(raw.model);
-  if (model !== undefined) options.model = model;
-
-  const force = readBoolean(raw.force);
-  if (force !== undefined) options.force = force;
-
-  const transcripts = readBoolean(raw.transcripts);
-  if (transcripts !== undefined) options.transcripts = transcripts;
-
-  const verbose = readBoolean(raw.verbose);
-  if (verbose !== undefined) options.verbose = verbose;
-
-  const keepSource = readBoolean(raw.keepSource);
-  if (keepSource !== undefined) options.keepSource = keepSource;
-
-  const backupMemoryDocs = readBoolean(raw.backupMemoryDocs);
-  if (backupMemoryDocs !== undefined) options.backupMemoryDocs = backupMemoryDocs;
+  assignDefined(options, "after", readTimestamp(raw.after));
+  assignDefined(options, "before", readTimestamp(raw.before));
+  assignDefined(options, "minMessages", readPositiveInt(raw.minMessages));
+  assignDefined(options, "jobs", readPositiveInt(raw.jobs));
+  assignDefined(options, "model", readTrimmedString(raw.model));
+  assignDefined(options, "force", readBoolean(raw.force));
+  assignDefined(options, "transcripts", readBoolean(raw.transcripts));
+  assignDefined(options, "verbose", readBoolean(raw.verbose));
+  assignDefined(options, "keepSource", readBoolean(raw.keepSource));
+  assignDefined(options, "backupMemoryDocs", readBoolean(raw.backupMemoryDocs));
 
   return options;
 }
@@ -208,20 +198,13 @@ function normalizeExtractedSessions(raw: unknown): Record<string, ExtractedSessi
       return undefined;
     }
 
-    const lastMessageAt = readTimestamp(sessionValue.lastMessageAt);
-    const messageCount = readNonNegativeInt(sessionValue.messageCount);
-    const sourceSessionKey = readTrimmedString(sessionValue.sourceSessionKey);
-    const workerSessionId = readTrimmedString(sessionValue.workerSessionId);
-    const workerSessionKey = readTrimmedString(sessionValue.workerSessionKey);
-    return {
-      at,
-      entries,
-      ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
-      ...(messageCount !== undefined ? { messageCount } : {}),
-      ...(sourceSessionKey !== undefined ? { sourceSessionKey } : {}),
-      ...(workerSessionId !== undefined ? { workerSessionId } : {}),
-      ...(workerSessionKey !== undefined ? { workerSessionKey } : {}),
-    };
+    const result: ExtractedSession = { at, entries };
+    assignDefined(result, "lastMessageAt", readTimestamp(sessionValue.lastMessageAt));
+    assignDefined(result, "messageCount", readNonNegativeInt(sessionValue.messageCount));
+    assignDefined(result, "sourceSessionKey", readTrimmedString(sessionValue.sourceSessionKey));
+    assignDefined(result, "workerSessionId", readTrimmedString(sessionValue.workerSessionId));
+    assignDefined(result, "workerSessionKey", readTrimmedString(sessionValue.workerSessionKey));
+    return result;
   });
 }
 
@@ -236,22 +219,13 @@ function normalizeFailedSessions(raw: unknown): Record<string, FailedSession> {
       return undefined;
     }
 
-    const lastMessageAt = readTimestamp(sessionValue.lastMessageAt);
-    const messageCount = readNonNegativeInt(sessionValue.messageCount);
-    const sourceSessionKey = readTrimmedString(sessionValue.sourceSessionKey);
-    const workerSessionId = readTrimmedString(sessionValue.workerSessionId);
-    const workerSessionKey = readTrimmedString(sessionValue.workerSessionKey);
-
-    return {
-      at,
-      error: sessionValue.error,
-      retries: sessionValue.retries,
-      ...(lastMessageAt !== undefined ? { lastMessageAt } : {}),
-      ...(messageCount !== undefined ? { messageCount } : {}),
-      ...(sourceSessionKey !== undefined ? { sourceSessionKey } : {}),
-      ...(workerSessionId !== undefined ? { workerSessionId } : {}),
-      ...(workerSessionKey !== undefined ? { workerSessionKey } : {}),
-    };
+    const result: FailedSession = { at, error: sessionValue.error, retries: sessionValue.retries };
+    assignDefined(result, "lastMessageAt", readTimestamp(sessionValue.lastMessageAt));
+    assignDefined(result, "messageCount", readNonNegativeInt(sessionValue.messageCount));
+    assignDefined(result, "sourceSessionKey", readTrimmedString(sessionValue.sourceSessionKey));
+    assignDefined(result, "workerSessionId", readTrimmedString(sessionValue.workerSessionId));
+    assignDefined(result, "workerSessionKey", readTrimmedString(sessionValue.workerSessionKey));
+    return result;
   });
 }
 
@@ -275,14 +249,9 @@ function normalizeImportedConversations(raw: unknown): Record<string, ImportedCo
       return undefined;
     }
 
-    const title = readTrimmedString(conversationValue.title);
-    return {
-      at,
-      updatedAt,
-      sessionId,
-      entries,
-      ...(title !== undefined ? { title } : {}),
-    };
+    const result: ImportedConversationState = { at, updatedAt, sessionId, entries };
+    assignDefined(result, "title", readTrimmedString(conversationValue.title));
+    return result;
   });
 }
 
@@ -329,25 +298,14 @@ function normalizeCompactionSessions(raw: unknown): Record<string, CompactionSes
       return undefined;
     }
 
-    const tokenCount = readFiniteNumber(sessionValue.tokenCount);
-    const sessionFile = readTrimmedString(sessionValue.sessionFile);
-    const reason = readTrimmedString(sessionValue.reason);
-    const error = readTrimmedString(sessionValue.error);
-    const extractedAt = readTimestamp(sessionValue.extractedAt);
-    const entries = readNonNegativeInt(sessionValue.entries);
-
-    return {
-      at,
-      messageCount,
-      compactedCount,
-      ...(tokenCount !== undefined ? { tokenCount } : {}),
-      ...(sessionFile !== undefined ? { sessionFile } : {}),
-      status,
-      ...(reason !== undefined ? { reason } : {}),
-      ...(error !== undefined ? { error } : {}),
-      ...(extractedAt !== undefined ? { extractedAt } : {}),
-      ...(entries !== undefined ? { entries } : {}),
-    };
+    const result: CompactionSessionState = { at, messageCount, compactedCount, status };
+    assignDefined(result, "tokenCount", readFiniteNumber(sessionValue.tokenCount));
+    assignDefined(result, "sessionFile", readTrimmedString(sessionValue.sessionFile));
+    assignDefined(result, "reason", readTrimmedString(sessionValue.reason));
+    assignDefined(result, "error", readTrimmedString(sessionValue.error));
+    assignDefined(result, "extractedAt", readTimestamp(sessionValue.extractedAt));
+    assignDefined(result, "entries", readNonNegativeInt(sessionValue.entries));
+    return result;
   });
 }
 
@@ -373,17 +331,11 @@ function normalizeSnapshotRuns(raw: unknown): SnapshotRunState[] {
       continue;
     }
 
-    const error = readTrimmedString(runValue.error);
-    const workerSessionId = readTrimmedString(runValue.workerSessionId);
-    const workerSessionKey = readTrimmedString(runValue.workerSessionKey);
-    runs.push({
-      at,
-      status,
-      memoryMdPath,
-      ...(error !== undefined ? { error } : {}),
-      ...(workerSessionId !== undefined ? { workerSessionId } : {}),
-      ...(workerSessionKey !== undefined ? { workerSessionKey } : {}),
-    });
+    const run: SnapshotRunState = { at, status, memoryMdPath };
+    assignDefined(run, "error", readTrimmedString(runValue.error));
+    assignDefined(run, "workerSessionId", readTrimmedString(runValue.workerSessionId));
+    assignDefined(run, "workerSessionKey", readTrimmedString(runValue.workerSessionKey));
+    runs.push(run);
   }
 
   return runs.sort((left, right) => right.at.localeCompare(left.at));
@@ -423,32 +375,15 @@ function normalizeImportJobs(raw: unknown): Record<string, ImportJobState> {
       attempts,
     };
 
-    const workspaceDir = readTrimmedString(jobValue.workspaceDir);
-    if (workspaceDir !== undefined) normalized.workspaceDir = workspaceDir;
-
-    const startedAt = readTimestamp(jobValue.startedAt);
-    if (startedAt !== undefined) normalized.startedAt = startedAt;
-
-    const finishedAt = readTimestamp(jobValue.finishedAt);
-    if (finishedAt !== undefined) normalized.finishedAt = finishedAt;
-
-    const stopRequestedAt = readTimestamp(jobValue.stopRequestedAt);
-    if (stopRequestedAt !== undefined) normalized.stopRequestedAt = stopRequestedAt;
-
-    const error = readTrimmedString(jobValue.error);
-    if (error !== undefined) normalized.error = error;
-
-    const summary = normalizeImportJobSummary(jobValue.summary);
-    if (summary) normalized.summary = summary;
-
-    const progress = normalizeImportJobProgress(jobValue.progress);
-    if (progress) normalized.progress = progress;
-
-    const cronJobId = readTrimmedString(jobValue.cronJobId);
-    if (cronJobId !== undefined) normalized.cronJobId = cronJobId;
-
-    const cronJobName = readTrimmedString(jobValue.cronJobName);
-    if (cronJobName !== undefined) normalized.cronJobName = cronJobName;
+    assignDefined(normalized, "workspaceDir", readTrimmedString(jobValue.workspaceDir));
+    assignDefined(normalized, "startedAt", readTimestamp(jobValue.startedAt));
+    assignDefined(normalized, "finishedAt", readTimestamp(jobValue.finishedAt));
+    assignDefined(normalized, "stopRequestedAt", readTimestamp(jobValue.stopRequestedAt));
+    assignDefined(normalized, "error", readTrimmedString(jobValue.error));
+    assignDefined(normalized, "summary", normalizeImportJobSummary(jobValue.summary));
+    assignDefined(normalized, "progress", normalizeImportJobProgress(jobValue.progress));
+    assignDefined(normalized, "cronJobId", readTrimmedString(jobValue.cronJobId));
+    assignDefined(normalized, "cronJobName", readTrimmedString(jobValue.cronJobName));
 
     importJobs[jobId] = normalized;
   }
