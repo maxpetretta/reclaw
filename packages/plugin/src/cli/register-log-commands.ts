@@ -1,9 +1,15 @@
 import type { PluginConfig } from "../config";
-import { queryLog, searchLog } from "../log/query";
+import { queryLog, searchLog, type LogQueryFilter } from "../log/query";
 import { parseEntryType, parseEntryStatus, type LogEntry } from "../log/schema";
 import { resolvePaths } from "./paths";
 import type { CommandLike } from "./command-like";
-import { parseIsoDateInput, readPositiveNumberOption, toObject } from "./parse";
+import {
+  parseIsoDateInput,
+  readOptionalPositiveNumberOption,
+  readPositiveNumberOption,
+  readTrimmedStringOption,
+  toObject,
+} from "./parse";
 
 interface TraceChain {
   subject: string;
@@ -59,19 +65,50 @@ function printEntries(entries: LogEntry[], total?: number): void {
   }
 }
 
-function readOptionalPositiveNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return Math.floor(value);
-  }
+function buildLogFilter(
+  options: Record<string, unknown>,
+  input: {
+    includeType?: boolean;
+    includeSubject?: boolean;
+    includeStatus?: boolean;
+    includeDateRange?: boolean;
+  },
+): LogQueryFilter {
+  const filter: LogQueryFilter = {};
 
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
+  if (input.includeType) {
+    const type = parseEntryType(options.type);
+    if (type) {
+      filter.type = type;
     }
   }
 
-  return undefined;
+  if (input.includeSubject) {
+    const subject = readTrimmedStringOption(options.subject);
+    if (subject) {
+      filter.subject = subject;
+    }
+  }
+
+  if (input.includeStatus) {
+    const status = parseEntryStatus(options.status);
+    if (status) {
+      filter.status = status;
+    }
+  }
+
+  if (input.includeDateRange) {
+    const from = parseIsoDateInput(options.from);
+    const to = parseIsoDateInput(options.to);
+    if (from) {
+      filter.from = from;
+    }
+    if (to) {
+      filter.to = to;
+    }
+  }
+
+  return filter;
 }
 
 export function buildTraceReport(entries: LogEntry[]): TraceReport {
@@ -188,13 +225,13 @@ export function registerLogCommands(
       const options = toObject(opts);
       const paths = resolvePaths(params.config, params.workspaceDir);
       const limit = readPositiveNumberOption(options.limit, 20);
-
-      const entries = await queryLog(paths.logPath, {
-        ...(parseEntryType(options.type) ? { type: parseEntryType(options.type) } : {}),
-        ...(typeof options.subject === "string" && options.subject.trim()
-          ? { subject: options.subject.trim() }
-          : {}),
-      });
+      const entries = await queryLog(
+        paths.logPath,
+        buildLogFilter(options, {
+          includeType: true,
+          includeSubject: true,
+        }),
+      );
 
       printEntries(entries.slice(0, limit), entries.length);
     });
@@ -210,18 +247,12 @@ export function registerLogCommands(
     .action(async (query: unknown, opts: unknown) => {
       const options = toObject(opts);
       const paths = resolvePaths(params.config, params.workspaceDir);
-      const from = parseIsoDateInput(options.from);
-      const to = parseIsoDateInput(options.to);
-
-      const filter = {
-        ...(parseEntryType(options.type) ? { type: parseEntryType(options.type) } : {}),
-        ...(typeof options.subject === "string" && options.subject.trim()
-          ? { subject: options.subject.trim() }
-          : {}),
-        ...(parseEntryStatus(options.status) ? { status: parseEntryStatus(options.status) } : {}),
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
-      };
+      const filter = buildLogFilter(options, {
+        includeType: true,
+        includeSubject: true,
+        includeStatus: true,
+        includeDateRange: true,
+      });
 
       const entries =
         typeof query === "string" && query.trim().length > 0
@@ -242,20 +273,16 @@ export function registerLogCommands(
     .action(async (id: unknown, opts: unknown) => {
       const options = toObject(opts);
       const paths = resolvePaths(params.config, params.workspaceDir);
-      const subject =
-        typeof options.subject === "string" && options.subject.trim().length > 0
-          ? options.subject.trim()
-          : undefined;
-      const from = parseIsoDateInput(options.from);
-      const to = parseIsoDateInput(options.to);
-      const limit = readOptionalPositiveNumber(options.limit);
+      const limit = readOptionalPositiveNumberOption(options.limit);
       const summary = options.summary === true || options.summary === "true";
 
-      const entries = await queryLog(paths.logPath, {
-        ...(subject ? { subject } : {}),
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
-      });
+      const entries = await queryLog(
+        paths.logPath,
+        buildLogFilter(options, {
+          includeSubject: true,
+          includeDateRange: true,
+        }),
+      );
 
       if (entries.length === 0) {
         console.log("No entries.");
@@ -263,7 +290,7 @@ export function registerLogCommands(
       }
 
       const report = buildTraceReport(entries);
-      const focusId = typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
+      const focusId = readTrimmedStringOption(id);
       if (summary) {
         printTraceSummary(entries, report, focusId);
         return;

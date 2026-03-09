@@ -9,9 +9,20 @@ import { isEnoent, isObject } from "../lib/guards";
 import { getLastSessionSummary, queryLog } from "../log/query";
 import { applyLastSessionSummaryBlock } from "../memory/session-summary";
 import { appendSnapshotRun, readState, type SnapshotRunState } from "../state";
+import {
+  buildExtractionStatusRows,
+  formatExtractionStatusRow,
+  formatLatestSnapshotRunLine,
+  formatSessionSummaryListLine,
+  formatSnapshotRunLine,
+  formatStatusTimestamp,
+  formatUnifiedSessionSummaryRow,
+  truncateStatusText,
+} from "./briefing-status";
 import { readPositiveNumberOption, toObject } from "./parse";
 import { resolvePaths } from "./paths";
 import type { CommandLike } from "./command-like";
+import { RECLAW_BANNER } from "./ui";
 
 interface SnapshotGenerateParams {
   config: PluginConfig;
@@ -47,33 +58,6 @@ function isAtOrAfter(iso: string, cutoffIso: string): boolean {
   const valueMs = Date.parse(iso);
   const cutoffMs = Date.parse(cutoffIso);
   return Number.isFinite(valueMs) && Number.isFinite(cutoffMs) && valueMs >= cutoffMs;
-}
-
-function formatTimestamp(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return iso;
-  }
-
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
-}
-
-function truncateText(value: string, max = 120): string {
-  if (value.length <= max) {
-    return value;
-  }
-
-  return `${value.slice(0, Math.max(1, max - 1))}...`;
-}
-
-function parseTimestampOrZero(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function pickPrimarySessionKey(keys: string[]): string | undefined {
@@ -142,8 +126,7 @@ export async function runSnapshotRefresh(params: SnapshotGenerateParams): Promis
     await appendSnapshotRun(paths.statePath, {
       status: "success",
       memoryMdPath: paths.memoryMdPath,
-      ...(generationResult?.workerSessionId ? { workerSessionId: generationResult.workerSessionId } : {}),
-      ...(generationResult?.workerSessionKey ? { workerSessionKey: generationResult.workerSessionKey } : {}),
+      ...(generationResult ?? {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -151,8 +134,7 @@ export async function runSnapshotRefresh(params: SnapshotGenerateParams): Promis
       status: "failed",
       memoryMdPath: paths.memoryMdPath,
       error: message,
-      ...(generationResult?.workerSessionId ? { workerSessionId: generationResult.workerSessionId } : {}),
-      ...(generationResult?.workerSessionKey ? { workerSessionKey: generationResult.workerSessionKey } : {}),
+      ...(generationResult ?? {}),
     });
     throw error;
   }
@@ -257,12 +239,7 @@ async function printSnapshotList(
   }
 
   for (const run of runs) {
-    const detail = run.error ? ` | error=${run.error}` : "";
-    const workerSessionKey = run.workerSessionKey ? ` | workerSessionKey=${run.workerSessionKey}` : "";
-    const workerSessionId = run.workerSessionId ? ` | workerSessionId=${run.workerSessionId}` : "";
-    console.log(
-      `[${formatTimestamp(run.at)}] status=${run.status} memory=${run.memoryMdPath}${detail}${workerSessionKey}${workerSessionId}`,
-    );
+    console.log(formatSnapshotRunLine(run));
   }
 }
 
@@ -275,20 +252,7 @@ async function printSnapshotStatus(
   const status = await buildSnapshotStatus(params);
 
   console.log("Snapshot status");
-  if (!status.latestRun) {
-    console.log("Latest snapshot run: none");
-  } else {
-    const latestDetail = status.latestRun.error ? ` error=${status.latestRun.error}` : "";
-    const workerSessionKey = status.latestRun.workerSessionKey
-      ? ` workerSessionKey=${status.latestRun.workerSessionKey}`
-      : "";
-    const workerSessionId = status.latestRun.workerSessionId
-      ? ` workerSessionId=${status.latestRun.workerSessionId}`
-      : "";
-    console.log(
-      `Latest snapshot run: ${formatTimestamp(status.latestRun.at)} (${status.latestRun.status})${latestDetail}${workerSessionKey}${workerSessionId}`,
-    );
-  }
+  console.log(formatLatestSnapshotRunLine(status.latestRun));
 
   console.log(`Today extracted sessions: ${status.extractedTodayCount} (${status.extractedTodayEntries} entries)`);
   console.log(`Today failed extractions: ${status.failedTodayCount}`);
@@ -315,11 +279,7 @@ async function printSessionSummaryList(
   }
 
   for (const entry of selected) {
-    const compact = state.compactionSessions[entry.session];
-    const compactStatus = compact ? compact.status : "n/a";
-    console.log(
-      `[${formatTimestamp(entry.timestamp)}] session=${entry.session} compact=${compactStatus} ${truncateText(entry.content)}`,
-    );
+    console.log(formatSessionSummaryListLine(entry, state));
   }
 }
 
@@ -352,22 +312,22 @@ async function printSessionSummaryStatus(
     if (compaction) {
       const compactionDetail = compaction.reason ?? compaction.error ?? "";
       console.log(
-        `Compaction: ${compaction.status} at ${formatTimestamp(compaction.at)} (compacted=${compaction.compactedCount}, remaining=${compaction.messageCount})${compactionDetail ? ` | ${compactionDetail}` : ""}`,
+        `Compaction: ${compaction.status} at ${formatStatusTimestamp(compaction.at)} (compacted=${compaction.compactedCount}, remaining=${compaction.messageCount})${compactionDetail ? ` | ${compactionDetail}` : ""}`,
       );
     } else {
       console.log("Compaction: not observed");
     }
 
     if (extracted) {
-      console.log(`Extraction: success at ${formatTimestamp(extracted.at)} (${extracted.entries} entries)`);
+      console.log(`Extraction: success at ${formatStatusTimestamp(extracted.at)} (${extracted.entries} entries)`);
     } else if (failed) {
-      console.log(`Extraction: failed at ${formatTimestamp(failed.at)} (${failed.error})`);
+      console.log(`Extraction: failed at ${formatStatusTimestamp(failed.at)} (${failed.error})`);
     } else {
       console.log("Extraction: no record");
     }
 
     if (latestForSession) {
-      console.log(`Session summary: yes at ${formatTimestamp(latestForSession.timestamp)} (${truncateText(latestForSession.content, 90)})`);
+      console.log(`Session summary: yes at ${formatStatusTimestamp(latestForSession.timestamp)} (${truncateStatusText(latestForSession.content, 90)})`);
     } else {
       console.log("Session summary: no session summary entry for this session");
     }
@@ -386,7 +346,7 @@ async function printSessionSummaryStatus(
     console.log("Latest session summary: none");
   } else {
     console.log(
-      `Latest session summary: ${formatTimestamp(latestSummary.timestamp)} session=${latestSummary.session} ${truncateText(latestSummary.content, 90)}`,
+      `Latest session summary: ${formatStatusTimestamp(latestSummary.timestamp)} session=${latestSummary.session} ${truncateStatusText(latestSummary.content, 90)}`,
     );
   }
 
@@ -410,59 +370,7 @@ async function printUnifiedStatusList(
     readState(paths.statePath),
     queryLog(paths.logPath, { type: "session_summary" }),
   ]);
-
-  const extractionSessionIds = [...new Set([
-    ...Object.keys(state.extractedSessions),
-    ...Object.keys(state.failedSessions),
-    ...Object.keys(state.compactionSessions),
-  ])];
-
-  const extractionRows = extractionSessionIds
-    .map((sessionId) => {
-      const extracted = state.extractedSessions[sessionId];
-      const failed = state.failedSessions[sessionId];
-      const compaction = state.compactionSessions[sessionId];
-
-      const extractedAtMs = extracted ? parseTimestampOrZero(extracted.at) : Number.NEGATIVE_INFINITY;
-      const failedAtMs = failed ? parseTimestampOrZero(failed.at) : Number.NEGATIVE_INFINITY;
-      const compactionAtMs = compaction ? parseTimestampOrZero(compaction.at) : Number.NEGATIVE_INFINITY;
-      const latestAtMs = Math.max(extractedAtMs, failedAtMs, compactionAtMs);
-
-      const latestAt = latestAtMs === extractedAtMs && extracted
-        ? extracted.at
-        : latestAtMs === failedAtMs && failed
-          ? failed.at
-          : compaction?.at ?? extracted?.at ?? failed?.at ?? new Date(0).toISOString();
-
-      const latestWasFailure = failedAtMs > extractedAtMs;
-      const extractionStatus = extracted || failed
-        ? latestWasFailure ? "failed" : "success"
-        : "none";
-
-      const latestSourceSessionKey = latestWasFailure ? failed?.sourceSessionKey : extracted?.sourceSessionKey;
-      const sourceSessionKey = latestSourceSessionKey ?? extracted?.sourceSessionKey ?? failed?.sourceSessionKey;
-      const latestWorkerSessionKey = latestWasFailure ? failed?.workerSessionKey : extracted?.workerSessionKey;
-      const workerSessionKey = latestWorkerSessionKey ?? extracted?.workerSessionKey ?? failed?.workerSessionKey;
-      const latestWorkerSessionId = latestWasFailure ? failed?.workerSessionId : extracted?.workerSessionId;
-      const workerSessionId = latestWorkerSessionId ?? extracted?.workerSessionId ?? failed?.workerSessionId;
-      const lastMessageAt = latestWasFailure ? failed?.lastMessageAt : extracted?.lastMessageAt;
-
-      return {
-        sessionId,
-        at: latestAt,
-        atMs: latestAtMs,
-        extractionStatus,
-        extracted,
-        failed,
-        compaction,
-        sourceSessionKey,
-        workerSessionKey,
-        workerSessionId,
-        lastMessageAt,
-      };
-    })
-    .sort((left, right) => right.atMs - left.atMs)
-    .slice(0, maxItems);
+  const extractionRows = buildExtractionStatusRows(state).slice(0, maxItems);
 
   const snapshotRuns = state.snapshotRuns.slice(0, maxItems);
   const sessionSummaryRows = sessionSummaries.slice(0, maxItems);
@@ -478,16 +386,7 @@ async function printUnifiedStatusList(
     console.log("- none");
   } else {
     for (const run of snapshotRuns) {
-      const detail = run.error ? ` | error=${run.error}` : "";
-      const workerSessionKey = run.workerSessionKey
-        ? ` | workerSessionKey=${run.workerSessionKey}`
-        : "";
-      const workerSessionId = run.workerSessionId
-        ? ` | workerSessionId=${run.workerSessionId}`
-        : "";
-      console.log(
-        `- [${formatTimestamp(run.at)}] status=${run.status} memory=${run.memoryMdPath}${detail}${workerSessionKey}${workerSessionId}`,
-      );
+      console.log(formatSnapshotRunLine(run, "- "));
     }
   }
 
@@ -497,29 +396,7 @@ async function printUnifiedStatusList(
     console.log("- none");
   } else {
     for (const row of extractionRows) {
-      const lastMessage = row.lastMessageAt
-        ? ` | lastMessage=${formatTimestamp(row.lastMessageAt)}`
-        : "";
-      const sourceSessionKey = row.sourceSessionKey ?? sessionKeyLookup.get(row.sessionId);
-      const sourceSessionKeyText = ` | sourceSessionKey=${sourceSessionKey ?? "n/a"}`;
-      const workerSessionKeyText = ` | workerSessionKey=${row.workerSessionKey ?? "n/a"}`;
-      const workerSessionIdText = row.workerSessionId
-        ? ` | workerSessionId=${row.workerSessionId}`
-        : "";
-      const compactionStatus = row.compaction?.status ?? "n/a";
-      const compactionDetail = row.compaction?.reason ?? row.compaction?.error;
-      const compactionDetailText = compactionDetail ? ` | compactionDetail=${truncateText(compactionDetail, 120)}` : "";
-      const resultText = row.extractionStatus === "success"
-        ? `result=success entries=${row.extracted?.entries ?? 0}`
-        : row.extractionStatus === "failed"
-          ? `result=failed retries=${row.failed?.retries ?? 0}`
-          : "result=none";
-      const failureErrorText = row.extractionStatus === "failed" && row.failed?.error
-        ? ` | error=${truncateText(row.failed.error, 120)}`
-        : "";
-      console.log(
-        `- [${formatTimestamp(row.at)}] session=${row.sessionId} ${resultText} compaction=${compactionStatus}${sourceSessionKeyText}${workerSessionKeyText}${workerSessionIdText}${failureErrorText}${compactionDetailText}${lastMessage}`,
-      );
+      console.log(formatExtractionStatusRow(row, sessionKeyLookup));
     }
   }
 
@@ -529,14 +406,7 @@ async function printUnifiedStatusList(
     console.log("- none");
   } else {
     for (const summary of sessionSummaryRows) {
-      const compactionStatus = state.compactionSessions[summary.session]?.status ?? "n/a";
-      const sourceSessionKey = state.extractedSessions[summary.session]?.sourceSessionKey ??
-        state.failedSessions[summary.session]?.sourceSessionKey ??
-        sessionKeyLookup.get(summary.session);
-      const sourceSessionKeyText = ` | sourceSessionKey=${sourceSessionKey ?? "n/a"}`;
-      console.log(
-        `- [${formatTimestamp(summary.timestamp)}] session=${summary.session} compact=${compactionStatus} ${truncateText(summary.content, 90)}${sourceSessionKeyText}`,
-      );
+      console.log(formatUnifiedSessionSummaryRow(summary, state, sessionKeyLookup));
     }
   }
 }
@@ -549,10 +419,8 @@ export function registerBriefingCommands(
     workspaceDir?: string;
   },
 ): void {
-  const BANNER = "🦞 Reclaw - Long-term memory for your Claw";
-
   const runSnapshotRefreshAction = async (): Promise<void> => {
-    clackIntro(BANNER);
+    clackIntro(RECLAW_BANNER);
     const spin = clackSpinner();
     spin.start("Refreshing memory snapshot...");
     const memoryMdPath = await runSnapshotRefresh({
@@ -565,7 +433,7 @@ export function registerBriefingCommands(
   };
 
   const runSessionSummaryRefreshAction = async (): Promise<void> => {
-    clackIntro(BANNER);
+    clackIntro(RECLAW_BANNER);
     const result = await runSessionSummaryRefresh({
       config: params.config,
       workspaceDir: params.workspaceDir,
