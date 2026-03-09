@@ -17,7 +17,7 @@ Scope: `packages/plugin` + `packages/skill`
 Managed marker families used by the plugin:
 
 - `<!-- BEGIN/END RECLAW MEMORY SNAPSHOT -->`
-- `<!-- BEGIN/END RECLAW SESSION HANDOFF -->`
+- `<!-- BEGIN/END RECLAW SESSION SUMMARY -->`
 - `<!-- BEGIN/END RECLAW MEMORY GUIDANCE -->`
 - `<!-- BEGIN/END RECLAW MEMORY NOTICE -->`
 
@@ -45,9 +45,10 @@ Reclaw does not use legacy daily memory files such as `memory/YYYY-MM-DD.md`.
 - `MEMORY.md` remains important because OpenClaw auto-loads it into sessions. Reclaw uses it for:
   - user-maintained manual context
   - a nightly generated memory snapshot block
-  - a latest-session handoff block
+  - a latest-session summary block
 - Reclaw also maintains per-subject markdown projection files under its store directory so builtin markdown indexing can semantically search event-log content.
 - The event log is authoritative when `MEMORY.md` and the log disagree.
+- OpenClaw's native compaction summary is the continuity mechanism for long-running sessions that compact in place. Reclaw should not duplicate that summary path by default.
 - Semantic search applies to indexed markdown memory content surfaced through the builtin memory tool integration. Reclaw bridges event-log content into that leg through generated per-subject markdown projections and registers the projection directory in `agents.defaults.memorySearch.extraPaths`; the raw `jsonl` log itself is still searched with structured filters and keyword matching, not a vector index.
 - Extraction only stores user-specific, durable information. Generic world knowledge and one-off browsing artifacts are filtered out.
 - Main-session traffic is the normal extraction scope. By default, session keys prefixed with `cron:`, `sub:`, or `hook:` are skipped.
@@ -123,7 +124,7 @@ Supported event types:
 | `fact` | Learned or observed user-specific information |
 | `decision` | A choice or commitment, usually with reasoning in `detail` |
 | `question` | An unresolved user-relevant open loop |
-| `handoff` | Session-boundary working state summary |
+| `session_summary` | Synchronous previous-session continuity summary used for reset/new-session carry-forward and later recall |
 
 Common fields:
 
@@ -135,14 +136,15 @@ Common fields:
 | `content` | yes | Main event text |
 | `session` | yes | OpenClaw session id for provenance |
 | `detail` | no | Supplemental context |
-| `subject` | yes for non-handoff | Canonical subject slug; missing live/import output is normalized to `unknown` for non-handoff entries |
+| `subject` | yes for task/fact/decision/question | Canonical subject slug; missing live/import output is normalized to `unknown` for task/fact/decision/question entries |
 | `status` | yes for task | `open` or `done` |
 
 Contracts:
 
 - Live extraction does not let the model supply `id`, `timestamp`, or `session`; the system injects them.
 - Historical import may preserve per-entry timestamps when valid; otherwise it falls back to the conversation's `updatedAt`.
-- Live extraction enforces exactly one final `handoff` event. If the first model output violates that contract, Reclaw runs a repair pass; if repair still fails, the extraction run fails.
+- Async extraction does not emit `session_summary` events. Session summaries are produced by a separate synchronous summarization path at reset/new-session boundaries.
+- `session_summary` events are not subject-scoped and are excluded from extraction context and subject projections by default.
 - Corrections are represented as later events on the same subject. There is no `replaces` linkage field.
 
 Examples:
@@ -151,7 +153,7 @@ Examples:
 {"timestamp":"2026-02-20T14:20:00.000Z","id":"a3k9x_BmQ2yT","type":"decision","subject":"auth-migration","content":"Queue-based retries for webhook delivery instead of synchronous retries","detail":"Synchronous retries amplified failures during the outage","session":"abc12345"}
 {"timestamp":"2026-02-20T14:35:00.000Z","id":"r7Wp3nKx_mZe","type":"fact","subject":"auth-migration","content":"Exponential backoff currently uses 1s, 5s, and 15s retry intervals","session":"abc12345"}
 {"timestamp":"2026-02-20T15:10:00.000Z","id":"Ht4vL_9qRx2D","type":"task","status":"open","subject":"auth-migration","content":"Write the backfill script for failed webhook jobs","session":"abc12345"}
-{"timestamp":"2026-02-20T15:30:00.000Z","id":"Ym8kP_3wNx5Q","type":"handoff","subject":"auth-migration","content":"Retry logic is implemented; backfill and canary remain","detail":"Backfill script is not started and load testing is still pending","session":"abc12345"}
+{"timestamp":"2026-02-20T15:30:00.000Z","id":"Ym8kP_3wNx5Q","type":"session_summary","content":"Worked on auth-migration retry rollout. Retry logic landed; backfill and canary validation remained open at session end.","detail":"Use memory_get(\"session:abc12345\") for the full transcript when implementation detail is needed.","session":"abc12345"}
 ```
 
 ### 6.2 Subject registry
@@ -189,6 +191,7 @@ Projection contract:
 - Projection refresh is best-effort. Projection write failures do not roll back successful log extraction/import writes.
 - A projection file may exist for a registry subject even when it has no events yet.
 - Each subject stays in a single markdown file; Reclaw does not split one subject across multiple projection files.
+- `session_summary` events are not rendered into subject projection files; they use a separate projection surface so session recall artifacts do not pollute subject histories.
 
 Each file should contain:
 
@@ -227,7 +230,18 @@ Refresh triggers:
 - after subject add/rename operations, refresh the affected subject projections
 - on demand through CLI refresh commands
 
-### 6.4 State file
+### 6.4 Session summary projections
+
+Reclaw should maintain a separate generated markdown surface for session summaries.
+
+Projection contract:
+
+- Session-summary projections are derived from `session_summary` events in `log.jsonl`.
+- They are distinct from per-subject projections so recall-oriented session summaries do not mix with durable subject memory.
+- The projection shape should optimize for fast recall: session id, timestamp, concise summary content, and a retrieval hint that points back to `memory_get("session:<id>")`.
+- If OpenClaw's native transcript compaction summaries are indexed for recall later, they should join this surface rather than the subject projection set.
+
+### 6.5 State file
 
 `state.json` stores operational state in addition to memory content:
 
@@ -314,7 +328,7 @@ Usage scoring for durable snapshot selection is:
 Reclaw registers these lifecycle hooks:
 
 - `session_end`: primary full-session extraction path
-- `before_reset`: extraction before reset/new-session flows, using inline messages when available
+- `before_reset`: synchronous previous-session summarization before reset/new-session flows, using inline messages when available
 - `after_compaction`: delta extraction for new transcript content after compaction
 - `gateway_start`: startup sweep for unextracted or failed sessions
 
@@ -328,7 +342,7 @@ Scope rules:
 By trigger:
 
 - `session_end`: reads the session transcript file
-- `before_reset`: prefers inline `messages[]`, then `sessionFile`, then transcript lookup by `(agentId, sessionId)`
+- `before_reset`: prefers inline `messages[]`, then `sessionFile`, then transcript lookup by `(agentId, sessionId)` for synchronous session summarization
 - `after_compaction`: uses the compaction event's `sessionFile` when possible, otherwise resolves the session and transcript by context or fallback discovery
 - `gateway_start`: scans known transcript sessions at startup
 
@@ -359,14 +373,26 @@ Existing subject history is capped per subject to keep prompt size bounded.
 
 When the transcript contains prior event references in the form `[<12-char-id>]`, Reclaw increments `citationCount` for those referenced events if they exist in the log.
 
-### 7.6 Live handoff enforcement
+### 7.6 Session summaries and compaction continuity
 
-Live extraction has a stricter handoff contract than import:
+Reclaw uses two separate continuity paths:
 
-- exactly one `handoff` event must be present
-- that handoff must be the final emitted event
+- OpenClaw's native compaction summary for same-session continuity after compaction
+- Reclaw `session_summary` events for reset/new-session continuity and later recall
 
-If the first model output violates that contract, Reclaw runs a repair pass and asks the model to fix the extraction output. If repair still does not produce exactly one final handoff, the extraction run fails rather than silently persisting malformed live output.
+`session_summary` contract:
+
+- generated synchronously during `before_reset`, before the reset/new-session transition completes
+- produced by a dedicated summarization prompt, not by the async extraction model
+- at most one `session_summary` event should be emitted for a given reset/new-session boundary
+- optimized for concise continuity: recent goals, outcomes, unresolved threads, and a retrieval hint back to the transcript
+- excluded from async extraction context, subject projections, and import output by default
+
+Compaction contract:
+
+- Reclaw should not generate a second continuity summary for compaction by default
+- same-session continuity after compaction should rely on OpenClaw's native transcript-level compaction summary
+- Reclaw may later index or surface transcript-level compaction summaries for recall, but they are distinct from `session_summary` events
 
 ## 8. MEMORY.md Contract
 
@@ -376,7 +402,7 @@ The implementation treats it as:
 
 - a manual section maintained by the user or workspace
 - a generated snapshot block managed by Reclaw
-- a latest handoff block managed by Reclaw
+- a latest session-summary block managed by Reclaw
 - optionally, a managed notice block inserted via the post-init guidance flow
 
 ### 8.1 Managed blocks
@@ -388,35 +414,36 @@ Reclaw owns these blocks:
 ... generated snapshot ...
 <!-- END RECLAW MEMORY SNAPSHOT -->
 
-<!-- BEGIN RECLAW SESSION HANDOFF -->
-... latest handoff ...
-<!-- END RECLAW SESSION HANDOFF -->
+<!-- BEGIN RECLAW SESSION SUMMARY -->
+... latest session summary ...
+<!-- END RECLAW SESSION SUMMARY -->
 ```
 
-The snapshot writer only edits the snapshot block. The handoff writer only edits the handoff block.
+The snapshot writer only edits the snapshot block. The session-summary writer only edits the session-summary block.
 
 If the markers are missing, Reclaw appends them and writes the generated content between them.
 
-### 8.2 Session handoff block
+### 8.2 Session summary block
 
-When a new handoff event is written, Reclaw rewrites the handoff block using the latest emitted handoff from that run.
+When a new `session_summary` event is written, Reclaw rewrites the session-summary block using the latest emitted summary from that run.
 
 Current formatting contract:
 
 ```markdown
-## Previous Session Handoff (agent:agent-1:main:session-h2)
+## Previous Session Summary (agent:agent-1:main:session-h2)
 
-Auth migration is complete; monitoring remains
+Worked on auth migration rollout. Retry logic shipped; monitoring and one follow-up validation step remained open.
 
 ### Details
 
-Backfill is done and canary is healthy
+Use memory_get("session:session-h2") for the full transcript if exact commands or rationale are needed.
 ```
 
 Notes:
 
 - The heading uses the resolved source session key when available, otherwise the bare session id.
-- The current implementation does not include the handoff timestamp in this block.
+- The block should be short enough to fit comfortably in prompt context.
+- This block is intended for cross-session carry-forward. Same-session post-compaction continuity should come from OpenClaw's native compaction summary, not from rewriting `MEMORY.md` mid-session.
 
 ### 8.3 Nightly snapshot
 
@@ -449,7 +476,7 @@ Empty sections may be omitted. The generated block is capped to `briefing.maxLin
 
 The current pre-filtering behavior is heuristic rather than exhaustive:
 
-- recent active entries are ranked, with handoffs excluded from the active-entry bucket
+- recent active entries are ranked, with `session_summary` events excluded from the active-entry bucket
 - open items are ranked with recency, usage, and subject-activity signals
 - stale subjects surface older but still significant threads
 - durable entries surface older `fact` / `decision` items with positive usage score
@@ -479,6 +506,7 @@ Execution model:
 2. If `query` is present, run direct keyword search over log `content` / `detail`
 3. If `query` is present and builtin `memory_search` exists, also run builtin semantic/keyword search over indexed markdown memory content
 4. Merge the results and render log-backed matches with inline event ids
+5. Render `session_summary` matches distinctly from subject-scoped durable events so session recall is visually separable from subject memory
 
 Example log-backed output:
 
@@ -490,7 +518,7 @@ Contracts:
 
 - The log leg is structured + keyword only. There is no vector index over `log.jsonl`.
 - `memorySearchCount` is incremented for log-backed result ids returned by the search.
-- Semantic search is delegated to the builtin runtime helper and therefore follows OpenClaw's markdown indexing behavior across `MEMORY.md` and generated subject projection files.
+- Semantic search is delegated to the builtin runtime helper and therefore follows OpenClaw's markdown indexing behavior across `MEMORY.md`, generated subject projection files, and any generated session-summary projection surface.
 
 ### 9.2 `memory_get`
 
@@ -539,7 +567,7 @@ Example event-id response:
    - `session.maintenance.resetArchiveRetention = false`
 6. Disables the bundled `session-memory` hook
 7. Adds `<logDir>/memory` to `agents.defaults.memorySearch.extraPaths`
-8. Ensures the snapshot and handoff markers exist in `MEMORY.md`
+8. Ensures the snapshot and session-summary markers exist in `MEMORY.md`
 9. Ensures the projection directory exists at `<logDir>/memory`
 10. Registers or updates the nightly snapshot cron job
 11. Fires a post-init system event instructing the main session to update `AGENTS.md` and `MEMORY.md` guidance blocks
@@ -553,14 +581,14 @@ Important: `init` does not directly rewrite `AGENTS.md` or inject the `RECLAW ME
 - removes the generated snapshot block from `MEMORY.md`
 - preserves log data
 
-It does not fully scrub all handoff or guidance content from the workspace.
+It does not fully scrub all session-summary or guidance content from the workspace.
 
 `openclaw reclaw verify` checks:
 
 - store files exist and are parseable
 - `openclaw.json` contains the expected slot, session-retention, hook, memory-flush, and `memorySearch.extraPaths` settings
 - `AGENTS.md` contains Reclaw guidance markers
-- `MEMORY.md` contains snapshot markers, handoff markers, and the Reclaw notice block
+- `MEMORY.md` contains snapshot markers, session-summary markers, and the Reclaw notice block
 - the projection directory exists under `<logDir>/memory`
 - the nightly snapshot cron job exists and is enabled
 
@@ -575,7 +603,7 @@ Primary CLI groups:
 - `openclaw reclaw subjects list|add|rename`
 - `openclaw reclaw projection refresh|generate|list`
 - `openclaw reclaw snapshot refresh|generate|list|status`
-- `openclaw reclaw handoff refresh|list|status`
+- `openclaw reclaw summary refresh|list|status`
 - `openclaw reclaw import ...`
 
 Notes:
@@ -608,7 +636,7 @@ Reclaw can import historical conversation data from:
 Historical import uses the same general extraction model with historical-mode guidance:
 
 - only durable future-useful information should be kept
-- handoff entries are dropped
+- `session_summary` entries are not emitted during import
 - per-entry timestamps may be preserved when valid
 - invalid or missing timestamps fall back to the conversation `updatedAt`
 
@@ -676,15 +704,15 @@ The current implementation does not include:
 A similar implementation should satisfy these checks:
 
 1. `init` creates the store, updates OpenClaw config, ensures markers, and registers the nightly cron
-2. Live sessions produce structured log entries and update the latest handoff block when a handoff is emitted
-3. Live extraction enforces exactly one final handoff, with a repair pass when needed
+2. Reset/new-session flows synchronously emit `session_summary` events and update the latest session-summary block in `MEMORY.md`
+3. Live sessions produce structured durable log entries through async extraction without relying on `session_summary` as the extraction boundary artifact
 4. Startup sweep can extract missed sessions and retry failed ones
-5. Compaction-triggered delta extraction records compaction state and only processes transcript content newer than the last extraction watermark
+5. Compaction-triggered delta extraction records compaction state and only processes transcript content newer than the last extraction watermark, while same-session continuity relies on OpenClaw's native compaction summary
 6. Snapshot generation rewrites only the snapshot block and preserves unrelated `MEMORY.md` content
-7. `memory_search` returns log-backed results with inline ids and combines them with builtin markdown semantic results when queried
+7. `memory_search` returns log-backed results with inline ids, distinguishes session-summary recall artifacts from subject memory, and combines them with builtin markdown semantic results when queried
 8. `memory_get` can read files, log entries by id, subject histories by `subject:<slug>`, and transcripts by `session:<id>`
 9. Extraction context can match subjects from transcript text beyond exact kebab-case slug mentions
-10. Subject projection files are generated under `<logDir>/memory/`, with one markdown file per subject and event ids preserved in the event headings
+10. Subject projection files are generated under `<logDir>/memory/`, with one markdown file per subject and event ids preserved in the event headings, while session summaries use a separate projection surface
 11. Successful live extraction refreshes touched subject projections, and successful non-dry-run import refreshes the projection set
 12. Subject add/rename flows update the registry, and rename also rewrites historical log subjects
 13. Async import jobs can be queued, inspected, resumed, stopped, and executed by worker runs

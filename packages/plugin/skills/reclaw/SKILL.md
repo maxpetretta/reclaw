@@ -15,9 +15,9 @@ Reclaw is an append-only event log that replaces daily memory files. All memory 
 ## How Memory Works
 
 1. **MEMORY.md** is auto-loaded into every session. It has a manual section (goals, preferences) and a generated Reclaw memory snapshot updated nightly.
-2. **Reclaw session handoff** is written into MEMORY.md after each session extraction.
-3. **Subject markdown projections** are generated under `~/.openclaw/reclaw/memory/` so OpenClaw can semantically index event-log content through its builtin markdown memory path.
-4. **`memory_search`** finds entries by keyword, type, subject, or status, and can hit semantic results from `MEMORY.md` plus generated subject projections.
+2. **Previous session summary** is written into `MEMORY.md` at reset/new-session boundaries so immediate continuity survives into the next session.
+3. **Subject markdown projections** are generated under `~/.openclaw/reclaw/memory/`, and **session summary projections** are generated under `~/.openclaw/reclaw/sessions/`, so OpenClaw can semantically index both subject memory and session-level recall surfaces.
+4. **`memory_search`** finds entries by keyword, type, subject, or status, and can hit semantic results from `MEMORY.md` plus generated subject/session-summary projections.
 5. **`memory_get`** retrieves a specific entry by ID, reads MEMORY.md, or fetches a full session transcript.
 
 Start with what's already in context (steps 1-3). Only call tools when you need something specific.
@@ -30,11 +30,11 @@ Start with what's already in context (steps 1-3). Only call tools when you need 
 | `fact` | User-specific information learned | Preferences, events, observations, milestones |
 | `decision` | A choice with reasoning | Use `detail` for the "why" |
 | `question` | An unresolved open loop | Resolved by later entries on the same subject |
-| `handoff` | Session boundary state | One per session, summarizes what's in-flight |
+| `session_summary` | Cross-session continuity artifact | Reset/new-session summary that points back to the full transcript |
 
 ## Subjects
 
-Every non-handoff entry has a `subject` — a kebab-case slug like `auth-migration` or `reclaw`. Subjects are tracked in a registry with a type: `project`, `person`, `system`, or `topic` (default).
+Every durable entry except `session_summary` has a `subject` — a kebab-case slug like `auth-migration` or `reclaw`. Subjects are tracked in a registry with a type: `project`, `person`, `system`, or `topic` (default).
 
 When discussing something new, use a clear kebab-case slug. The extraction hook auto-creates subjects it hasn't seen. To explicitly manage subjects:
 
@@ -141,8 +141,8 @@ openclaw reclaw projection list
 # Regenerate the MEMORY.md memory snapshot now
 openclaw reclaw snapshot generate
 
-# Force-refresh MEMORY.md session handoff block from log
-openclaw reclaw handoff refresh
+# Force-refresh MEMORY.md session summary block from log
+openclaw reclaw summary refresh
 
 # Import historical conversations
 openclaw reclaw import <chatgpt|claude|grok|openclaw> <file>
