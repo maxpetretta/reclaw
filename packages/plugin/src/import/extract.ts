@@ -111,7 +111,7 @@ export async function extractImportedConversation(
 
   const parseOptions = {
     includeTimestampHint: true,
-    dropHandoff: true,
+    dropSessionSummary: true,
   } as const;
   const strategyPrompts: Array<{ stage: "initial" | "repair" | "quality"; prompt: string }> = [
     { stage: "initial", prompt: userPrompt },

@@ -320,7 +320,7 @@ function buildBriefingBuckets(
   const activeEntries = rankEntries(
     entries
       .filter((entry) => isWithinDays(entry, nowMs, config.activeWindow))
-      .filter((entry) => entry.type !== "handoff")
+      .filter((entry) => entry.type !== "session_summary")
       .filter((entry) =>
         entry.type !== "fact" ||
         computeUsageScore(eventUsage[entry.id]) > 0 ||
@@ -422,7 +422,7 @@ function buildSubjectActivity(entries: LogEntry[], limit = 12): SubjectActivity[
 }
 
 function formatTypeCounts(typeCounts: Partial<Record<LogEntry["type"], number>>): string {
-  const ordered: LogEntry["type"][] = ["task", "decision", "fact", "question", "handoff"];
+  const ordered: LogEntry["type"][] = ["task", "decision", "fact", "question", "session_summary"];
   const parts: string[] = [];
 
   for (const type of ordered) {

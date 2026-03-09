@@ -6,7 +6,10 @@ import type { PluginConfig } from "../config";
 import type { CommandLike } from "../cli/command-like";
 import { registerBriefingCommands, runSessionHandoffRefresh } from "../cli/register-briefing-commands";
 import { writeState } from "../state";
-import { LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER } from "../memory/markers";
+import {
+  LAST_SESSION_SUMMARY_BEGIN_MARKER,
+  LAST_SESSION_SUMMARY_END_MARKER,
+} from "../memory/markers";
 
 function createConfig(logDir: string): PluginConfig {
   return {
@@ -176,7 +179,7 @@ describe("snapshot and handoff CLI commands", () => {
 
     await writeFile(
       join(logDir, "log.jsonl"),
-      '{"timestamp":"2026-03-03T09:02:00.000Z","id":"M3n4O5p6Q7r8","type":"handoff","subject":"reclaw","content":"Latest handoff content","session":"session-a"}\n',
+      '{"timestamp":"2026-03-03T09:02:00.000Z","id":"M3n4O5p6Q7r8","type":"session_summary","content":"Latest handoff content","session":"session-a"}\n',
       "utf8",
     );
     await mkdir(join(tempDir, "agents", "main", "sessions"), { recursive: true });
@@ -223,7 +226,7 @@ describe("snapshot and handoff CLI commands", () => {
     expect(rendered).toContain("workerSessionKey=agent:main:cron:job-9:run:worker-failed");
     expect(rendered).toContain("session=session-compaction-only result=none compaction=skipped");
     expect(rendered).toContain("compactionDetail=no new messages since last extraction");
-    expect(rendered).toContain("Handoffs");
+    expect(rendered).toContain("Session summaries");
     expect(rendered).toContain("session=session-a compact=extracted Latest handoff content");
     expect(rendered).toContain("sourceSessionKey=agent:main:main:session-a");
   });
@@ -287,7 +290,7 @@ describe("snapshot and handoff CLI commands", () => {
 
     await writeFile(
       join(logDir, "log.jsonl"),
-      '{"timestamp":"2026-03-01T09:00:00.000Z","id":"M3n4O5p6Q7r8","type":"handoff","subject":"reclaw","content":"Session handoff","session":"session-42"}\n',
+      '{"timestamp":"2026-03-01T09:00:00.000Z","id":"M3n4O5p6Q7r8","type":"session_summary","content":"Session handoff","session":"session-42"}\n',
       "utf8",
     );
 
@@ -337,10 +340,10 @@ describe("snapshot and handoff CLI commands", () => {
     }
 
     const rendered = output.join("\n");
-    expect(rendered).toContain("Handoff status for session=session-42");
+    expect(rendered).toContain("Session summary status for session=session-42");
     expect(rendered).toContain("Compaction: extracted");
     expect(rendered).toContain("Extraction: success");
-    expect(rendered).toContain("Handoff: yes");
+    expect(rendered).toContain("Session summary: yes");
   });
   test("runSessionHandoffRefresh writes the latest handoff entry into MEMORY.md", async () => {
     const logPath = join(logDir, "log.jsonl");
@@ -348,8 +351,8 @@ describe("snapshot and handoff CLI commands", () => {
       logPath,
       [
         '{"timestamp":"2026-03-01T00:01:00.000Z","id":"A1b2C3d4E5f6","type":"fact","subject":"reclaw","content":"Fact entry","session":"s-1"}',
-        '{"timestamp":"2026-03-01T00:02:00.000Z","id":"G7h8I9j0K1l2","type":"handoff","subject":"reclaw","content":"Earlier handoff","session":"s-2"}',
-        '{"timestamp":"2026-03-01T00:03:00.000Z","id":"M3n4O5p6Q7r8","type":"handoff","subject":"reclaw","content":"Latest handoff","detail":"Carry this forward","session":"s-3"}',
+        '{"timestamp":"2026-03-01T00:02:00.000Z","id":"G7h8I9j0K1l2","type":"session_summary","content":"Earlier handoff","session":"s-2"}',
+        '{"timestamp":"2026-03-01T00:03:00.000Z","id":"M3n4O5p6Q7r8","type":"session_summary","content":"Latest handoff","detail":"Carry this forward","session":"s-3"}',
         "",
       ].join("\n"),
       "utf8",
@@ -358,7 +361,7 @@ describe("snapshot and handoff CLI commands", () => {
     const memoryPath = join(workspaceDir, "MEMORY.md");
     await writeFile(
       memoryPath,
-      [LAST_HANDOFF_BEGIN_MARKER, "Old handoff text", LAST_HANDOFF_END_MARKER, ""].join("\n"),
+      [LAST_SESSION_SUMMARY_BEGIN_MARKER, "Old handoff text", LAST_SESSION_SUMMARY_END_MARKER, ""].join("\n"),
       "utf8",
     );
 
@@ -369,7 +372,7 @@ describe("snapshot and handoff CLI commands", () => {
 
     expect(result.updated).toBe(true);
     const memoryText = await readFile(memoryPath, "utf8");
-    expect(memoryText).toContain("## Previous Session Handoff (s-3)");
+    expect(memoryText).toContain("## Previous Session Summary (s-3)");
     expect(memoryText).toContain("Latest handoff");
     expect(memoryText).toContain("### Details");
     expect(memoryText).toContain("Carry this forward");

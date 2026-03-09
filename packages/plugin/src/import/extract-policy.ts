@@ -14,7 +14,7 @@ export const HISTORICAL_IMPORT_SYSTEM_PREFIX = [
   "- Examples to skip: menus, store addresses/hours, trivia/song ID requests, generic explainers, transient shopping lookups, and codebase architecture details (database schemas, contract patterns, dependency lists) discoverable from project source code.",
   "- Do not extract the act of researching or asking about something. Only extract the durable conclusion or preference that resulted. 'User researched X' or 'User asked about X' entries are not durable.",
   "- Do not emit speculative questions. Only emit `question` entries for things the user explicitly left unresolved.",
-  "- Do not emit handoff entries in historical import mode.",
+  "- Do not emit session_summary entries in historical import mode.",
   "- You may include an optional `timestamp` field per entry for historical placement.",
   "- Prefer exact timestamps from transcript messages when available.",
   "- If confidence is low, emit a `question` instead of an uncertain `fact`.",

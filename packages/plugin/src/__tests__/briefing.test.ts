@@ -7,8 +7,8 @@ import { generateBriefing } from "../briefing/generate";
 import {
   BRIEFING_BEGIN_MARKER,
   BRIEFING_END_MARKER,
-  LAST_HANDOFF_BEGIN_MARKER,
-  LAST_HANDOFF_END_MARKER,
+  LAST_SESSION_SUMMARY_BEGIN_MARKER,
+  LAST_SESSION_SUMMARY_END_MARKER,
 } from "../memory/markers";
 import { writeState } from "../state";
 
@@ -354,7 +354,7 @@ describe("briefing generation", () => {
     expect(capturedUserInput).toContain("Historically important fact from search recall");
   });
 
-  test("briefing generation preserves handoff markers and content", async () => {
+  test("briefing generation preserves session summary markers and content", async () => {
     await writeFile(
       memoryPath,
       [
@@ -365,10 +365,10 @@ describe("briefing generation", () => {
         "old briefing content",
         BRIEFING_END_MARKER,
         "",
-        LAST_HANDOFF_BEGIN_MARKER,
+        LAST_SESSION_SUMMARY_BEGIN_MARKER,
         "Session: session-9 (2026-02-19T00:00:00.000Z)",
         "Auth migration handoff snapshot",
-        LAST_HANDOFF_END_MARKER,
+        LAST_SESSION_SUMMARY_END_MARKER,
       ].join("\n"),
       "utf8",
     );
@@ -386,8 +386,8 @@ describe("briefing generation", () => {
 
     const content = await readFile(memoryPath, "utf8");
     expect(content).toContain("## Active");
-    expect(content).toContain(LAST_HANDOFF_BEGIN_MARKER);
-    expect(content).toContain(LAST_HANDOFF_END_MARKER);
+    expect(content).toContain(LAST_SESSION_SUMMARY_BEGIN_MARKER);
+    expect(content).toContain(LAST_SESSION_SUMMARY_END_MARKER);
     expect(content).toContain("Auth migration handoff snapshot");
   });
 });

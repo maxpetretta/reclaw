@@ -8,8 +8,8 @@ import {
   AGENTS_MEMORY_GUIDANCE_END_MARKER,
   BRIEFING_BEGIN_MARKER,
   BRIEFING_END_MARKER,
-  LAST_HANDOFF_BEGIN_MARKER,
-  LAST_HANDOFF_END_MARKER,
+  LAST_SESSION_SUMMARY_BEGIN_MARKER,
+  LAST_SESSION_SUMMARY_END_MARKER,
   MEMORY_NOTICE_BEGIN_MARKER,
   MEMORY_NOTICE_END_MARKER,
 } from "../memory/markers";
@@ -141,6 +141,7 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     const sessionMemoryHook = toObject(hookEntries["session-memory"]);
     const sessionMemoryDisabled = sessionMemoryHook.enabled === false;
     const hasProjectionMemoryPath = extraPaths.includes(paths.projectionDir);
+    const hasSessionSummaryProjectionPath = extraPaths.includes(paths.sessionSummaryProjectionDir);
 
     if (
       slotValue === "reclaw" &&
@@ -149,7 +150,8 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
       pruneDisabled &&
       maxEntriesHigh &&
       resetArchiveDisabled &&
-      hasProjectionMemoryPath
+      hasProjectionMemoryPath &&
+      hasSessionSummaryProjectionPath
     ) {
       addCheck("openclaw.json", true, "ok");
     } else {
@@ -179,6 +181,9 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
       if (!hasProjectionMemoryPath) {
         issues.push(`agents.defaults.memorySearch.extraPaths is missing "${paths.projectionDir}"`);
       }
+      if (!hasSessionSummaryProjectionPath) {
+        issues.push(`agents.defaults.memorySearch.extraPaths is missing "${paths.sessionSummaryProjectionDir}"`);
+      }
       addCheck("openclaw.json", false, issues.join("; "));
     }
   } catch (error) {
@@ -204,22 +209,22 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     const memoryContent = await readFile(paths.memoryMdPath, "utf8");
     const hasBriefingMarkers =
       memoryContent.includes(BRIEFING_BEGIN_MARKER) && memoryContent.includes(BRIEFING_END_MARKER);
-    const hasHandoffMarkers =
-      memoryContent.includes(LAST_HANDOFF_BEGIN_MARKER) &&
-      memoryContent.includes(LAST_HANDOFF_END_MARKER);
+    const hasSessionSummaryMarkers =
+      memoryContent.includes(LAST_SESSION_SUMMARY_BEGIN_MARKER) &&
+      memoryContent.includes(LAST_SESSION_SUMMARY_END_MARKER);
     const hasNoticeMarkers =
       memoryContent.includes(MEMORY_NOTICE_BEGIN_MARKER) &&
       memoryContent.includes(MEMORY_NOTICE_END_MARKER);
 
-    if (hasBriefingMarkers && hasHandoffMarkers && hasNoticeMarkers) {
+    if (hasBriefingMarkers && hasSessionSummaryMarkers && hasNoticeMarkers) {
       addCheck("MEMORY.md", true, "ok");
     } else {
       const issues: string[] = [];
       if (!hasBriefingMarkers) {
         issues.push("missing generated memory snapshot markers");
       }
-      if (!hasHandoffMarkers) {
-        issues.push("missing reclaw session handoff markers");
+      if (!hasSessionSummaryMarkers) {
+        issues.push("missing reclaw session summary markers");
       }
       if (!hasNoticeMarkers) {
         issues.push("missing reclaw memory notice");
@@ -239,6 +244,17 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     );
   } catch (error) {
     addCheck("reclaw projection dir", false, isEnoent(error) ? "missing" : String(error));
+  }
+
+  try {
+    const projectionDirStat = await stat(paths.sessionSummaryProjectionDir);
+    addCheck(
+      "reclaw session summary projection dir",
+      projectionDirStat.isDirectory(),
+      projectionDirStat.isDirectory() ? "ok" : "not a directory",
+    );
+  } catch (error) {
+    addCheck("reclaw session summary projection dir", false, isEnoent(error) ? "missing" : String(error));
   }
 
   const qmdCollections = listQmdCollections();

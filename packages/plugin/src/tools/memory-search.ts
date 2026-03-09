@@ -61,6 +61,10 @@ function extractTextFromToolResult(result: unknown): string {
 }
 
 function formatLogEntry(entry: LogEntry): string {
+  if (entry.type === "session_summary") {
+    return `[id=${entry.id}] [${entry.type}] session=${entry.session} — ${entry.content} (${entry.timestamp})`;
+  }
+
   const subject = entry.subject ?? "unknown";
   if (entry.type === "task") {
     return `[id=${entry.id}] [${entry.type}] ${subject} [status=${entry.status}] — ${entry.content} (${entry.timestamp})`;
@@ -133,7 +137,7 @@ function buildParametersSchema(baseParameters: unknown): Record<string, unknown>
     type: "object",
     properties: {
       ...existingProperties,
-      type: { type: "string", enum: ["task", "fact", "decision", "question", "handoff"] },
+      type: { type: "string", enum: ["task", "fact", "decision", "question", "session_summary"] },
       subject: { type: "string" },
       status: { type: "string", enum: ["open", "done"] },
     },

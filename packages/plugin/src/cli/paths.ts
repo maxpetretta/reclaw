@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { PluginConfig } from "../config";
 import { resolveOpenClawHome } from "../lib/runtime-env";
+import { SESSION_SUMMARY_PROJECTION_DIRNAME } from "../projections/session-summaries";
 import { SUBJECT_PROJECTION_DIRNAME } from "../projections/subjects";
 
 export interface InitPaths {
@@ -13,12 +14,14 @@ export interface InitPaths {
   agentsMdPath: string;
   memoryMdPath: string;
   projectionDir: string;
+  sessionSummaryProjectionDir: string;
 }
 
 export function resolvePaths(config: PluginConfig, workspaceDir?: string): InitPaths {
   const openClawHome = resolveOpenClawHome();
   const resolvedWorkspaceDir = workspaceDir?.trim() || process.cwd();
   const projectionDir = join(config.logDir, SUBJECT_PROJECTION_DIRNAME);
+  const sessionSummaryProjectionDir = join(config.logDir, SESSION_SUMMARY_PROJECTION_DIRNAME);
 
   return {
     logDir: config.logDir,
@@ -30,5 +33,6 @@ export function resolvePaths(config: PluginConfig, workspaceDir?: string): InitP
     agentsMdPath: join(resolvedWorkspaceDir, "AGENTS.md"),
     memoryMdPath: join(resolvedWorkspaceDir, "MEMORY.md"),
     projectionDir,
+    sessionSummaryProjectionDir,
   };
 }

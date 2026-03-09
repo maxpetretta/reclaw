@@ -120,7 +120,7 @@ export function applyRequiredSubjectFallback(raw: unknown): unknown {
   const type = typeof candidate.type === "string" ? candidate.type : undefined;
   const subject = typeof candidate.subject === "string" ? candidate.subject.trim() : "";
 
-  if (type !== "handoff" && subject.length === 0) {
+  if (type !== "session_summary" && subject.length === 0) {
     candidate.subject = GENERAL_SUBJECT_SLUG;
     return candidate;
   }
@@ -136,7 +136,7 @@ export function parseExtractionJsonl(
   rawOutput: string,
   opts: {
     includeTimestampHint?: boolean;
-    dropHandoff?: boolean;
+    dropSessionSummary?: boolean;
   } = {},
 ): ParsedExtractionOutput {
   const entries: ParsedExtractionEntry[] = [];
@@ -173,7 +173,7 @@ export function parseExtractionJsonl(
       continue;
     }
 
-    if (opts.dropHandoff && validated.entry.type === "handoff") {
+    if (opts.dropSessionSummary && validated.entry.type === "session_summary") {
       continue;
     }
 

@@ -8,8 +8,8 @@ import {
   AGENTS_MEMORY_GUIDANCE_END_MARKER,
   BRIEFING_BEGIN_MARKER,
   BRIEFING_END_MARKER,
-  LAST_HANDOFF_BEGIN_MARKER,
-  LAST_HANDOFF_END_MARKER,
+  LAST_SESSION_SUMMARY_BEGIN_MARKER,
+  LAST_SESSION_SUMMARY_END_MARKER,
   MEMORY_NOTICE_BEGIN_MARKER,
   MEMORY_NOTICE_END_MARKER,
 } from "../memory/markers";
@@ -191,8 +191,8 @@ describe("cli init helpers", () => {
     expect(cronJobs.jobs?.some((job) => job.name === "reclaw-nightly")).toBe(false);
     expect(memoryContent).toContain(BRIEFING_BEGIN_MARKER);
     expect(memoryContent).toContain(BRIEFING_END_MARKER);
-    expect(memoryContent).toContain(LAST_HANDOFF_BEGIN_MARKER);
-    expect(memoryContent).toContain(LAST_HANDOFF_END_MARKER);
+    expect(memoryContent).toContain(LAST_SESSION_SUMMARY_BEGIN_MARKER);
+    expect(memoryContent).toContain(LAST_SESSION_SUMMARY_END_MARKER);
     expect(projectionDirEntries).toEqual([]);
     expect(initResult.guidanceEvent.sent).toBe(true);
     expect(initResult.qmd).toEqual(createQmdResult(join(logDir, "memory")));

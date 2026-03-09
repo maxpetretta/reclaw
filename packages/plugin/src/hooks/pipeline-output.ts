@@ -2,21 +2,19 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { ExtractionModelResult } from "../lib/llm";
 import type { LogEntry } from "../log/schema";
 import { readRegistry } from "../subjects/registry";
-import { parseExtractionJsonl, type ParsedExtractionEntry } from "../extraction/shared";
+import { parseExtractionJsonl, type ParsedExtractionEntry, type ParsedExtractionOutput } from "../extraction/shared";
 
 function toOutputRecord(output: string | ExtractionModelResult): ExtractionModelResult {
   return typeof output === "string" ? { output } : output;
 }
 
-function describeLiveOutputIssue(parsedEntries: ParsedExtractionEntry[]): string | undefined {
-  const handoffCount = parsedEntries.filter((entry) => entry.entry.type === "handoff").length;
-  if (handoffCount !== 1) {
-    return `live extraction output must contain exactly one handoff event; found ${handoffCount}`;
+function describeLiveOutputIssue(parsed: ParsedExtractionOutput): string | undefined {
+  if (parsed.entries.length > 0) {
+    return undefined;
   }
 
-  const lastEntry = parsedEntries[parsedEntries.length - 1];
-  if (!lastEntry || lastEntry.entry.type !== "handoff") {
-    return "live extraction output must end with the handoff event";
+  if (parsed.nonEmptyLines > 0 && parsed.invalidLineCount === parsed.nonEmptyLines) {
+    return "live extraction output did not contain any valid durable events";
   }
 
   return undefined;
@@ -50,8 +48,10 @@ export async function validateLiveExtractionOutput(params: {
   let outputRecord = params.outputRecord;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const parsed = parseExtractionJsonl(outputRecord.output);
-    const issue = describeLiveOutputIssue(parsed.entries);
+    const parsed = parseExtractionJsonl(outputRecord.output, {
+      dropSessionSummary: true,
+    });
+    const issue = describeLiveOutputIssue(parsed);
     if (!issue) {
       return {
         parsedEntries: parsed.entries,

@@ -30,8 +30,6 @@ import { runExtractionPipeline, type ExtractionPaths } from "./pipeline";
 import {
   type ExtractionHookDeps,
   readTrimmedString,
-  readWorkspaceDir,
-  resolveMemoryMdPath,
 } from "./extraction-common";
 
 const COMPACTION_FALLBACK_WINDOW_MS = 10 * 60 * 1000;
@@ -287,7 +285,6 @@ export async function runCompactionExtraction(params: {
       messages: deltaMessages,
       transcriptMessageCount: allMessages.length,
       paths,
-      memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
       config,
       deps: runtimeDeps,
       logger: api.logger,

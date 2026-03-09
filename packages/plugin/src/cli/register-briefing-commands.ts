@@ -6,8 +6,8 @@ import { generateBriefing } from "../briefing/generate";
 import type { PluginConfig } from "../config";
 import { listSessionCandidates } from "../hooks/session-discovery";
 import { isEnoent, isObject } from "../lib/guards";
-import { getLastHandoff, queryLog } from "../log/query";
-import { applyLastHandoffBlock } from "../memory/handoff";
+import { getLastSessionSummary, queryLog } from "../log/query";
+import { applyLastSessionSummaryBlock } from "../memory/session-summary";
 import { appendSnapshotRun, readState, type SnapshotRunState } from "../state";
 import { readPositiveNumberOption, toObject } from "./parse";
 import { resolvePaths } from "./paths";
@@ -19,12 +19,12 @@ interface SnapshotGenerateParams {
   workspaceDir?: string;
 }
 
-interface SessionHandoffRefreshParams {
+interface SessionSummaryRefreshParams {
   config: PluginConfig;
   workspaceDir?: string;
 }
 
-interface SessionHandoffRefreshResult {
+interface SessionSummaryRefreshResult {
   updated: boolean;
   memoryMdPath: string;
 }
@@ -164,15 +164,15 @@ export async function runSnapshotGenerate(params: SnapshotGenerateParams): Promi
   return await runSnapshotRefresh(params);
 }
 
-export async function runSessionHandoffRefresh(
-  params: SessionHandoffRefreshParams,
-): Promise<SessionHandoffRefreshResult> {
+export async function runSessionSummaryRefresh(
+  params: SessionSummaryRefreshParams,
+): Promise<SessionSummaryRefreshResult> {
   const paths = resolvePaths(params.config, params.workspaceDir);
-  const [latestHandoff, state] = await Promise.all([
-    getLastHandoff(paths.logPath),
+  const [latestSummary, state] = await Promise.all([
+    getLastSessionSummary(paths.logPath),
     readState(paths.statePath),
   ]);
-  if (!latestHandoff) {
+  if (!latestSummary) {
     return {
       updated: false,
       memoryMdPath: paths.memoryMdPath,
@@ -180,10 +180,10 @@ export async function runSessionHandoffRefresh(
   }
 
   let sourceSessionKey =
-    state.extractedSessions[latestHandoff.session]?.sourceSessionKey ??
-    state.failedSessions[latestHandoff.session]?.sourceSessionKey;
+    state.extractedSessions[latestSummary.session]?.sourceSessionKey ??
+    state.failedSessions[latestSummary.session]?.sourceSessionKey;
   if (!sourceSessionKey) {
-    sourceSessionKey = (await resolveSessionKeyLookup([latestHandoff.session])).get(latestHandoff.session);
+    sourceSessionKey = (await resolveSessionKeyLookup([latestSummary.session])).get(latestSummary.session);
   }
 
   let memoryContent = "";
@@ -195,7 +195,7 @@ export async function runSessionHandoffRefresh(
     }
   }
 
-  const updatedMemory = applyLastHandoffBlock(memoryContent, latestHandoff, {
+  const updatedMemory = applyLastSessionSummaryBlock(memoryContent, latestSummary, {
     sessionKey: sourceSessionKey,
   });
   await mkdir(dirname(paths.memoryMdPath), { recursive: true });
@@ -205,6 +205,12 @@ export async function runSessionHandoffRefresh(
     updated: true,
     memoryMdPath: paths.memoryMdPath,
   };
+}
+
+export async function runSessionHandoffRefresh(
+  params: SessionSummaryRefreshParams,
+): Promise<SessionSummaryRefreshResult> {
+  return await runSessionSummaryRefresh(params);
 }
 
 async function listSnapshotRuns(
@@ -299,7 +305,7 @@ async function printSnapshotStatus(
   console.log(`Today compactions observed: ${status.compactedTodayCount}`);
 }
 
-async function printHandoffList(
+async function printSessionSummaryList(
   params: {
     config: PluginConfig;
     workspaceDir?: string;
@@ -307,14 +313,14 @@ async function printHandoffList(
   limit: number,
 ): Promise<void> {
   const paths = resolvePaths(params.config, params.workspaceDir);
-  const [state, handoffs] = await Promise.all([
+  const [state, summaries] = await Promise.all([
     readState(paths.statePath),
-    queryLog(paths.logPath, { type: "handoff" }),
+    queryLog(paths.logPath, { type: "session_summary" }),
   ]);
 
-  const selected = handoffs.slice(0, limit);
+  const selected = summaries.slice(0, limit);
   if (selected.length === 0) {
-    console.log("No handoff entries.");
+    console.log("No session summary entries.");
     return;
   }
 
@@ -327,7 +333,7 @@ async function printHandoffList(
   }
 }
 
-async function printHandoffStatus(
+async function printSessionSummaryStatus(
   params: {
     config: PluginConfig;
     workspaceDir?: string;
@@ -335,24 +341,24 @@ async function printHandoffStatus(
   sessionId?: string,
 ): Promise<void> {
   const paths = resolvePaths(params.config, params.workspaceDir);
-  const [state, latestHandoff] = await Promise.all([
+  const [state, latestSummary] = await Promise.all([
     readState(paths.statePath),
-    getLastHandoff(paths.logPath),
+    getLastSessionSummary(paths.logPath),
   ]);
 
   const normalizedSessionId = sessionId?.trim();
   if (normalizedSessionId) {
-    const handoffEntries = await queryLog(paths.logPath, {
-      type: "handoff",
+    const sessionSummaryEntries = await queryLog(paths.logPath, {
+      type: "session_summary",
       session: normalizedSessionId,
     });
 
     const compaction = state.compactionSessions[normalizedSessionId];
     const extracted = state.extractedSessions[normalizedSessionId];
     const failed = state.failedSessions[normalizedSessionId];
-    const latestForSession = handoffEntries[0];
+    const latestForSession = sessionSummaryEntries[0];
 
-    console.log(`Handoff status for session=${normalizedSessionId}`);
+    console.log(`Session summary status for session=${normalizedSessionId}`);
     if (compaction) {
       const compactionDetail = compaction.reason ?? compaction.error ?? "";
       console.log(
@@ -371,9 +377,9 @@ async function printHandoffStatus(
     }
 
     if (latestForSession) {
-      console.log(`Handoff: yes at ${formatTimestamp(latestForSession.timestamp)} (${truncateText(latestForSession.content, 90)})`);
+      console.log(`Session summary: yes at ${formatTimestamp(latestForSession.timestamp)} (${truncateText(latestForSession.content, 90)})`);
     } else {
-      console.log("Handoff: no handoff entry for this session");
+      console.log("Session summary: no session summary entry for this session");
     }
 
     return;
@@ -382,19 +388,19 @@ async function printHandoffStatus(
   const startOfDay = getStartOfTodayIso();
   const extractedToday = Object.values(state.extractedSessions)
     .filter((session) => isAtOrAfter(session.at, startOfDay));
-  const handoffsToday = (await queryLog(paths.logPath, { type: "handoff" }))
+  const sessionSummariesToday = (await queryLog(paths.logPath, { type: "session_summary" }))
     .filter((entry) => isAtOrAfter(entry.timestamp, startOfDay));
 
-  console.log("Handoff status");
-  if (!latestHandoff) {
-    console.log("Latest handoff: none");
+  console.log("Session summary status");
+  if (!latestSummary) {
+    console.log("Latest session summary: none");
   } else {
     console.log(
-      `Latest handoff: ${formatTimestamp(latestHandoff.timestamp)} session=${latestHandoff.session} ${truncateText(latestHandoff.content, 90)}`,
+      `Latest session summary: ${formatTimestamp(latestSummary.timestamp)} session=${latestSummary.session} ${truncateText(latestSummary.content, 90)}`,
     );
   }
 
-  console.log(`Today handoffs: ${handoffsToday.length}`);
+  console.log(`Today session summaries: ${sessionSummariesToday.length}`);
   console.log(`Today extracted sessions: ${extractedToday.length}`);
 }
 
@@ -410,9 +416,9 @@ async function printUnifiedStatusList(
 ): Promise<void> {
   const maxItems = opts.showAll ? Number.POSITIVE_INFINITY : limit;
   const paths = resolvePaths(params.config, params.workspaceDir);
-  const [state, handoffs] = await Promise.all([
+  const [state, sessionSummaries] = await Promise.all([
     readState(paths.statePath),
-    queryLog(paths.logPath, { type: "handoff" }),
+    queryLog(paths.logPath, { type: "session_summary" }),
   ]);
 
   const extractionSessionIds = [...new Set([
@@ -469,10 +475,10 @@ async function printUnifiedStatusList(
     .slice(0, maxItems);
 
   const snapshotRuns = state.snapshotRuns.slice(0, maxItems);
-  const handoffRows = handoffs.slice(0, maxItems);
+  const sessionSummaryRows = sessionSummaries.slice(0, maxItems);
   const sessionKeyLookup = await resolveSessionKeyLookup([
     ...extractionRows.map((row) => row.sessionId),
-    ...handoffRows.map((entry) => entry.session),
+    ...sessionSummaryRows.map((entry) => entry.session),
   ]);
 
   console.log(opts.showAll ? "Reclaw status (all)" : `Reclaw status (recent ${limit})`);
@@ -528,18 +534,18 @@ async function printUnifiedStatusList(
   }
 
   console.log("");
-  console.log("Handoffs");
-  if (handoffRows.length === 0) {
+  console.log("Session summaries");
+  if (sessionSummaryRows.length === 0) {
     console.log("- none");
   } else {
-    for (const handoff of handoffRows) {
-      const compactionStatus = state.compactionSessions[handoff.session]?.status ?? "n/a";
-      const sourceSessionKey = state.extractedSessions[handoff.session]?.sourceSessionKey ??
-        state.failedSessions[handoff.session]?.sourceSessionKey ??
-        sessionKeyLookup.get(handoff.session);
+    for (const summary of sessionSummaryRows) {
+      const compactionStatus = state.compactionSessions[summary.session]?.status ?? "n/a";
+      const sourceSessionKey = state.extractedSessions[summary.session]?.sourceSessionKey ??
+        state.failedSessions[summary.session]?.sourceSessionKey ??
+        sessionKeyLookup.get(summary.session);
       const sourceSessionKeyText = ` | sourceSessionKey=${sourceSessionKey ?? "n/a"}`;
       console.log(
-        `- [${formatTimestamp(handoff.timestamp)}] session=${handoff.session} compact=${compactionStatus} ${truncateText(handoff.content, 90)}${sourceSessionKeyText}`,
+        `- [${formatTimestamp(summary.timestamp)}] session=${summary.session} compact=${compactionStatus} ${truncateText(summary.content, 90)}${sourceSessionKeyText}`,
       );
     }
   }
@@ -568,20 +574,20 @@ export function registerBriefingCommands(
     clackOutro("MEMORY.md snapshot block updated.");
   };
 
-  const runHandoffRefresh = async (): Promise<void> => {
+  const runSessionSummaryRefreshAction = async (): Promise<void> => {
     clackIntro(BANNER);
-    const result = await runSessionHandoffRefresh({
+    const result = await runSessionSummaryRefresh({
       config: params.config,
       workspaceDir: params.workspaceDir,
     });
 
     if (result.updated) {
-      clackLog.step("Session handoff refreshed");
-      clackOutro("MEMORY.md handoff block updated.");
+      clackLog.step("Session summary refreshed");
+      clackOutro("MEMORY.md session summary block updated.");
       return;
     }
 
-    clackOutro("No handoff entries found. MEMORY.md unchanged.");
+    clackOutro("No session summary entries found. MEMORY.md unchanged.");
   };
 
   const snapshot = reclaw.command("snapshot").description("Memory snapshot helpers");
@@ -620,19 +626,19 @@ export function registerBriefingCommands(
       });
     });
 
-  const handoff = reclaw.command("handoff").description("Reclaw session handoff helpers");
-  handoff
+  const summary = reclaw.command("summary").description("Reclaw session summary helpers");
+  summary
     .command("refresh")
-    .description("Force-refresh MEMORY.md session handoff block from latest handoff event")
-    .action(runHandoffRefresh);
+    .description("Force-refresh MEMORY.md session summary block from latest session summary event")
+    .action(runSessionSummaryRefreshAction);
 
-  handoff
+  summary
     .command("list")
-    .description("List recent handoff entries with compaction status")
-    .option("--limit <n>", "Max handoffs to print", 10)
+    .description("List recent session summary entries with compaction status")
+    .option("--limit <n>", "Max session summaries to print", 10)
     .action(async (opts: unknown) => {
       const options = toObject(opts);
-      await printHandoffList(
+      await printSessionSummaryList(
         {
           config: params.config,
           workspaceDir: params.workspaceDir,
@@ -641,11 +647,40 @@ export function registerBriefingCommands(
       );
     });
 
+  summary
+    .command("status [sessionId]")
+    .description("Show session-summary/extraction/compaction status (optionally for a specific session)")
+    .action(async (sessionId: unknown) => {
+      await printSessionSummaryStatus(
+        {
+          config: params.config,
+          workspaceDir: params.workspaceDir,
+        },
+        typeof sessionId === "string" && sessionId.trim().length > 0 ? sessionId.trim() : undefined,
+      );
+    });
+
+  const handoff = reclaw.command("handoff").description("Alias for `reclaw summary`");
+  handoff.command("refresh").description("Alias for `summary refresh`").action(runSessionSummaryRefreshAction);
+  handoff
+    .command("list")
+    .description("Alias for `summary list`")
+    .option("--limit <n>", "Max session summaries to print", 10)
+    .action(async (opts: unknown) => {
+      const options = toObject(opts);
+      await printSessionSummaryList(
+        {
+          config: params.config,
+          workspaceDir: params.workspaceDir,
+        },
+        readPositiveNumberOption(options.limit, 10),
+      );
+    });
   handoff
     .command("status [sessionId]")
-    .description("Show handoff/extraction/compaction status (optionally for a specific session)")
+    .description("Alias for `summary status`")
     .action(async (sessionId: unknown) => {
-      await printHandoffStatus(
+      await printSessionSummaryStatus(
         {
           config: params.config,
           workspaceDir: params.workspaceDir,
@@ -656,7 +691,7 @@ export function registerBriefingCommands(
 
   reclaw
     .command("status")
-    .description("List recent snapshots, extractions (success/failed), and handoffs")
+    .description("List recent snapshots, extractions (success/failed), and session summaries")
     .option("--limit <n>", "Max items to print per section", 10)
     .option("--all", "Show all items in each section", false)
     .action(async (opts: unknown) => {

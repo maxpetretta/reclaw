@@ -355,7 +355,7 @@ export async function searchLog(
   return applyFilterAndResolution(allEntries, candidateIds, filter);
 }
 
-export async function getLastHandoff(logPath: string): Promise<LogEntry | undefined> {
+export async function getLastSessionSummary(logPath: string): Promise<LogEntry | undefined> {
   let fileHandle: Awaited<ReturnType<typeof open>>;
 
   try {
@@ -391,14 +391,14 @@ export async function getLastHandoff(logPath: string): Promise<LogEntry | undefi
 
       for (let index = lines.length - 1; index >= 0; index -= 1) {
         const entry = parseLine(lines[index] ?? "");
-        if (entry?.type === "handoff") {
+        if (entry?.type === "session_summary") {
           return entry;
         }
       }
     }
 
     const finalEntry = parseLine(remainder);
-    if (finalEntry?.type === "handoff") {
+    if (finalEntry?.type === "session_summary") {
       return finalEntry;
     }
 

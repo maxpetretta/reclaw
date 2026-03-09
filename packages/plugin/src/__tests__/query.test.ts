@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEntry, type LogEntry } from "../log/schema";
 import {
-  getLastHandoff,
+  getLastSessionSummary,
   queryBySubjects,
   queryExtractionContext,
   queryLog,
@@ -55,19 +55,17 @@ describe("query", () => {
     {
       id: "hid000000001",
       timestamp: "2026-02-24T08:00:00.000Z",
-      type: "handoff",
-      content: "Initial handoff",
+      type: "session_summary",
+      content: "Initial session summary",
       detail: "open backfill task",
-      subject: "auth-migration",
       session: "s5",
     },
     {
       id: "hid000000002",
       timestamp: "2026-02-25T08:00:00.000Z",
-      type: "handoff",
-      content: "Latest handoff",
+      type: "session_summary",
+      content: "Latest session summary",
       detail: "queue is stable",
-      subject: "auth-migration",
       session: "s6",
     },
     {
@@ -135,16 +133,14 @@ describe("query", () => {
     }
   });
 
-  test("getLastHandoff returns the most recent handoff entry", async () => {
-    const last = await getLastHandoff(logPath);
+  test("getLastSessionSummary returns the most recent session summary entry", async () => {
+    const last = await getLastSessionSummary(logPath);
     expect(last?.id).toBe("hid000000002");
   });
 
   test("queryBySubjects returns current entries for matching subjects", async () => {
     const entries = await queryBySubjects(logPath, ["auth-migration"]);
     expect(entries.map((entry) => entry.id)).toEqual([
-      "hid000000002",
-      "hid000000001",
       "tiddone00001",
       "tidopen00001",
       "did000000001",
@@ -161,8 +157,6 @@ describe("query", () => {
     const context = await queryExtractionContext(logPath, ["auth-migration"]);
     expect(context.map((entry) => entry.id)).toEqual([
       "qid000000002",
-      "hid000000002",
-      "hid000000001",
       "tiddone00001",
       "tidopen00001",
       "did000000001",

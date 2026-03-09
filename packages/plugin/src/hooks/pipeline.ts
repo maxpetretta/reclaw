@@ -24,7 +24,6 @@ import { validateLiveExtractionOutput } from "./pipeline-output";
 import {
   recordTranscriptCitationUsage,
   refreshTouchedSubjectProjections,
-  writeLatestHandoff,
 } from "./pipeline-side-effects";
 
 export interface ExtractionPaths {
@@ -32,6 +31,7 @@ export interface ExtractionPaths {
   subjectsPath: string;
   statePath: string;
   projectionDir: string;
+  sessionSummaryProjectionDir: string;
 }
 
 export interface ExtractionPipelineDeps {
@@ -53,15 +53,12 @@ export interface ExtractionPipelineDeps {
     apiBaseUrl?: string;
     apiToken?: string;
   }) => Promise<string | ExtractionModelResult>;
-  readMemoryFile: (path: string) => Promise<string>;
-  writeMemoryFile: (path: string, content: string) => Promise<void>;
 }
 
 interface ExtractionPipelineParams {
   sessionId: string;
   messages: TranscriptMessage[];
   paths: ExtractionPaths;
-  memoryMdPath: string;
   config: PluginConfig;
   deps: ExtractionPipelineDeps;
   logger: OpenClawPluginApi["logger"];
@@ -191,16 +188,6 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
       );
     }
 
-    const finalHandoff = appendedEntries[appendedEntries.length - 1];
-    await writeLatestHandoff({
-      sessionId: params.sessionId,
-      finalHandoff,
-      memoryMdPath: params.memoryMdPath,
-      sourceSessionKey: params.sourceSessionKey,
-      readMemoryFile: params.deps.readMemoryFile,
-      writeMemoryFile: params.deps.writeMemoryFile,
-      logger: params.logger,
-    });
     await refreshTouchedSubjectProjections({
       sessionId: params.sessionId,
       projectionDir: params.paths.projectionDir,

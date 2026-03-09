@@ -3,6 +3,10 @@ import type { PluginConfig } from "../config";
 import { normalizeError } from "../lib/guards";
 import { resolveApiBaseUrlFromConfig } from "../lib/runtime-env";
 import { findTranscriptFile, readTranscript } from "../lib/transcript";
+import { appendEntry, finalizeEntry } from "../log/schema";
+import { queryLog } from "../log/query";
+import { applyLastSessionSummaryBlock } from "../memory/session-summary";
+import { refreshSessionSummaryProjections } from "../projections/session-summaries";
 import { markFailed } from "../state";
 import { findSessionKeyForSession, listSessionCandidates, shouldExtractSession } from "./session-discovery";
 import { hasUserMessage, loadBeforeResetMessages } from "./transcript-utils";
@@ -13,6 +17,85 @@ import {
   readWorkspaceDir,
   resolveMemoryMdPath,
 } from "./extraction-common";
+
+const ACTIVE_EXTRACTIONS = new Set<string>();
+
+async function runExclusiveExtraction(
+  sessionId: string,
+  logger: OpenClawPluginApi["logger"],
+  run: () => Promise<void>,
+): Promise<void> {
+  if (ACTIVE_EXTRACTIONS.has(sessionId)) {
+    logger.info(`reclaw extraction skipped ${sessionId}: extraction already in progress`);
+    return;
+  }
+
+  ACTIVE_EXTRACTIONS.add(sessionId);
+  try {
+    await run();
+  } finally {
+    ACTIVE_EXTRACTIONS.delete(sessionId);
+  }
+}
+
+async function writeSessionSummary(params: {
+  api: OpenClawPluginApi;
+  config: PluginConfig;
+  paths: ExtractionPaths;
+  runtimeDeps: ExtractionHookDeps;
+  messages: Awaited<ReturnType<typeof readTranscript>>;
+  sessionId: string;
+  sessionKey?: string;
+  memoryMdPath: string;
+}): Promise<void> {
+  const { api, config, paths, runtimeDeps, messages, sessionId, sessionKey, memoryMdPath } = params;
+  const existingSummary = (await queryLog(paths.logPath, {
+    type: "session_summary",
+    session: sessionId,
+  }))[0];
+  let entry = existingSummary;
+  if (!entry) {
+    const draft = await runtimeDeps.generateSessionSummary({
+      messages,
+      sessionId,
+      sessionKey,
+      model: config.extraction.model,
+    });
+    const detailParts = [
+      draft.detail?.trim(),
+      `Use memory_get("session:${sessionId}") for the full transcript if implementation detail is needed.`,
+    ].filter((value): value is string => typeof value === "string" && value.length > 0);
+    entry = finalizeEntry(
+      {
+        type: "session_summary",
+        content: draft.content,
+        ...(detailParts.length > 0 ? { detail: detailParts.join("\n\n") } : {}),
+      },
+      { sessionId },
+    );
+    await appendEntry(paths.logPath, entry);
+  }
+
+  try {
+    const memoryContent = await runtimeDeps.readMemoryFile(memoryMdPath);
+    const updatedMemory = applyLastSessionSummaryBlock(memoryContent, entry, {
+      sessionKey,
+    });
+    await runtimeDeps.writeMemoryFile(memoryMdPath, updatedMemory);
+  } catch (error) {
+    api.logger.warn(`reclaw session summary write failed for ${sessionId}: ${normalizeError(error)}`);
+  }
+
+  try {
+    await refreshSessionSummaryProjections({
+      projectionDir: paths.sessionSummaryProjectionDir,
+      logPath: paths.logPath,
+      sessionIds: [sessionId],
+    });
+  } catch (error) {
+    api.logger.warn(`reclaw session summary projection refresh failed for ${sessionId}: ${normalizeError(error)}`);
+  }
+}
 
 export async function runSessionEndExtraction(params: {
   api: OpenClawPluginApi;
@@ -55,17 +138,18 @@ export async function runSessionEndExtraction(params: {
     return;
   }
 
-  await runExtractionPipeline({
-    sessionId: event.sessionId,
-    messages,
-    paths,
-    memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
-    config,
-    deps: runtimeDeps,
-    logger: api.logger,
-    apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
-    apiToken,
-    sourceSessionKey: sessionKey,
+  await runExclusiveExtraction(event.sessionId, api.logger, async () => {
+    await runExtractionPipeline({
+      sessionId: event.sessionId,
+      messages,
+      paths,
+      config,
+      deps: runtimeDeps,
+      logger: api.logger,
+      apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
+      apiToken,
+      sourceSessionKey: sessionKey,
+    });
   });
 }
 
@@ -96,17 +180,34 @@ export async function runBeforeResetExtraction(params: {
     return;
   }
 
-  await runExtractionPipeline({
-    sessionId: ctx.sessionId,
-    messages,
-    paths,
-    memoryMdPath: resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath),
+  const sourceSessionKey = readTrimmedString(ctx.sessionKey);
+  const memoryMdPath = resolveMemoryMdPath(readWorkspaceDir(ctx), api.resolvePath);
+
+  await writeSessionSummary({
+    api,
     config,
-    deps: runtimeDeps,
-    logger: api.logger,
-    apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
-    apiToken,
-    sourceSessionKey: readTrimmedString(ctx.sessionKey),
+    paths,
+    runtimeDeps,
+    messages,
+    sessionId: ctx.sessionId,
+    sessionKey: sourceSessionKey,
+    memoryMdPath,
+  });
+
+  void runExclusiveExtraction(ctx.sessionId, api.logger, async () => {
+    await runExtractionPipeline({
+      sessionId: ctx.sessionId!,
+      messages,
+      paths,
+      config,
+      deps: runtimeDeps,
+      logger: api.logger,
+      apiBaseUrl: resolveApiBaseUrlFromConfig(api.config),
+      apiToken,
+      sourceSessionKey,
+    });
+  }).catch((error) => {
+    api.logger.warn(`reclaw before_reset background extraction failed: ${normalizeError(error)}`);
   });
 }
 
@@ -146,17 +247,18 @@ export async function runGatewayStartSweep(params: {
       continue;
     }
 
-    await runExtractionPipeline({
-      sessionId: candidate.sessionId,
-      messages,
-      paths,
-      memoryMdPath: resolveMemoryMdPath(undefined, api.resolvePath),
-      config,
-      deps: runtimeDeps,
-      logger: api.logger,
-      apiBaseUrl: resolveApiBaseUrlFromConfig(api.config, event.port),
-      apiToken,
-      sourceSessionKey: resolvedSessionKey,
+    await runExclusiveExtraction(candidate.sessionId, api.logger, async () => {
+      await runExtractionPipeline({
+        sessionId: candidate.sessionId,
+        messages,
+        paths,
+        config,
+        deps: runtimeDeps,
+        logger: api.logger,
+        apiBaseUrl: resolveApiBaseUrlFromConfig(api.config, event.port),
+        apiToken,
+        sourceSessionKey: resolvedSessionKey,
+      });
     });
   }
 }

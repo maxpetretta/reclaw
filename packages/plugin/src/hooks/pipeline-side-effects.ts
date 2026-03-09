@@ -1,8 +1,6 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { normalizeError } from "../lib/guards";
 import { queryByIds } from "../log/query";
-import type { LogEntry } from "../log/schema";
-import { applyLastHandoffBlock } from "../memory/handoff";
 import { refreshSubjectProjections } from "../projections/subjects";
 import { incrementEventUsage } from "../state";
 
@@ -51,30 +49,6 @@ export async function recordTranscriptCitationUsage(params: {
 
   const citedIds = [...new Set(existingCitedEntries.map((entry) => entry.id))];
   await incrementEventUsage(params.statePath, citedIds, "citation");
-}
-
-export async function writeLatestHandoff(params: {
-  sessionId: string;
-  finalHandoff: LogEntry | undefined;
-  memoryMdPath: string;
-  sourceSessionKey?: string;
-  readMemoryFile: (path: string) => Promise<string>;
-  writeMemoryFile: (path: string, content: string) => Promise<void>;
-  logger: OpenClawPluginApi["logger"];
-}): Promise<void> {
-  if (params.finalHandoff?.type !== "handoff") {
-    return;
-  }
-
-  try {
-    const memoryContent = await params.readMemoryFile(params.memoryMdPath);
-    const updatedMemory = applyLastHandoffBlock(memoryContent, params.finalHandoff, {
-      sessionKey: params.sourceSessionKey,
-    });
-    await params.writeMemoryFile(params.memoryMdPath, updatedMemory);
-  } catch (error) {
-    params.logger.warn(`reclaw handoff write failed for ${params.sessionId}: ${normalizeError(error)}`);
-  }
 }
 
 export async function refreshTouchedSubjectProjections(params: {

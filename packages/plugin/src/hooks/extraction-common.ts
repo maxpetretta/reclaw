@@ -2,10 +2,15 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isObject } from "../lib/guards";
 import { extractFromTranscriptWithMeta, repairExtractionOutputWithMeta } from "../lib/llm";
+import { generateSessionSummary } from "../session-summary/generate";
 import { resolvePaths } from "../cli/paths";
 import type { ExtractionPaths, ExtractionPipelineDeps } from "./pipeline";
 
-export interface ExtractionHookDeps extends ExtractionPipelineDeps {}
+export interface ExtractionHookDeps extends ExtractionPipelineDeps {
+  readMemoryFile: (path: string) => Promise<string>;
+  writeMemoryFile: (path: string, content: string) => Promise<void>;
+  generateSessionSummary: typeof generateSessionSummary;
+}
 
 const DEFAULT_DEPS: ExtractionHookDeps = {
   extractFromTranscript: extractFromTranscriptWithMeta,
@@ -30,6 +35,7 @@ const DEFAULT_DEPS: ExtractionHookDeps = {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content, "utf8");
   },
+  generateSessionSummary,
 };
 
 export function createExtractionHookDeps(deps: Partial<ExtractionHookDeps>): ExtractionHookDeps {
@@ -85,6 +91,7 @@ export function resolveExtractionPaths(config: { logDir: string }): ExtractionPa
     subjectsPath: paths.subjectsPath,
     statePath: paths.statePath,
     projectionDir: paths.projectionDir,
+    sessionSummaryProjectionDir: paths.sessionSummaryProjectionDir,
   };
 }
 

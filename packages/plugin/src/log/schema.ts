@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { nanoid } from "nanoid";
 import { isNonEmptyString, isObject } from "../lib/guards";
 
-export const ENTRY_TYPES = ["task", "fact", "decision", "question", "handoff"] as const;
+export const ENTRY_TYPES = ["task", "fact", "decision", "question", "session_summary"] as const;
 export const VALID_SUBJECT_TYPES = ["project", "person", "system", "topic"] as const;
 export const GENERAL_SUBJECT_SLUG = "unknown";
 
@@ -52,12 +52,12 @@ interface QuestionEntry extends SubjectScopedEntry {
   type: "question";
 }
 
-interface HandoffEntry extends BaseEntry {
-  type: "handoff";
+interface SessionSummaryEntry extends BaseEntry {
+  type: "session_summary";
   subject?: string;
 }
 
-export type LogEntry = TaskEntry | FactEntry | DecisionEntry | QuestionEntry | HandoffEntry;
+export type LogEntry = TaskEntry | FactEntry | DecisionEntry | QuestionEntry | SessionSummaryEntry;
 
 const COMMON_REQUIRED_FIELDS = ["content", "type"] as const;
 const COMMON_OPTIONAL_FIELDS = ["detail"] as const;
@@ -118,7 +118,7 @@ function buildLlmEntry(
 ): { ok: true; entry: Omit<LogEntry, "id" | "timestamp" | "session"> } | { ok: false; error: string } {
   const type = parseEntryType(raw.type);
   if (!type) {
-    return { ok: false, error: "type must be one of task, fact, decision, question, handoff" };
+    return { ok: false, error: "type must be one of task, fact, decision, question, session_summary" };
   }
 
   const commonValidation = validateCommonTextFields(raw);
@@ -130,8 +130,8 @@ function buildLlmEntry(
   const detail = raw.detail as string | undefined;
   const subject = parseSubject(raw.subject);
 
-  if (type !== "handoff" && !subject) {
-    return { ok: false, error: "subject must be a non-empty string for non-handoff entries" };
+  if (type !== "session_summary" && !subject) {
+    return { ok: false, error: "subject must be a non-empty string for non-session_summary entries" };
   }
 
   if (type === "task") {
@@ -152,7 +152,7 @@ function buildLlmEntry(
     };
   }
 
-  if (type === "handoff") {
+  if (type === "session_summary") {
     return {
       ok: true,
       entry: {
@@ -275,7 +275,7 @@ export function validateLlmOutput(
 
   const type = parseEntryType(raw.type);
   if (!type) {
-    return { ok: false, error: "type must be one of task, fact, decision, question, handoff" };
+    return { ok: false, error: "type must be one of task, fact, decision, question, session_summary" };
   }
 
   const allowedKeys = new Set([

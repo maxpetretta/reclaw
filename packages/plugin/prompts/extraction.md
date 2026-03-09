@@ -13,9 +13,6 @@ You will receive:
 - **decision**: A choice was made. Include what was decided and why (use the detail field).
   Includes preferences, observations, events, lessons — anything learned or observed.
 - **question**: An open loop. Something unresolved that needs an answer.
-- **handoff**: Session boundary. Exactly one per session, at the end. Records what's
-  in-flight and what's unresolved. Don't repeat decisions or tasks already captured
-  as separate entries — the handoff is for working state, not a session recap.
 
 ## Rules
 
@@ -40,7 +37,7 @@ You will receive:
    `subjectType` to `person`.
    If unsure, use `topic`. If an existing subject's type should be corrected,
    include `subjectType` on the entry and the hook may update the registry.
-   Subject is required for all non-handoff entries. If you truly cannot choose,
+   Subject is required for all extracted entries. If you truly cannot choose,
    use `unknown`.
    **Never use a person subject when a topical subject fits.** Person subjects
    are for facts about the person themselves (identity, location, age,
@@ -48,31 +45,30 @@ You will receive:
    `system` subject describing *what* was discussed — health, investing, golf,
    nutrition, career, a specific project name, etc. When in doubt, create a
    new topical slug rather than filing under a person.
-6. For standard (live) extraction, always produce exactly one handoff entry at the end.
-7. Skip trivial exchanges (greetings, acknowledgments, clarifying questions
+6. Skip trivial exchanges (greetings, acknowledgments, clarifying questions
    that led nowhere).
-8. Existing entries are provided so you can evolve memory, not duplicate it.
+7. Existing entries are provided so you can evolve memory, not duplicate it.
    To reason about history, list entries for the same subject in chronological order.
-9. Do not re-extract information that already exists in the log unless it has
+8. Do not re-extract information that already exists in the log unless it has
    materially changed. If the same concept appears in existing entries with
    substantially the same content, skip it entirely. This applies across
    subjects — if a fact about "auth-migration" already covers retry intervals, do not
    emit a near-identical entry.
-10. If a task is now done, emit a new `task` entry with `status: "done"` and
+9. If a task is now done, emit a new `task` entry with `status: "done"` and
     describe closure details in `detail` when useful.
-11. In historical import mode, apply a stricter filter: keep only durable items
+10. In historical import mode, apply a stricter filter: keep only durable items
     likely to help in future sessions. Skip one-off lookups (menus, business
     addresses/hours, trivia/song identification, generic explainers) unless they
     reveal a stable user preference, constraint, or recurring pattern.
-12. In historical import mode, extraction density should scale with transcript
+11. In historical import mode, extraction density should scale with transcript
     complexity: longer transcripts should usually yield multiple durable entries.
-13. Only emit `question` for things the user explicitly left unresolved or
+12. Only emit `question` for things the user explicitly left unresolved or
     expressed uncertainty about. Do not invent follow-up questions the user
     never asked. Do not speculate about what the user might need to investigate.
-14. State facts definitively. If information is uncertain or speculative, emit
+13. State facts definitively. If information is uncertain or speculative, emit
     a `question` instead. Hedging language — maybe, probably, seems, appears,
     might — signals a question, not a fact.
-15. Use the right entry type. If a choice was made, emit `decision` (not `fact`).
+14. Use the right entry type. If a choice was made, emit `decision` (not `fact`).
     If work is actionable, emit `task` (not `fact`). Don't default to `fact`
     when a more specific type applies.
 
@@ -91,7 +87,6 @@ If only a day is known, use noon for that date.
 {"type":"task","content":"...","status":"done","subject":"...","detail":"..."}
 {"type":"fact","content":"...","subject":"unknown"}
 {"type":"fact","content":"...","subject":"...","timestamp":"2026-02-12T12:00:00.000Z"}
-{"type":"handoff","content":"...","detail":"..."}
 
 When introducing a new subject slug, add `"subjectType":"project|person|system|topic"` on that entry.
-In historical import mode, do not emit `handoff` entries.
+In historical import mode, do not emit `session_summary` entries.

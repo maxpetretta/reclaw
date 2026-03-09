@@ -145,17 +145,25 @@ function removeProjectionMemoryPath(root: Record<string, unknown>, projectionDir
   }
 }
 
-export async function updateOpenClawConfigForInit(configPath: string, projectionDir: string): Promise<void> {
+export async function updateOpenClawConfigForInit(
+  configPath: string,
+  projectionDirs: string[],
+): Promise<void> {
   const root = await readConfigObject(configPath);
   ensurePluginMemorySlot(root);
   ensureAgentMemoryFlushDisabled(root);
   ensureSessionRetentionForever(root);
   ensureSessionMemoryHookDisabled(root);
-  ensureProjectionMemoryPath(root, projectionDir);
+  for (const projectionDir of projectionDirs) {
+    ensureProjectionMemoryPath(root, projectionDir);
+  }
   await writeConfigObject(configPath, root);
 }
 
-export async function updateOpenClawConfigForUninstall(configPath: string, projectionDir: string): Promise<void> {
+export async function updateOpenClawConfigForUninstall(
+  configPath: string,
+  projectionDirs: string[],
+): Promise<void> {
   const root = await readConfigObjectOrEmpty(configPath);
   if (!root) {
     return;
@@ -165,6 +173,8 @@ export async function updateOpenClawConfigForUninstall(configPath: string, proje
   removeAgentMemoryFlush(root);
   removeSessionRetention(root);
   removeSessionMemoryHook(root);
-  removeProjectionMemoryPath(root, projectionDir);
+  for (const projectionDir of projectionDirs) {
+    removeProjectionMemoryPath(root, projectionDir);
+  }
   await writeConfigObject(configPath, root);
 }

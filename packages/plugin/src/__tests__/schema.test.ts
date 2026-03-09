@@ -60,7 +60,7 @@ describe("schema", () => {
     }
   });
 
-  test("validateLlmOutput requires subject for non-handoff entries", () => {
+  test("validateLlmOutput requires subject for non-session_summary entries", () => {
     const validated = validateLlmOutput({
       type: "fact",
       content: "bad",
@@ -72,9 +72,9 @@ describe("schema", () => {
     }
   });
 
-  test("validateLlmOutput allows handoff without subject", () => {
+  test("validateLlmOutput allows session_summary without subject", () => {
     const validated = validateLlmOutput({
-      type: "handoff",
+      type: "session_summary",
       content: "Need follow-up",
     });
 

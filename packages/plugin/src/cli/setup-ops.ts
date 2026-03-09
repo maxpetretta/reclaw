@@ -8,9 +8,10 @@ import { ensureManagedBlock } from "../memory/managed-block";
 import {
   BRIEFING_BEGIN_MARKER,
   BRIEFING_END_MARKER,
-  LAST_HANDOFF_BEGIN_MARKER,
-  LAST_HANDOFF_END_MARKER,
+  LAST_SESSION_SUMMARY_BEGIN_MARKER,
+  LAST_SESSION_SUMMARY_END_MARKER,
 } from "../memory/markers";
+import { ensureSessionSummaryProjectionDir } from "../projections/session-summaries";
 import { ensureSubjectProjectionDir } from "../projections/subjects";
 import { ensureStoreFiles } from "../store/files";
 import {
@@ -115,13 +116,17 @@ export async function ensureMemoryMarkers(memoryMdPath: string): Promise<void> {
   }
 
   const withBriefing = ensureManagedBlock(content, BRIEFING_BEGIN_MARKER, BRIEFING_END_MARKER);
-  const withHandoff = ensureManagedBlock(withBriefing, LAST_HANDOFF_BEGIN_MARKER, LAST_HANDOFF_END_MARKER);
-  if (withHandoff === content) {
+  const withSessionSummary = ensureManagedBlock(
+    withBriefing,
+    LAST_SESSION_SUMMARY_BEGIN_MARKER,
+    LAST_SESSION_SUMMARY_END_MARKER,
+  );
+  if (withSessionSummary === content) {
     return;
   }
 
   await mkdir(dirname(memoryMdPath), { recursive: true });
-  await writeFile(memoryMdPath, withHandoff, "utf8");
+  await writeFile(memoryMdPath, withSessionSummary, "utf8");
 }
 
 export async function removeGeneratedBriefingBlock(memoryMdPath: string): Promise<void> {
@@ -240,9 +245,13 @@ export async function runInit(
   const paths = resolvePaths(config, workspaceDir);
 
   await ensureLogStoreFiles(paths);
-  await updateOpenClawConfigForInit(paths.openClawConfigPath, paths.projectionDir);
+  await updateOpenClawConfigForInit(paths.openClawConfigPath, [
+    paths.projectionDir,
+    paths.sessionSummaryProjectionDir,
+  ]);
   await ensureMemoryMarkers(paths.memoryMdPath);
   await ensureSubjectProjectionDir(paths.projectionDir);
+  await ensureSessionSummaryProjectionDir(paths.sessionSummaryProjectionDir);
   const qmd = await (deps.ensureQmdCollection ?? ensureQmdCollection)(paths.projectionDir);
   await ensureBriefingCron(paths, config);
 
@@ -259,7 +268,10 @@ export async function runInit(
 export async function runUninstall(config: PluginConfig, workspaceDir?: string): Promise<InitPaths> {
   const paths = resolvePaths(config, workspaceDir);
 
-  await updateOpenClawConfigForUninstall(paths.openClawConfigPath, paths.projectionDir);
+  await updateOpenClawConfigForUninstall(paths.openClawConfigPath, [
+    paths.projectionDir,
+    paths.sessionSummaryProjectionDir,
+  ]);
   await removeGeneratedBriefingBlock(paths.memoryMdPath);
   await removeBriefingCron(paths);
 
