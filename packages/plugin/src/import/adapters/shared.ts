@@ -1,5 +1,5 @@
 import { isObject } from "../../lib/guards";
-import type { ImportedRole } from "../types";
+import type { ImportedConversation, ImportedRole } from "../types";
 
 export function readString(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -133,4 +133,32 @@ export function normalizeRole(
   }
 
   return null;
+}
+
+export function isLikelyExport(
+  raw: unknown,
+  looksLike: (value: unknown) => boolean,
+): boolean {
+  const conversations = readConversationList(raw);
+  if (conversations.length === 0) {
+    return false;
+  }
+
+  return conversations.slice(0, 5).some(looksLike);
+}
+
+export function parseConversations(
+  raw: unknown,
+  parse: (value: unknown, index: number) => ImportedConversation | null,
+): ImportedConversation[] {
+  const conversations: ImportedConversation[] = [];
+
+  for (const [index, conversationRaw] of readConversationList(raw).entries()) {
+    const parsed = parse(conversationRaw, index);
+    if (parsed) {
+      conversations.push(parsed);
+    }
+  }
+
+  return conversations;
 }

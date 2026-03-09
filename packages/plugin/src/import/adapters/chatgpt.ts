@@ -2,8 +2,9 @@ import { isObject } from "../../lib/guards";
 import type { ImportedConversation, ImportedMessage, ImportedRole } from "../types";
 import {
   extractText,
+  isLikelyExport,
   normalizeRole,
-  readConversationList,
+  parseConversations,
   readString,
   toIso,
 } from "./shared";
@@ -270,27 +271,9 @@ function looksLikeChatGptConversation(raw: unknown): boolean {
 }
 
 export function isLikelyChatGptExport(raw: unknown): boolean {
-  const conversations = readConversationList(raw);
-  if (conversations.length === 0) {
-    return false;
-  }
-
-  const sample = conversations.slice(0, 5);
-  return sample.some((conversation) => looksLikeChatGptConversation(conversation));
+  return isLikelyExport(raw, looksLikeChatGptConversation);
 }
 
-
 export function parseChatGptConversations(raw: unknown): ImportedConversation[] {
-  const conversations: ImportedConversation[] = [];
-
-  for (const [index, conversationRaw] of readConversationList(raw).entries()) {
-    const parsed = parseConversation(conversationRaw, index);
-    if (!parsed) {
-      continue;
-    }
-
-    conversations.push(parsed);
-  }
-
-  return conversations;
+  return parseConversations(raw, parseConversation);
 }
