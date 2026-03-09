@@ -1,0 +1,135 @@
+---
+import "@fontsource-variable/inter/standard.css"
+import "@/styles/global.css"
+import {
+  heroEyebrow,
+  heroTitleAccent,
+  heroTitleLead,
+  siteDomain,
+} from "@/lib/site"
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1200" />
+    <meta name="robots" content="noindex" />
+    <title>OG Image</title>
+  </head>
+
+  <body class="bg-background text-foreground antialiased">
+    <div class="og-frame">
+      <!-- Amber orb -->
+      <div class="amber-orb" aria-hidden="true"></div>
+      <!-- Strata lines -->
+      <div class="strata" aria-hidden="true">
+        <div class="strata-line" style="--y: 18%; --w: 60%; --delay: 0s;"></div>
+        <div class="strata-line" style="--y: 34%; --w: 45%; --delay: 0.4s;"></div>
+        <div class="strata-line" style="--y: 52%; --w: 70%; --delay: 0.8s;"></div>
+        <div class="strata-line" style="--y: 68%; --w: 38%; --delay: 1.2s;"></div>
+        <div class="strata-line" style="--y: 82%; --w: 55%; --delay: 1.6s;"></div>
+      </div>
+
+      <div class="og-content">
+        <p class="og-eyebrow">{heroEyebrow}</p>
+        <h1 class="og-title">
+          {heroTitleLead}<br />
+          <span class="og-title-accent">{heroTitleAccent}</span>
+        </h1>
+        <div class="og-install">
+          <span class="og-install-prompt">$</span>
+          <code>openclaw plugins install reclaw</code>
+        </div>
+      </div>
+
+      <div class="og-domain">{siteDomain}</div>
+    </div>
+  </body>
+</html>
+
+<style is:global>
+  .og-frame {
+    width: 1200px;
+    height: 630px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    background:
+      radial-gradient(circle at 20% 0%, rgba(255, 107, 53, 0.18) 0%, transparent 40%),
+      radial-gradient(circle at 80% 30%, rgba(240, 101, 67, 0.12) 0%, transparent 38%),
+      var(--background);
+  }
+
+  .og-frame .amber-orb {
+    width: 500px;
+    height: 500px;
+  }
+
+  .og-frame .strata-line {
+    animation: none;
+    opacity: 0.7;
+  }
+
+  .og-content {
+    position: relative;
+    z-index: 10;
+    padding: 0 60px 0 100px;
+    max-width: 100%;
+  }
+
+  .og-eyebrow {
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(251, 191, 36, 0.9);
+    margin-bottom: 32px;
+  }
+
+  .og-title {
+    font-size: 108px;
+    font-weight: 800;
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+  }
+
+  .og-title-accent {
+    background: linear-gradient(to right, #fbbf24, #fb923c, #f87171);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .og-install {
+    display: inline-flex;
+    align-items: center;
+    gap: 17px;
+    margin-top: 40px;
+    padding: 18px 34px;
+    border-radius: 16px;
+    border: 1px solid rgba(251, 191, 36, 0.15);
+    background: rgba(251, 191, 36, 0.06);
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 32px;
+    color: rgba(238, 243, 251, 0.7);
+  }
+
+  .og-install-prompt {
+    color: rgba(251, 191, 36, 0.5);
+  }
+
+  .og-domain {
+    position: absolute;
+    bottom: 36px;
+    right: 48px;
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 36px;
+    font-weight: 600;
+    color: var(--muted-foreground);
+    opacity: 0.6;
+  }
+
+  astro-dev-toolbar { display: none !important; }
+</style>

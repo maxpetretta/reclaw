@@ -2,10 +2,23 @@
 import "@fontsource-variable/inter/standard.css"
 import "@fontsource-variable/inter/standard-italic.css"
 import "@/styles/global.css"
+import {
+  heroEyebrow,
+  heroSubtitleIntro,
+  heroSubtitleLinkLabel,
+  heroSubtitleOutro,
+  heroTitleAccent,
+  heroTitleLead,
+  ogImageAlt,
+  pageDescription,
+  pageTitle,
+  siteUrl,
+} from "@/lib/site"
 
-const title = "Reclaw | Long-term memory for your Claw"
-const description =
-  "Durable memory for OpenClaw. Your AI conversations produce knowledge — Reclaw makes sure none of it gets lost."
+const title = pageTitle
+const description = pageDescription
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? siteUrl).toString()
+const ogImageUrl = new URL("/og.png", Astro.site ?? siteUrl).toString()
 
 const features = [
   {
@@ -55,7 +68,18 @@ const features = [
     <title>{title}</title>
     <meta name="description" content={description} />
     <meta name="theme-color" content="#0b0f14" />
-    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site ?? "https://reclaw.sh")} />
+    <link rel="canonical" href={canonicalUrl} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:image:alt" content={ogImageAlt} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content={ogImageUrl} />
+    <meta name="twitter:image:alt" content={ogImageAlt} />
   </head>
 
   <body class="bg-background text-foreground antialiased">
@@ -87,14 +111,14 @@ const features = [
 
       <div class="relative z-10 max-w-3xl text-center">
         <p class="hero-kicker mb-5 text-sm font-semibold tracking-[0.2em] uppercase text-amber-400/90 mx-6">
-          Long-term memory for your Claw
+          {heroEyebrow}
         </p>
         <h1 class="hero-title text-4xl sm:text-6xl md:text-7xl font-extrabold leading-[1.08] tracking-tight">
-          Your best ideas are<br />
-          <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-orange-400 to-red-400">buried in old chats</span>
+          {heroTitleLead}<br />
+          <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-orange-400 to-red-400">{heroTitleAccent}</span>
         </h1>
         <p class="hero-sub mt-7 text-base sm:text-xl text-muted-foreground max-w-xl mx-auto leading-relaxed">
-          Every conversation with your AI produces knowledge. Reclaw is an <a href="https://openclaw.com" target="_blank" rel="noopener" class="text-foreground/90 hover:text-amber-400 underline decoration-amber-500/30 underline-offset-2 transition-colors">OpenClaw</a> plugin that captures the important bits, so your assistant can pick up right where you left off.
+          {heroSubtitleIntro}<a href="https://openclaw.com" target="_blank" rel="noopener" class="text-foreground/90 hover:text-amber-400 underline decoration-amber-500/30 underline-offset-2 transition-colors">{heroSubtitleLinkLabel}</a>{heroSubtitleOutro}
         </p>
         <div class="hero-actions mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
           <div class="group relative">
