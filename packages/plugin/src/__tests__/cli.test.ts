@@ -14,7 +14,6 @@ import {
   MEMORY_NOTICE_END_MARKER,
 } from "../memory/markers";
 import {
-  __cliTestExports,
   detectImportSources,
   queueImportJob,
   resumeImportJobs,
@@ -27,6 +26,10 @@ import {
   runVerify,
   verifySetup,
 } from "../cli/commands";
+import { resolveImportPathForPlatform } from "../cli/import-detect";
+import { parseInteractiveImportJobs } from "../cli/import-ui";
+import { buildTraceReport } from "../cli/register-log-commands";
+import { normalizeCliInputPath } from "../lib/path";
 import { IMPORT_STOP_REQUESTED_ERROR } from "../import/run";
 import { readState, writeState } from "../state";
 
@@ -423,7 +426,7 @@ describe("cli init helpers", () => {
   });
 
   test("buildTraceReport groups entries by subject chronology", () => {
-    const report = __cliTestExports.buildTraceReport([
+    const report = buildTraceReport([
       {
         id: "root00000001",
         timestamp: "2026-02-20T00:00:00.000Z",
@@ -798,22 +801,22 @@ describe("cli init helpers", () => {
   });
 
   test("normalizeCliInputPath expands tilde to home directory", () => {
-    const resolved = __cliTestExports.normalizeCliInputPath("~/Desktop/extracts-mini/grok");
+    const resolved = normalizeCliInputPath("~/Desktop/extracts-mini/grok");
     expect(resolved).toBe(resolvePath(join(homedir(), "Desktop/extracts-mini/grok")));
   });
 
   test("parseInteractiveImportJobs accepts integers from 1 to 10", () => {
-    expect(__cliTestExports.parseInteractiveImportJobs("1")).toBe(1);
-    expect(__cliTestExports.parseInteractiveImportJobs("10")).toBe(10);
-    expect(__cliTestExports.parseInteractiveImportJobs(3)).toBe(3);
+    expect(parseInteractiveImportJobs("1")).toBe(1);
+    expect(parseInteractiveImportJobs("10")).toBe(10);
+    expect(parseInteractiveImportJobs(3)).toBe(3);
   });
 
   test("parseInteractiveImportJobs rejects invalid or out-of-range values", () => {
-    expect(__cliTestExports.parseInteractiveImportJobs("0")).toBeUndefined();
-    expect(__cliTestExports.parseInteractiveImportJobs("11")).toBeUndefined();
-    expect(__cliTestExports.parseInteractiveImportJobs("-1")).toBeUndefined();
-    expect(__cliTestExports.parseInteractiveImportJobs("abc")).toBeUndefined();
-    expect(__cliTestExports.parseInteractiveImportJobs("2.5")).toBeUndefined();
+    expect(parseInteractiveImportJobs("0")).toBeUndefined();
+    expect(parseInteractiveImportJobs("11")).toBeUndefined();
+    expect(parseInteractiveImportJobs("-1")).toBeUndefined();
+    expect(parseInteractiveImportJobs("abc")).toBeUndefined();
+    expect(parseInteractiveImportJobs("2.5")).toBeUndefined();
   });
 
   test("resolveImportPathForPlatform accepts grok directory input and resolves JSON export", async () => {
@@ -837,7 +840,7 @@ describe("cli init helpers", () => {
       "utf8",
     );
 
-    const resolved = await __cliTestExports.resolveImportPathForPlatform("grok", grokDir);
+    const resolved = await resolveImportPathForPlatform("grok", grokDir);
     expect(resolved).toBe(grokExportPath);
   });
 
@@ -896,7 +899,7 @@ describe("cli init helpers", () => {
       "utf8",
     );
 
-    const resolved = await __cliTestExports.resolveImportPathForPlatform("chatgpt", chatgptDir);
+    const resolved = await resolveImportPathForPlatform("chatgpt", chatgptDir);
     expect(resolved).toBe(conversationsPath);
   });
 

@@ -1,14 +1,11 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { ensureQmdCollection, installQmdGlobal } from "../lib/qmd";
-import { normalizeCliInputPath } from "../lib/path";
 import type { CommandLike } from "./command-like";
-import { detectImportSources, resolveImportPathForPlatform } from "./import-detect";
-import { parseInteractiveImportJobs } from "./import-ui";
-import { resolvePaths } from "./paths";
+import { detectImportSources } from "./import-detect";
 import { registerBriefingCommands } from "./register-briefing-commands";
 import { registerImportCommands } from "./register-import-commands";
-import { buildTraceReport, registerLogCommands } from "./register-log-commands";
+import { registerLogCommands } from "./register-log-commands";
 import { registerProjectionCommands } from "./register-projection-commands";
 import { registerSetupCommands } from "./register-setup-commands";
 import { registerSubjectCommands } from "./register-subject-commands";
@@ -91,12 +88,4 @@ export {
   type InitResult,
   type VerifyCheck,
   type VerifyResult,
-};
-
-export const __cliTestExports = {
-  resolvePaths,
-  buildTraceReport,
-  resolveImportPathForPlatform,
-  normalizeCliInputPath,
-  parseInteractiveImportJobs,
 };
