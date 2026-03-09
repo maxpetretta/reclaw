@@ -160,10 +160,6 @@ export async function runSnapshotRefresh(params: SnapshotGenerateParams): Promis
   return paths.memoryMdPath;
 }
 
-export async function runSnapshotGenerate(params: SnapshotGenerateParams): Promise<string> {
-  return await runSnapshotRefresh(params);
-}
-
 export async function runSessionSummaryRefresh(
   params: SessionSummaryRefreshParams,
 ): Promise<SessionSummaryRefreshResult> {
@@ -205,12 +201,6 @@ export async function runSessionSummaryRefresh(
     updated: true,
     memoryMdPath: paths.memoryMdPath,
   };
-}
-
-export async function runSessionHandoffRefresh(
-  params: SessionSummaryRefreshParams,
-): Promise<SessionSummaryRefreshResult> {
-  return await runSessionSummaryRefresh(params);
 }
 
 async function listSnapshotRuns(
@@ -597,11 +587,6 @@ export function registerBriefingCommands(
     .action(runSnapshotRefreshAction);
 
   snapshot
-    .command("generate")
-    .description("Alias for `snapshot refresh`")
-    .action(runSnapshotRefreshAction);
-
-  snapshot
     .command("list")
     .description("List recent snapshot refresh runs")
     .option("--limit <n>", "Max runs to print", 10)
@@ -650,35 +635,6 @@ export function registerBriefingCommands(
   summary
     .command("status [sessionId]")
     .description("Show session-summary/extraction/compaction status (optionally for a specific session)")
-    .action(async (sessionId: unknown) => {
-      await printSessionSummaryStatus(
-        {
-          config: params.config,
-          workspaceDir: params.workspaceDir,
-        },
-        typeof sessionId === "string" && sessionId.trim().length > 0 ? sessionId.trim() : undefined,
-      );
-    });
-
-  const handoff = reclaw.command("handoff").description("Alias for `reclaw summary`");
-  handoff.command("refresh").description("Alias for `summary refresh`").action(runSessionSummaryRefreshAction);
-  handoff
-    .command("list")
-    .description("Alias for `summary list`")
-    .option("--limit <n>", "Max session summaries to print", 10)
-    .action(async (opts: unknown) => {
-      const options = toObject(opts);
-      await printSessionSummaryList(
-        {
-          config: params.config,
-          workspaceDir: params.workspaceDir,
-        },
-        readPositiveNumberOption(options.limit, 10),
-      );
-    });
-  handoff
-    .command("status [sessionId]")
-    .description("Alias for `summary status`")
     .action(async (sessionId: unknown) => {
       await printSessionSummaryStatus(
         {

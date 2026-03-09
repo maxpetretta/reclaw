@@ -70,11 +70,6 @@ export function registerProjectionCommands(
     .action(runRefreshAction);
 
   projection
-    .command("generate [subject]")
-    .description("Alias for `projection refresh`")
-    .action(runRefreshAction);
-
-  projection
     .command("list")
     .description("List generated subject projection files")
     .action(async () => {

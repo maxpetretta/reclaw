@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PluginConfig } from "../config";
 import type { CommandLike } from "../cli/command-like";
-import { registerBriefingCommands, runSessionHandoffRefresh } from "../cli/register-briefing-commands";
+import { registerBriefingCommands, runSessionSummaryRefresh } from "../cli/register-briefing-commands";
 import { writeState } from "../state";
 import {
   LAST_SESSION_SUMMARY_BEGIN_MARKER,
@@ -61,7 +61,7 @@ class MockCommand implements CommandLike {
   }
 }
 
-describe("snapshot and handoff CLI commands", () => {
+describe("snapshot and summary CLI commands", () => {
   let tempDir = "";
   let workspaceDir = "";
   let logDir = "";
@@ -88,7 +88,7 @@ describe("snapshot and handoff CLI commands", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  test("registers snapshot and handoff command sets with refresh/list/status", () => {
+  test("registers snapshot and summary command sets with refresh/list/status", () => {
     const root = new MockCommand("reclaw");
     registerBriefingCommands(root, {
       config: createConfig(logDir),
@@ -97,19 +97,18 @@ describe("snapshot and handoff CLI commands", () => {
     });
 
     expect(root.children.has("snapshot")).toBe(true);
-    expect(root.children.has("handoff")).toBe(true);
-    expect(root.children.has("briefing")).toBe(false);
+    expect(root.children.has("handoff")).toBe(false);
 
     const snapshot = root.children.get("snapshot");
     expect(snapshot?.children.has("refresh")).toBe(true);
-    expect(snapshot?.children.has("generate")).toBe(true);
+    expect(snapshot?.children.has("generate")).toBe(false);
     expect(snapshot?.children.has("list")).toBe(true);
     expect(snapshot?.children.has("status")).toBe(true);
 
-    const handoff = root.children.get("handoff");
-    expect(handoff?.children.has("refresh")).toBe(true);
-    expect(handoff?.children.has("list")).toBe(true);
-    expect(handoff?.children.has("status [sessionId]")).toBe(true);
+    const summary = root.children.get("summary");
+    expect(summary?.children.has("refresh")).toBe(true);
+    expect(summary?.children.has("list")).toBe(true);
+    expect(summary?.children.has("status [sessionId]")).toBe(true);
 
     expect(root.children.has("status")).toBe(true);
   });
@@ -280,7 +279,7 @@ describe("snapshot and handoff CLI commands", () => {
   });
 
 
-  test("handoff status command reports compaction and extraction for a session", async () => {
+  test("summary status command reports compaction and extraction for a session", async () => {
     const root = new MockCommand("reclaw");
     registerBriefingCommands(root, {
       config: createConfig(logDir),
@@ -290,7 +289,7 @@ describe("snapshot and handoff CLI commands", () => {
 
     await writeFile(
       join(logDir, "log.jsonl"),
-      '{"timestamp":"2026-03-01T09:00:00.000Z","id":"M3n4O5p6Q7r8","type":"session_summary","content":"Session handoff","session":"session-42"}\n',
+      '{"timestamp":"2026-03-01T09:00:00.000Z","id":"M3n4O5p6Q7r8","type":"session_summary","content":"Session summary","session":"session-42"}\n',
       "utf8",
     );
 
@@ -320,7 +319,7 @@ describe("snapshot and handoff CLI commands", () => {
 
     const handler = root
       .children
-      .get("handoff")
+      .get("summary")
       ?.children
       .get("status [sessionId]")
       ?.actionHandler;
@@ -345,14 +344,14 @@ describe("snapshot and handoff CLI commands", () => {
     expect(rendered).toContain("Extraction: success");
     expect(rendered).toContain("Session summary: yes");
   });
-  test("runSessionHandoffRefresh writes the latest handoff entry into MEMORY.md", async () => {
+  test("runSessionSummaryRefresh writes the latest session summary into MEMORY.md", async () => {
     const logPath = join(logDir, "log.jsonl");
     await writeFile(
       logPath,
       [
         '{"timestamp":"2026-03-01T00:01:00.000Z","id":"A1b2C3d4E5f6","type":"fact","subject":"reclaw","content":"Fact entry","session":"s-1"}',
-        '{"timestamp":"2026-03-01T00:02:00.000Z","id":"G7h8I9j0K1l2","type":"session_summary","content":"Earlier handoff","session":"s-2"}',
-        '{"timestamp":"2026-03-01T00:03:00.000Z","id":"M3n4O5p6Q7r8","type":"session_summary","content":"Latest handoff","detail":"Carry this forward","session":"s-3"}',
+        '{"timestamp":"2026-03-01T00:02:00.000Z","id":"G7h8I9j0K1l2","type":"session_summary","content":"Earlier summary","session":"s-2"}',
+        '{"timestamp":"2026-03-01T00:03:00.000Z","id":"M3n4O5p6Q7r8","type":"session_summary","content":"Latest summary","detail":"Carry this forward","session":"s-3"}',
         "",
       ].join("\n"),
       "utf8",
@@ -361,11 +360,11 @@ describe("snapshot and handoff CLI commands", () => {
     const memoryPath = join(workspaceDir, "MEMORY.md");
     await writeFile(
       memoryPath,
-      [LAST_SESSION_SUMMARY_BEGIN_MARKER, "Old handoff text", LAST_SESSION_SUMMARY_END_MARKER, ""].join("\n"),
+      [LAST_SESSION_SUMMARY_BEGIN_MARKER, "Old summary text", LAST_SESSION_SUMMARY_END_MARKER, ""].join("\n"),
       "utf8",
     );
 
-    const result = await runSessionHandoffRefresh({
+    const result = await runSessionSummaryRefresh({
       config: createConfig(logDir),
       workspaceDir,
     });
@@ -373,13 +372,13 @@ describe("snapshot and handoff CLI commands", () => {
     expect(result.updated).toBe(true);
     const memoryText = await readFile(memoryPath, "utf8");
     expect(memoryText).toContain("## Previous Session Summary (s-3)");
-    expect(memoryText).toContain("Latest handoff");
+    expect(memoryText).toContain("Latest summary");
     expect(memoryText).toContain("### Details");
     expect(memoryText).toContain("Carry this forward");
-    expect(memoryText).not.toContain("Old handoff text");
+    expect(memoryText).not.toContain("Old summary text");
   });
 
-  test("runSessionHandoffRefresh is a no-op when no handoff entries exist", async () => {
+  test("runSessionSummaryRefresh is a no-op when no session summary entries exist", async () => {
     const logPath = join(logDir, "log.jsonl");
     await writeFile(
       logPath,
@@ -390,7 +389,7 @@ describe("snapshot and handoff CLI commands", () => {
     const memoryPath = join(workspaceDir, "MEMORY.md");
     await writeFile(memoryPath, "Manual memory content\n", "utf8");
 
-    const result = await runSessionHandoffRefresh({
+    const result = await runSessionSummaryRefresh({
       config: createConfig(logDir),
       workspaceDir,
     });
