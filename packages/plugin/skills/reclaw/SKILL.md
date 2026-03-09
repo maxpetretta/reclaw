@@ -139,7 +139,7 @@ openclaw reclaw projection refresh
 openclaw reclaw projection list
 
 # Regenerate the MEMORY.md memory snapshot now
-openclaw reclaw snapshot generate
+openclaw reclaw snapshot refresh
 
 # Force-refresh MEMORY.md session summary block from log
 openclaw reclaw summary refresh

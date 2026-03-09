@@ -105,8 +105,8 @@ openclaw reclaw subjects rename   # rename a subject (updates registry + log)
 openclaw reclaw projection refresh # rebuild generated subject markdown projections
 openclaw reclaw projection list    # list generated projection files
 
-openclaw reclaw snapshot generate # run snapshot generation now
-openclaw reclaw handoff refresh   # refresh handoff block from latest log entry
+openclaw reclaw snapshot refresh # run snapshot generation now
+openclaw reclaw summary refresh  # refresh session summary block from latest log entry
 
 openclaw reclaw import            # import conversation history
 openclaw reclaw import status     # check import job status

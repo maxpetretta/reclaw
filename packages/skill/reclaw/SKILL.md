@@ -139,10 +139,10 @@ openclaw reclaw projection refresh
 openclaw reclaw projection list
 
 # Regenerate the MEMORY.md memory snapshot now
-openclaw reclaw snapshot generate
+openclaw reclaw snapshot refresh
 
-# Force-refresh MEMORY.md session handoff block from log
-openclaw reclaw handoff refresh
+# Force-refresh MEMORY.md session summary block from log
+openclaw reclaw summary refresh
 
 # Import historical conversations
 openclaw reclaw import <chatgpt|claude|grok|openclaw> <file>

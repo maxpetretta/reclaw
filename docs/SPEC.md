@@ -601,15 +601,13 @@ Primary CLI groups:
 - `openclaw reclaw trace`
 - `openclaw reclaw status`
 - `openclaw reclaw subjects list|add|rename`
-- `openclaw reclaw projection refresh|generate|list`
-- `openclaw reclaw snapshot refresh|generate|list|status`
+- `openclaw reclaw projection refresh|list`
+- `openclaw reclaw snapshot refresh|list|status`
 - `openclaw reclaw summary refresh|list|status`
 - `openclaw reclaw import ...`
 
 Notes:
 
-- `projection generate` is an alias for `projection refresh`
-- `snapshot generate` is an alias for `snapshot refresh`
 - the nightly cron uses `snapshot refresh`
 - `trace` groups event history by subject and renders chronological chains
 
