@@ -17,6 +17,12 @@ import {
   readCronJobName,
   readCronJobsDocument,
 } from "../lib/cron-jobs-store";
+import {
+  readOpenClawConfigView,
+  RECLAW_OPENCLAW_MAX_ENTRIES,
+  RECLAW_OPENCLAW_MEMORY_SLOT,
+  RECLAW_OPENCLAW_PRUNE_AFTER,
+} from "./openclaw-config-shared";
 import { toObject } from "./parse";
 import { type InitPaths, resolvePaths } from "./paths";
 import { BRIEFING_CRON_NAME } from "./setup-ops";
@@ -117,34 +123,19 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     const configRaw = await readFile(paths.openClawConfigPath, "utf8");
     const parsed = JSON.parse(configRaw) as unknown;
     const configRoot = toObject(parsed);
-    const plugins = toObject(configRoot.plugins);
-    const slots = toObject(plugins.slots);
-    const slotValue = typeof slots.memory === "string" ? slots.memory : undefined;
-
-    const agents = toObject(configRoot.agents);
-    const defaults = toObject(agents.defaults);
-    const memorySearch = toObject(defaults.memorySearch);
-    const extraPaths = Array.isArray(memorySearch.extraPaths)
-      ? memorySearch.extraPaths.filter((entry): entry is string => typeof entry === "string")
-      : [];
-    const compaction = toObject(defaults.compaction);
-    const memoryFlush = compaction.memoryFlush;
+    const configView = readOpenClawConfigView(configRoot);
+    const memoryFlush = configView.memoryFlush;
     const memoryFlushDisabled = isObject(memoryFlush) && memoryFlush.enabled === false;
-    const session = toObject(configRoot.session);
-    const maintenance = toObject(session.maintenance);
-    const pruneDisabled = maintenance.pruneAfter === "36500d";
-    const maxEntriesHigh = typeof maintenance.maxEntries === "number" && maintenance.maxEntries >= 100_000;
-    const resetArchiveDisabled = maintenance.resetArchiveRetention === false;
-    const hooks = toObject(configRoot.hooks);
-    const internalHooks = toObject(hooks.internal);
-    const hookEntries = toObject(internalHooks.entries);
-    const sessionMemoryHook = toObject(hookEntries["session-memory"]);
-    const sessionMemoryDisabled = sessionMemoryHook.enabled === false;
-    const hasProjectionMemoryPath = extraPaths.includes(paths.projectionDir);
-    const hasSessionSummaryProjectionPath = extraPaths.includes(paths.sessionSummaryProjectionDir);
+    const sessionMemoryDisabled = configView.sessionMemoryHook.enabled === false;
+    const pruneDisabled = configView.pruneAfter === RECLAW_OPENCLAW_PRUNE_AFTER;
+    const maxEntriesHigh =
+      typeof configView.maxEntries === "number" && configView.maxEntries >= RECLAW_OPENCLAW_MAX_ENTRIES;
+    const resetArchiveDisabled = configView.resetArchiveRetention === false;
+    const hasProjectionMemoryPath = configView.extraPaths.includes(paths.projectionDir);
+    const hasSessionSummaryProjectionPath = configView.extraPaths.includes(paths.sessionSummaryProjectionDir);
 
     if (
-      slotValue === "reclaw" &&
+      configView.slotValue === RECLAW_OPENCLAW_MEMORY_SLOT &&
       memoryFlushDisabled &&
       sessionMemoryDisabled &&
       pruneDisabled &&
@@ -156,8 +147,8 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
       addCheck("openclaw.json", true, "ok");
     } else {
       const issues: string[] = [];
-      if (slotValue !== "reclaw") {
-        issues.push(`plugins.slots.memory=${slotValue ? `"${slotValue}"` : "missing"}`);
+      if (configView.slotValue !== RECLAW_OPENCLAW_MEMORY_SLOT) {
+        issues.push(`plugins.slots.memory=${configView.slotValue ? `"${configView.slotValue}"` : "missing"}`);
       }
       if (!memoryFlushDisabled) {
         if (isObject(memoryFlush)) {

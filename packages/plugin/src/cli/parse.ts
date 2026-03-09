@@ -1,8 +1,10 @@
+import { isNonEmptyString, isObject } from "../lib/guards";
+
 export function toObject(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  return isObject(value) ? value : {};
 }
 
-export function readPositiveNumberOption(value: unknown, fallback: number): number {
+export function readOptionalPositiveNumberOption(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return Math.floor(value);
   }
@@ -14,15 +16,19 @@ export function readPositiveNumberOption(value: unknown, fallback: number): numb
     }
   }
 
-  return fallback;
+  return undefined;
+}
+
+export function readPositiveNumberOption(value: unknown, fallback: number): number {
+  return readOptionalPositiveNumberOption(value) ?? fallback;
+}
+
+export function readTrimmedStringOption(value: unknown): string | undefined {
+  return isNonEmptyString(value) ? value.trim() : undefined;
 }
 
 export function parseIsoDateInput(raw: unknown): string | undefined {
-  if (typeof raw !== "string") {
-    return undefined;
-  }
-
-  const trimmed = raw.trim();
+  const trimmed = readTrimmedStringOption(raw);
   if (!trimmed) {
     return undefined;
   }

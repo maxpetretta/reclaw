@@ -9,6 +9,7 @@ import {
   readTranscript,
 } from "../lib/transcript";
 import {
+  createTranscriptWatermark,
   getExtractedSessionWatermark,
   hasTranscriptAdvanced,
   markCompactionObserved,
@@ -260,10 +261,11 @@ export async function runCompactionExtraction(params: {
 
     const state = await readState(paths.statePath);
     const previousSuccessWatermark = getExtractedSessionWatermark(state, sessionId);
-    const currentWatermark = {
-      ...(findLatestMessageTimestamp(allMessages) ? { lastMessageAt: findLatestMessageTimestamp(allMessages) } : {}),
+    const latestMessageAt = findLatestMessageTimestamp(allMessages);
+    const currentWatermark = createTranscriptWatermark({
+      lastMessageAt: latestMessageAt,
       messageCount: allMessages.length,
-    };
+    });
 
     if (!hasTranscriptAdvanced(currentWatermark, previousSuccessWatermark)) {
       await markCompactionStatus(paths.statePath, sessionId, "skipped", {

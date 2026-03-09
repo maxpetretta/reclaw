@@ -13,8 +13,7 @@ import type {
 } from "../lib/qmd";
 import type { CommandLike } from "./command-like";
 import type { InitPaths } from "./paths";
-
-const BANNER = "🦞 Reclaw - Long-term memory for your Claw";
+import { isInteractiveTerminal, RECLAW_BANNER } from "./ui";
 
 interface InitResult {
   paths: InitPaths;
@@ -23,10 +22,6 @@ interface InitResult {
     message?: string;
   };
   qmd: EnsureQmdCollectionResult;
-}
-
-function isInteractiveTerminal(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
 async function promptInstallQmd(): Promise<boolean> {
@@ -62,7 +57,7 @@ export function registerSetupCommands(
     .command("init")
     .description("Initialize reclaw memory store and config")
     .action(async () => {
-      clackIntro(BANNER);
+      clackIntro(RECLAW_BANNER);
       const initResult = await params.runInit(params.config, params.workspaceDir);
       const paths = initResult.paths;
       let qmdResult = initResult.qmd;
@@ -123,7 +118,7 @@ export function registerSetupCommands(
     .command("uninstall")
     .description("Reverse init config and remove generated memory snapshot block")
     .action(async () => {
-      clackIntro(BANNER);
+      clackIntro(RECLAW_BANNER);
       const paths = await params.runUninstall(params.config, params.workspaceDir);
       clackLog.step(`Config reverted: ${paths.openClawConfigPath}`);
       clackLog.step(`Generated snapshot block removed: ${paths.memoryMdPath}`);
@@ -135,7 +130,7 @@ export function registerSetupCommands(
     .command("verify")
     .description("Verify reclaw setup and required files")
     .action(async () => {
-      clackIntro(BANNER);
+      clackIntro(RECLAW_BANNER);
       try {
         await params.runVerify(params.config, params.workspaceDir);
         clackOutro("Verify passed.");

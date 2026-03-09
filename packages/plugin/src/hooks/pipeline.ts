@@ -8,7 +8,9 @@ import {
 import { queryExtractionContext } from "../log/query";
 import { appendEntry, finalizeEntry, type LogEntry } from "../log/schema";
 import {
+  buildSessionTrackingUpdate,
   compareTranscriptWatermarks,
+  createTranscriptWatermark,
   getExtractedSessionWatermark,
   getFailedSessionWatermark,
   markExtracted,
@@ -93,10 +95,10 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
     typeof params.transcriptMessageCount === "number" && Number.isFinite(params.transcriptMessageCount)
       ? Math.max(0, Math.floor(params.transcriptMessageCount))
       : params.messages.length;
-  const currentWatermark = {
-    ...(lastMessageAt ? { lastMessageAt } : {}),
+  const currentWatermark = createTranscriptWatermark({
+    lastMessageAt,
     messageCount: transcriptMessageCount,
-  };
+  });
   const extractedWatermark = getExtractedSessionWatermark(state, params.sessionId);
   const failedWatermark = getFailedSessionWatermark(state, params.sessionId);
 
@@ -114,10 +116,15 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
 
   const transcript = formatTranscript(params.messages);
   if (!transcript.trim()) {
-    await markExtracted(params.paths.statePath, params.sessionId, 0, {
-      ...(lastMessageAt ? { lastMessageAt } : {}),
-      messageCount: transcriptMessageCount,
-    });
+    await markExtracted(
+      params.paths.statePath,
+      params.sessionId,
+      0,
+      buildSessionTrackingUpdate({
+        lastMessageAt,
+        messageCount: transcriptMessageCount,
+      }),
+    );
     await pruneState(params.paths.statePath);
     return { status: "extracted", entries: 0 };
   }
@@ -197,25 +204,35 @@ export async function runExtractionPipeline(params: ExtractionPipelineParams): P
       logger: params.logger,
     });
 
-    await markExtracted(params.paths.statePath, params.sessionId, appendedCount, {
-      ...(lastMessageAt ? { lastMessageAt } : {}),
-      messageCount: transcriptMessageCount,
-      ...(params.sourceSessionKey ? { sourceSessionKey: params.sourceSessionKey } : {}),
-      ...(workerSessionId ? { workerSessionId } : {}),
-      ...(workerSessionKey ? { workerSessionKey } : {}),
-    });
+    await markExtracted(
+      params.paths.statePath,
+      params.sessionId,
+      appendedCount,
+      buildSessionTrackingUpdate({
+        lastMessageAt,
+        messageCount: transcriptMessageCount,
+        sourceSessionKey: params.sourceSessionKey,
+        workerSessionId,
+        workerSessionKey,
+      }),
+    );
     await pruneState(params.paths.statePath);
     return { status: "extracted", entries: appendedCount };
   } catch (error) {
     const message = normalizeError(error);
     params.logger.warn(`reclaw extraction failed for ${params.sessionId}: ${message}`);
-    await markFailed(params.paths.statePath, params.sessionId, message, {
-      ...(lastMessageAt ? { lastMessageAt } : {}),
-      messageCount: transcriptMessageCount,
-      ...(params.sourceSessionKey ? { sourceSessionKey: params.sourceSessionKey } : {}),
-      ...(workerSessionId ? { workerSessionId } : {}),
-      ...(workerSessionKey ? { workerSessionKey } : {}),
-    });
+    await markFailed(
+      params.paths.statePath,
+      params.sessionId,
+      message,
+      buildSessionTrackingUpdate({
+        lastMessageAt,
+        messageCount: transcriptMessageCount,
+        sourceSessionKey: params.sourceSessionKey,
+        workerSessionId,
+        workerSessionKey,
+      }),
+    );
     await pruneState(params.paths.statePath);
     return { status: "failed", error: message };
   }

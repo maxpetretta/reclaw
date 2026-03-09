@@ -6,8 +6,7 @@ import {
 } from "../projections/subjects";
 import type { CommandLike } from "./command-like";
 import { resolvePaths } from "./paths";
-
-const BANNER = "🦞 Reclaw - Long-term memory for your Claw";
+import { RECLAW_BANNER } from "./ui";
 
 export async function runProjectionRefresh(params: {
   config: PluginConfig;
@@ -49,7 +48,7 @@ export function registerProjectionCommands(
   const projection = reclaw.command("projection").description("Subject markdown projection helpers");
 
   const runRefreshAction = async (subject: unknown): Promise<void> => {
-    clackIntro(BANNER);
+    clackIntro(RECLAW_BANNER);
     const spin = clackSpinner();
     spin.start("Refreshing subject projections...");
     const result = await runProjectionRefresh({

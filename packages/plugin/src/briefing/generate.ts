@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { PluginConfig } from "../config";
 import { isEnoent } from "../lib/guards";
 import { runIsolatedModelTaskWithMeta } from "../lib/isolated-model-task";
+import { assignDefined, buildWorkerSessionMeta } from "../lib/optional-fields";
 import { replaceManagedBlock } from "../memory/managed-block";
 import { BRIEFING_BEGIN_MARKER, BRIEFING_END_MARKER } from "../memory/markers";
 import { isOpenItem } from "../log/query";
@@ -522,8 +523,7 @@ const DEFAULT_DEPS: BriefingDeps = {
     });
     return {
       output: result.output,
-      ...(result.sessionId ? { workerSessionId: result.sessionId } : {}),
-      ...(result.sessionKey ? { workerSessionKey: result.sessionKey } : {}),
+      ...buildWorkerSessionMeta(result),
     };
   },
   async readMemoryFile(path) {
@@ -621,10 +621,10 @@ export async function generateBriefing(
 
   await resolvedDeps.writeMemoryFile(opts.memoryMdPath, updatedMemory);
 
-  return {
-    ...(outputRecord.workerSessionId ? { workerSessionId: outputRecord.workerSessionId } : {}),
-    ...(outputRecord.workerSessionKey ? { workerSessionKey: outputRecord.workerSessionKey } : {}),
-  };
+  const result: BriefingGenerationResult = {};
+  assignDefined(result, "workerSessionId", outputRecord.workerSessionId);
+  assignDefined(result, "workerSessionKey", outputRecord.workerSessionKey);
+  return result;
 }
 
 export const __briefingTestExports = {

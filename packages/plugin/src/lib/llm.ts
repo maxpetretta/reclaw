@@ -1,6 +1,7 @@
 import { runIsolatedModelTaskWithMeta } from "./isolated-model-task";
 import type { LogEntry } from "../log/schema";
 import type { SubjectRegistry } from "../subjects/registry";
+import { buildWorkerSessionMeta } from "./optional-fields";
 import {
   buildExtractionUserPrompt,
   loadExtractionPrompt,
@@ -55,8 +56,7 @@ export async function extractFromTranscriptWithMeta(opts: {
 
   return {
     output: result.output,
-    ...(result.sessionId ? { workerSessionId: result.sessionId } : {}),
-    ...(result.sessionKey ? { workerSessionKey: result.sessionKey } : {}),
+    ...buildWorkerSessionMeta(result),
   };
 }
 
@@ -107,7 +107,6 @@ export async function repairExtractionOutputWithMeta(opts: {
 
   return {
     output: result.output,
-    ...(result.sessionId ? { workerSessionId: result.sessionId } : {}),
-    ...(result.sessionKey ? { workerSessionKey: result.sessionKey } : {}),
+    ...buildWorkerSessionMeta(result),
   };
 }

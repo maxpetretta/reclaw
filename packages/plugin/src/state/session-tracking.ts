@@ -1,37 +1,53 @@
 import { updateState } from "./store";
 import type { ReclawState, TranscriptWatermark } from "./types";
+import { assignDefined } from "../lib/optional-fields";
+
+export interface SessionTrackingUpdateOptions {
+  lastMessageAt?: string;
+  messageCount?: number;
+  sourceSessionKey?: string;
+  workerSessionId?: string;
+  workerSessionKey?: string;
+}
+
+function readNonEmptyTrimmedString(value: string | undefined): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readNonNegativeInt(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
+}
+
+export function buildSessionTrackingUpdate(
+  opts: SessionTrackingUpdateOptions = {},
+): SessionTrackingUpdateOptions {
+  const normalized: SessionTrackingUpdateOptions = {};
+  assignDefined(normalized, "lastMessageAt", readNonEmptyTrimmedString(opts.lastMessageAt));
+  assignDefined(normalized, "messageCount", readNonNegativeInt(opts.messageCount));
+  assignDefined(normalized, "sourceSessionKey", readNonEmptyTrimmedString(opts.sourceSessionKey));
+  assignDefined(normalized, "workerSessionId", readNonEmptyTrimmedString(opts.workerSessionId));
+  assignDefined(normalized, "workerSessionKey", readNonEmptyTrimmedString(opts.workerSessionKey));
+  return normalized;
+}
+
+export function createTranscriptWatermark(input: TranscriptWatermark = {}): TranscriptWatermark {
+  const watermark: TranscriptWatermark = {};
+  assignDefined(watermark, "lastMessageAt", readNonEmptyTrimmedString(input.lastMessageAt));
+  assignDefined(watermark, "messageCount", readNonNegativeInt(input.messageCount));
+  return watermark;
+}
 
 export async function markExtracted(
   path: string,
   sessionId: string,
   entryCount: number,
-  opts: {
-    lastMessageAt?: string;
-    messageCount?: number;
-    sourceSessionKey?: string;
-    workerSessionId?: string;
-    workerSessionKey?: string;
-  } = {},
+  opts: SessionTrackingUpdateOptions = {},
 ): Promise<void> {
   await updateState(path, (state) => {
     state.extractedSessions[sessionId] = {
       at: new Date().toISOString(),
       entries: entryCount,
-      ...(typeof opts.lastMessageAt === "string" && opts.lastMessageAt.trim().length > 0
-        ? { lastMessageAt: opts.lastMessageAt.trim() }
-        : {}),
-      ...(typeof opts.messageCount === "number" && Number.isFinite(opts.messageCount)
-        ? { messageCount: Math.max(0, Math.floor(opts.messageCount)) }
-        : {}),
-      ...(typeof opts.sourceSessionKey === "string" && opts.sourceSessionKey.trim().length > 0
-        ? { sourceSessionKey: opts.sourceSessionKey.trim() }
-        : {}),
-      ...(typeof opts.workerSessionId === "string" && opts.workerSessionId.trim().length > 0
-        ? { workerSessionId: opts.workerSessionId.trim() }
-        : {}),
-      ...(typeof opts.workerSessionKey === "string" && opts.workerSessionKey.trim().length > 0
-        ? { workerSessionKey: opts.workerSessionKey.trim() }
-        : {}),
+      ...buildSessionTrackingUpdate(opts),
     };
     delete state.failedSessions[sessionId];
   });
@@ -41,13 +57,7 @@ export async function markFailed(
   path: string,
   sessionId: string,
   error: string,
-  opts: {
-    lastMessageAt?: string;
-    messageCount?: number;
-    sourceSessionKey?: string;
-    workerSessionId?: string;
-    workerSessionKey?: string;
-  } = {},
+  opts: SessionTrackingUpdateOptions = {},
 ): Promise<void> {
   await updateState(path, (state) => {
     const previous = state.failedSessions[sessionId];
@@ -55,21 +65,7 @@ export async function markFailed(
       at: new Date().toISOString(),
       error,
       retries: (previous?.retries ?? 0) + 1,
-      ...(typeof opts.lastMessageAt === "string" && opts.lastMessageAt.trim().length > 0
-        ? { lastMessageAt: opts.lastMessageAt.trim() }
-        : {}),
-      ...(typeof opts.messageCount === "number" && Number.isFinite(opts.messageCount)
-        ? { messageCount: Math.max(0, Math.floor(opts.messageCount)) }
-        : {}),
-      ...(typeof opts.sourceSessionKey === "string" && opts.sourceSessionKey.trim().length > 0
-        ? { sourceSessionKey: opts.sourceSessionKey.trim() }
-        : {}),
-      ...(typeof opts.workerSessionId === "string" && opts.workerSessionId.trim().length > 0
-        ? { workerSessionId: opts.workerSessionId.trim() }
-        : {}),
-      ...(typeof opts.workerSessionKey === "string" && opts.workerSessionKey.trim().length > 0
-        ? { workerSessionKey: opts.workerSessionKey.trim() }
-        : {}),
+      ...buildSessionTrackingUpdate(opts),
     };
   });
 }
@@ -85,12 +81,10 @@ function readRecordWatermark(
     return undefined;
   }
 
-  return {
+  return createTranscriptWatermark({
     lastMessageAt: record.lastMessageAt ?? record.at,
-    ...(typeof record.messageCount === "number" && Number.isFinite(record.messageCount)
-      ? { messageCount: Math.max(0, Math.floor(record.messageCount)) }
-      : {}),
-  };
+    messageCount: record.messageCount,
+  });
 }
 
 function parseWatermarkTimestamp(value: string | undefined): number | undefined {

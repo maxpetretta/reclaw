@@ -1,4 +1,5 @@
 import { isObject } from "./lib/guards";
+import { assignDefined } from "./lib/optional-fields";
 import type {
   CompactionExtractionStatus,
   CompactionSessionState,
@@ -55,16 +56,6 @@ function readBoolean(value: unknown): boolean | undefined {
 function readPositiveInt(value: unknown): number | undefined {
   const n = readFiniteNumber(value);
   return n !== undefined && n > 0 ? Math.floor(n) : undefined;
-}
-
-function assignDefined<T extends Record<string, unknown>, K extends keyof T>(
-  target: T,
-  key: K,
-  value: T[K] | undefined,
-): void {
-  if (value !== undefined) {
-    target[key] = value;
-  }
 }
 
 function normalizeImportJobOptions(raw: unknown): ImportJobOptionsState {

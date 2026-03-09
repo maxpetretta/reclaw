@@ -39,14 +39,7 @@ import {
 import { resolvePaths } from "./paths";
 import type { CommandLike } from "./command-like";
 import { toObject } from "./parse";
-
-function unwrapPromptValue<T>(value: T | symbol): T {
-  if (typeof value === "symbol") {
-    throw new Error("Import canceled");
-  }
-
-  return value;
-}
+import { RECLAW_BANNER, unwrapPromptValue } from "./ui";
 
 export function registerImportCommands(
   reclaw: CommandLike,
@@ -109,6 +102,7 @@ export function registerImportCommands(
                       hint: model.key === defaultModel.key ? "default" : undefined,
                     })),
                   }),
+                  "Import canceled",
                 );
                 importOptions.model = selectedModelKey;
               }
@@ -129,6 +123,7 @@ export function registerImportCommands(
                   : undefined;
               },
             }),
+            "Import canceled",
           );
           const selectedJobs = parseInteractiveImportJobs(selectedJobsRaw);
           if (selectedJobs === undefined) {
@@ -189,6 +184,7 @@ export function registerImportCommands(
               message: "Proceed with import and write changes?",
               initialValue: true,
             }),
+            "Import canceled",
           );
 
           if (!shouldProceed) {
@@ -236,7 +232,7 @@ export function registerImportCommands(
           return;
         }
 
-        clackIntro("🦞 Reclaw - Long-term memory for your Claw");
+        clackIntro(RECLAW_BANNER);
         const queued = await queueImportJob({
           config: params.config,
           workspaceDir: params.workspaceDir,
@@ -320,7 +316,7 @@ export function registerImportCommands(
     .command("resume [jobId]")
     .description("Re-queue failed/queued async import jobs")
     .action(async (jobId: unknown) => {
-      clackIntro("🦞 Reclaw - Long-term memory for your Claw");
+      clackIntro(RECLAW_BANNER);
       const result = await resumeImportJobs({
         config: params.config,
         workspaceDir: params.workspaceDir,
@@ -353,7 +349,7 @@ export function registerImportCommands(
     .command("stop [jobId]")
     .description("Stop running/queued async import jobs")
     .action(async (jobId: unknown) => {
-      clackIntro("🦞 Reclaw - Long-term memory for your Claw");
+      clackIntro(RECLAW_BANNER);
       const result = await stopImportJobs({
         config: params.config,
         workspaceDir: params.workspaceDir,

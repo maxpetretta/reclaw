@@ -4,8 +4,10 @@ import type { ImportJobOptionsState, ImportJobState } from "../state";
 import {
   parseIsoDateInput,
   readPositiveNumberOption as readNumberOption,
+  readTrimmedStringOption,
   toObject,
 } from "./parse";
+import { assignDefined } from "../lib/optional-fields";
 
 export { toObject, readNumberOption };
 
@@ -25,28 +27,21 @@ function readPositiveIntOption(value: unknown): number | undefined {
 }
 
 export function sanitizeImportOptionsForJob(raw: Record<string, unknown>): ImportJobOptionsState {
-  const after = parseIsoDateInput(raw.after);
-  const before = parseIsoDateInput(raw.before);
-  const minMessages = readPositiveIntOption(raw.minMessages);
-  const jobs = readPositiveIntOption(raw.jobs);
-  const model =
-    typeof raw.model === "string" && raw.model.trim().length > 0 ? raw.model.trim() : undefined;
-
-  const options: ImportJobOptionsState = {
-    ...(after ? { after } : {}),
-    ...(before ? { before } : {}),
-    ...(minMessages !== undefined ? { minMessages } : {}),
-    ...(jobs !== undefined ? { jobs } : {}),
-    ...(model ? { model } : {}),
-    ...(typeof raw.force === "boolean" ? { force: raw.force } : {}),
-    ...(typeof raw.transcripts === "boolean" ? { transcripts: raw.transcripts } : {}),
-    ...(typeof raw.verbose === "boolean" ? { verbose: raw.verbose } : {}),
-    ...(typeof raw.keepSource === "boolean" ? { keepSource: raw.keepSource } : {}),
-    ...(typeof raw.backupMemoryDocs === "boolean"
-      ? { backupMemoryDocs: raw.backupMemoryDocs }
-      : {}),
-  };
-
+  const options: ImportJobOptionsState = {};
+  assignDefined(options, "after", parseIsoDateInput(raw.after));
+  assignDefined(options, "before", parseIsoDateInput(raw.before));
+  assignDefined(options, "minMessages", readPositiveIntOption(raw.minMessages));
+  assignDefined(options, "jobs", readPositiveIntOption(raw.jobs));
+  assignDefined(options, "model", readTrimmedStringOption(raw.model));
+  assignDefined(options, "force", typeof raw.force === "boolean" ? raw.force : undefined);
+  assignDefined(options, "transcripts", typeof raw.transcripts === "boolean" ? raw.transcripts : undefined);
+  assignDefined(options, "verbose", typeof raw.verbose === "boolean" ? raw.verbose : undefined);
+  assignDefined(options, "keepSource", typeof raw.keepSource === "boolean" ? raw.keepSource : undefined);
+  assignDefined(
+    options,
+    "backupMemoryDocs",
+    typeof raw.backupMemoryDocs === "boolean" ? raw.backupMemoryDocs : undefined,
+  );
   return options;
 }
 

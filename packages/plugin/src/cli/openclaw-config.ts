@@ -1,16 +1,14 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { isEnoent, isObject } from "../lib/guards";
-
-function toObject(value: unknown): Record<string, unknown> {
-  return isObject(value) ? value : {};
-}
-
-function getOrCreateObject(parent: Record<string, unknown>, key: string): Record<string, unknown> {
-  const next = toObject(parent[key]);
-  parent[key] = next;
-  return next;
-}
+import { isEnoent } from "../lib/guards";
+import {
+  ensureNestedObject,
+  readStringList,
+  RECLAW_OPENCLAW_MAX_ENTRIES,
+  RECLAW_OPENCLAW_MEMORY_SLOT,
+  RECLAW_OPENCLAW_PRUNE_AFTER,
+} from "./openclaw-config-shared";
+import { toObject } from "./parse";
 
 async function readConfigObject(configPath: string): Promise<Record<string, unknown>> {
   try {
@@ -40,89 +38,58 @@ async function writeConfigObject(configPath: string, root: Record<string, unknow
 }
 
 function ensurePluginMemorySlot(root: Record<string, unknown>): void {
-  const plugins = getOrCreateObject(root, "plugins");
-  const slots = getOrCreateObject(plugins, "slots");
-  slots.memory = "reclaw";
+  const plugins = ensureNestedObject(root, "plugins");
+  const slots = ensureNestedObject(root, "plugins", "slots");
+  slots.memory = RECLAW_OPENCLAW_MEMORY_SLOT;
 
-  const allow = Array.isArray(plugins.allow)
-    ? plugins.allow
-        .filter((entry): entry is string => typeof entry === "string")
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0)
-    : [];
-
-  if (!allow.includes("reclaw")) {
-    allow.push("reclaw");
+  const allow = readStringList(plugins.allow);
+  if (!allow.includes(RECLAW_OPENCLAW_MEMORY_SLOT)) {
+    allow.push(RECLAW_OPENCLAW_MEMORY_SLOT);
   }
   plugins.allow = allow;
 }
 
 function removePluginMemorySlot(root: Record<string, unknown>): void {
-  const plugins = getOrCreateObject(root, "plugins");
-  const slots = getOrCreateObject(plugins, "slots");
+  const slots = ensureNestedObject(root, "plugins", "slots");
   delete slots.memory;
 }
 
 function ensureAgentMemoryFlushDisabled(root: Record<string, unknown>): void {
-  const agents = getOrCreateObject(root, "agents");
-  const defaults = getOrCreateObject(agents, "defaults");
-  const compaction = getOrCreateObject(defaults, "compaction");
+  const compaction = ensureNestedObject(root, "agents", "defaults", "compaction");
   compaction.memoryFlush = { enabled: false };
 }
 
 function removeAgentMemoryFlush(root: Record<string, unknown>): void {
-  const agents = getOrCreateObject(root, "agents");
-  const defaults = getOrCreateObject(agents, "defaults");
-  const compaction = getOrCreateObject(defaults, "compaction");
+  const compaction = ensureNestedObject(root, "agents", "defaults", "compaction");
   delete compaction.memoryFlush;
 }
 
 function ensureSessionRetentionForever(root: Record<string, unknown>): void {
-  const session = getOrCreateObject(root, "session");
-  const maintenance = getOrCreateObject(session, "maintenance");
-  maintenance.pruneAfter = "36500d";
-  maintenance.maxEntries = 100_000;
+  const maintenance = ensureNestedObject(root, "session", "maintenance");
+  maintenance.pruneAfter = RECLAW_OPENCLAW_PRUNE_AFTER;
+  maintenance.maxEntries = RECLAW_OPENCLAW_MAX_ENTRIES;
   maintenance.resetArchiveRetention = false;
 }
 
 function removeSessionRetention(root: Record<string, unknown>): void {
-  const session = getOrCreateObject(root, "session");
-  const maintenance = getOrCreateObject(session, "maintenance");
+  const maintenance = ensureNestedObject(root, "session", "maintenance");
   delete maintenance.pruneAfter;
   delete maintenance.maxEntries;
   delete maintenance.resetArchiveRetention;
 }
 
 function ensureSessionMemoryHookDisabled(root: Record<string, unknown>): void {
-  const hooks = getOrCreateObject(root, "hooks");
-  const internalHooks = getOrCreateObject(hooks, "internal");
-  const entries = getOrCreateObject(internalHooks, "entries");
-  const sessionMemoryHook = getOrCreateObject(entries, "session-memory");
+  const sessionMemoryHook = ensureNestedObject(root, "hooks", "internal", "entries", "session-memory");
   sessionMemoryHook.enabled = false;
 }
 
 function removeSessionMemoryHook(root: Record<string, unknown>): void {
-  const hooks = getOrCreateObject(root, "hooks");
-  const internalHooks = getOrCreateObject(hooks, "internal");
-  const entries = getOrCreateObject(internalHooks, "entries");
+  const entries = ensureNestedObject(root, "hooks", "internal", "entries");
   delete entries["session-memory"];
 }
 
-function readStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-}
-
 function ensureProjectionMemoryPath(root: Record<string, unknown>, projectionDir: string): void {
-  const agents = getOrCreateObject(root, "agents");
-  const defaults = getOrCreateObject(agents, "defaults");
-  const memorySearch = getOrCreateObject(defaults, "memorySearch");
+  const memorySearch = ensureNestedObject(root, "agents", "defaults", "memorySearch");
   const extraPaths = readStringList(memorySearch.extraPaths);
 
   if (!extraPaths.includes(projectionDir)) {
@@ -133,9 +100,7 @@ function ensureProjectionMemoryPath(root: Record<string, unknown>, projectionDir
 }
 
 function removeProjectionMemoryPath(root: Record<string, unknown>, projectionDir: string): void {
-  const agents = getOrCreateObject(root, "agents");
-  const defaults = getOrCreateObject(agents, "defaults");
-  const memorySearch = getOrCreateObject(defaults, "memorySearch");
+  const memorySearch = ensureNestedObject(root, "agents", "defaults", "memorySearch");
   const extraPaths = readStringList(memorySearch.extraPaths).filter((entry) => entry !== projectionDir);
 
   if (extraPaths.length > 0) {

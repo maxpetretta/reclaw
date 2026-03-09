@@ -19,7 +19,9 @@ export {
 } from "./state/types";
 export { readState, writeState, updateState, pruneState } from "./state/store";
 export {
+  buildSessionTrackingUpdate,
   compareTranscriptWatermarks,
+  createTranscriptWatermark,
   getExtractedSessionWatermark,
   getFailedSessionWatermark,
   hasTranscriptAdvanced,

@@ -1,10 +1,14 @@
 import { readdir, stat } from "node:fs/promises";
-import { isCancel as clackIsCancel, intro as clackIntro, select as clackSelect, spinner as clackSpinner, text as clackText } from "@clack/prompts";
+import { intro as clackIntro, select as clackSelect, spinner as clackSpinner, text as clackText } from "@clack/prompts";
 import { runPluginCommandWithTimeout } from "openclaw/plugin-sdk";
 import { join } from "node:path";
 import type { ImportPlatform } from "../import/types";
+import { isObject } from "../lib/guards";
 import { isDailyMemoryFile } from "../lib/path";
 import { detectImportSources, resolveImportPathForPlatform } from "./import-detect";
+import { isInteractiveTerminal, RECLAW_BANNER, unwrapPromptValue } from "./ui";
+
+export { isInteractiveTerminal } from "./ui";
 
 export const INTERACTIVE_IMPORT_JOBS_MIN = 1;
 export const INTERACTIVE_IMPORT_JOBS_MAX = 10;
@@ -22,20 +26,12 @@ export interface ImportModelInfo {
   isDefault: boolean;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function parseImportPlatform(raw: unknown): ImportPlatform | undefined {
   if (raw === "chatgpt" || raw === "claude" || raw === "grok" || raw === "openclaw") {
     return raw;
   }
 
   return undefined;
-}
-
-export function isInteractiveTerminal(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
 export function normalizeModelOption(value: unknown): string | undefined {
@@ -124,13 +120,6 @@ export function resolveModelByQuery(models: ImportModelInfo[], query: string): I
   });
 }
 
-function unwrapPromptValue<T>(value: T | symbol): T {
-  if (clackIsCancel(value)) {
-    throw new Error("Import canceled");
-  }
-  return value;
-}
-
 export function platformLabel(platform: ImportPlatform): string {
   if (platform === "chatgpt") {
     return "ChatGPT export";
@@ -191,7 +180,7 @@ export async function resolveImportSelection(input: {
     throw new Error("Import requires interactive TTY when platform/file args are omitted.");
   }
 
-  clackIntro("🦞 Reclaw - Long-term memory for your Claw");
+  clackIntro(RECLAW_BANNER);
   const detectSpin = clackSpinner();
   detectSpin.start("Auto-detecting import sources");
   const detections = await detectImportSources(input.workspaceDir);
@@ -211,6 +200,7 @@ export async function resolveImportSelection(input: {
           };
         }),
       }),
+      "Import canceled",
     );
 
   const platformDetections = detections[platform];
@@ -234,6 +224,7 @@ export async function resolveImportSelection(input: {
             },
           ],
         }),
+        "Import canceled",
       );
 
       if (selectedCandidate === "__manual__") {
@@ -245,6 +236,7 @@ export async function resolveImportSelection(input: {
                 : `Path to ${platformLabel(platform)} JSON export (file or directory)`,
             placeholder: platform === "openclaw" ? "./memory" : "./export.json",
           }),
+          "Import canceled",
         );
       } else {
         selectedPath = selectedCandidate;
@@ -258,6 +250,7 @@ export async function resolveImportSelection(input: {
               : `Path to ${platformLabel(platform)} JSON export (file or directory)`,
           placeholder: platform === "openclaw" ? "./memory" : "./export.json",
         }),
+        "Import canceled",
       );
     }
   }

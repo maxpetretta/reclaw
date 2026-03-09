@@ -1,5 +1,6 @@
 import { updateState } from "./store";
 import type { CompactionExtractionStatus, SnapshotRunStatus } from "./types";
+import { assignDefined } from "../lib/optional-fields";
 
 const MAX_SNAPSHOT_RUNS = 50;
 
@@ -14,14 +15,21 @@ export async function appendSnapshotRun(
   },
 ): Promise<void> {
   await updateState(path, (state) => {
-    const nextRun = {
+    const nextRun: {
+      at: string;
+      status: SnapshotRunStatus;
+      memoryMdPath: string;
+      error?: string;
+      workerSessionId?: string;
+      workerSessionKey?: string;
+    } = {
       at: new Date().toISOString(),
       status: run.status,
       memoryMdPath: run.memoryMdPath,
-      ...(run.error ? { error: run.error } : {}),
-      ...(run.workerSessionId ? { workerSessionId: run.workerSessionId } : {}),
-      ...(run.workerSessionKey ? { workerSessionKey: run.workerSessionKey } : {}),
     };
+    assignDefined(nextRun, "error", run.error);
+    assignDefined(nextRun, "workerSessionId", run.workerSessionId);
+    assignDefined(nextRun, "workerSessionKey", run.workerSessionKey);
 
     state.snapshotRuns = [nextRun, ...state.snapshotRuns].slice(0, MAX_SNAPSHOT_RUNS);
   });
