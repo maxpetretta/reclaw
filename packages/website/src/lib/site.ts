@@ -10,8 +10,7 @@ export const heroEyebrow = "Long-term memory for your Claw"
 export const heroTitleLead = "Your best ideas are"
 export const heroTitleAccent = "buried in old chats"
 export const heroTitle = `${heroTitleLead} ${heroTitleAccent}`
-export const heroSubtitleIntro =
-  "Every conversation with your AI produces knowledge. Reclaw is an "
+export const heroSubtitleIntro = "Every conversation with your AI produces knowledge. Reclaw is an "
 export const heroSubtitleLinkLabel = "OpenClaw"
 export const heroSubtitleOutro =
   " plugin that captures the important bits, so your assistant can pick up right where you left off."

@@ -6,19 +6,25 @@ read_when:
   - You want to record a decision, fact, task, or question
   - You're asked about what you remember or know
   - You need to check or update the subject registry
+metadata:
+  openclaw:
+    homepage: https://github.com/maxpetretta/reclaw
+    requires:
+      bins:
+        - openclaw
 ---
 
 # Reclaw Memory System
 
-Reclaw is an append-only event log that replaces daily memory files. All memory lives in `log.jsonl` as structured entries. Extraction happens automatically at session end — you don't write to the log directly. Your job is to state information clearly in conversation so the extraction hook captures it.
+Reclaw is an append-only event log that replaces daily memory files. It assumes the current OpenClaw environment already has the Reclaw plugin installed. All memory lives in `log.jsonl` as structured entries. Extraction happens automatically at session end — you don't write to the log directly. Your job is to state information clearly in conversation so the extraction hook captures it.
 
 ## How Memory Works
 
 1. **MEMORY.md** is auto-loaded into every session. It has a manual section (goals, preferences) and a generated Reclaw memory snapshot updated nightly.
 2. **Reclaw session handoff** is written into MEMORY.md after each session extraction.
 3. **Subject markdown projections** are generated under `~/.openclaw/reclaw/memory/` so OpenClaw can semantically index event-log content through its builtin markdown memory path.
-4. **`memory_search`** finds entries by keyword, type, subject, or status, and can hit semantic results from `MEMORY.md` plus generated subject projections.
-5. **`memory_get`** retrieves a specific entry by ID, reads MEMORY.md, or fetches a full session transcript.
+4. **`memory_search`** finds entries by keyword, type, subject, or status when the Reclaw plugin has registered that tool in the current OpenClaw environment, and can hit semantic results from `MEMORY.md` plus generated subject projections.
+5. **`memory_get`** retrieves a specific entry by ID, reads `MEMORY.md`, or fetches a full session transcript when the Reclaw plugin has registered that tool in the current OpenClaw environment.
 
 Start with what's already in context (steps 1-3). Only call tools when you need something specific.
 
