@@ -18,13 +18,13 @@ openclaw reclaw init
 ```
 Session ends  →  Extraction hook reads transcript
                       ↓
-              LLM extracts structured entries (facts, decisions, tasks, questions, handoff)
+              LLM extracts structured entries (facts, decisions, tasks, questions)
                       ↓
               Entries appended to log.jsonl, subjects upserted in subjects.json
                       ↓
               Touched subject markdown projections refreshed under <logDir>/memory
                       ↓
-              Handoff block updated in MEMORY.md
+              Session-summary block updated in MEMORY.md
                       ↓
 Nightly cron  →  Snapshot generator rewrites MEMORY.md generated block
 ```
@@ -39,7 +39,7 @@ All content passes a hard filter: only user-specific knowledge enters the log. G
 | `decision` | A choice that was made, with reasoning |
 | `task` | Something to do (`open` or `done`) |
 | `question` | An open loop that needs an answer |
-| `handoff` | Session boundary state — what's active and unresolved |
+| `session_summary` | Session boundary state — what's active and unresolved |
 
 ### Memory tools
 
@@ -50,7 +50,7 @@ Reclaw wraps OpenClaw's builtin `memory_search` and `memory_get` with structured
 
 ### Subjects
 
-Every non-handoff entry is tagged with a subject slug (`kebab-case`). Subjects are tracked in `subjects.json` with a type enum: `project`, `person`, `system`, `topic` (default).
+Every non-`session_summary` entry is tagged with a subject slug (`kebab-case`). Subjects are tracked in `subjects.json` with a type enum: `project`, `person`, `system`, `topic` (default).
 
 ```bash
 openclaw reclaw subjects list
@@ -96,7 +96,7 @@ openclaw reclaw uninstall         # revert config changes (log data preserved)
 openclaw reclaw log               # print recent log entries
 openclaw reclaw search            # search with filters (--type, --subject, --status)
 openclaw reclaw trace             # trace chronological subject history
-openclaw reclaw status            # list recent snapshots, extractions, and handoffs
+openclaw reclaw status            # list recent snapshots, extractions, and session summaries
 
 openclaw reclaw subjects list     # list all subjects
 openclaw reclaw subjects add      # add a subject
