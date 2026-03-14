@@ -6,7 +6,7 @@ import { detectImportSources } from "./import-detect";
 import { registerBriefingCommands } from "./register-briefing-commands";
 import { registerImportCommands } from "./register-import-commands";
 import { registerLogCommands } from "./register-log-commands";
-import { registerProjectionCommands } from "./register-projection-commands";
+import { registerRefreshCommands } from "./register-refresh-commands";
 import { registerSetupCommands } from "./register-setup-commands";
 import { registerSubjectCommands } from "./register-subject-commands";
 import {
@@ -53,8 +53,9 @@ function registerReclawCliCommands(
     config,
     workspaceDir,
   });
-  registerProjectionCommands(reclaw, {
+  registerRefreshCommands(reclaw, {
     config,
+    api,
     workspaceDir,
   });
   registerBriefingCommands(reclaw, {

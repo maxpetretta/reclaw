@@ -113,4 +113,31 @@ describe("runIsolatedModelTask", () => {
     expect(result.sessionId).toBe("session-1");
     expect(result.sessionKey).toBe("agent:main:cron:job-1:run:session-1");
   });
+
+  test("uses the configured wait timeout for both cron run and completion polling", async () => {
+    const waitCalls: Array<{ kind: "run" | "result"; timeoutMs: number }> = [];
+    const deps = createDeps({
+      runCronJobNow: async (_jobId, timeoutMs) => {
+        waitCalls.push({ kind: "run", timeoutMs });
+      },
+      waitForCronResult: async (_jobId, timeoutMs) => {
+        waitCalls.push({ kind: "result", timeoutMs });
+        return {
+          summary: "DONE",
+          sessionId: "session-1",
+          sessionKey: "agent:main:cron:job-1:run:session-1",
+        };
+      },
+    });
+
+    await runIsolatedModelTask({
+      ...BASE_OPTIONS,
+      waitTimeoutMs: 321_000,
+    }, deps);
+
+    expect(waitCalls).toEqual([
+      { kind: "run", timeoutMs: 321_000 },
+      { kind: "result", timeoutMs: 321_000 },
+    ]);
+  });
 });

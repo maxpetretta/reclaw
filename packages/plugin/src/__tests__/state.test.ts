@@ -3,13 +3,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  finishSessionSummaryRewrite,
   incrementEventUsage,
   isExtracted,
   markExtracted,
   markFailed,
   pruneState,
   readState,
+  startSessionSummaryRewrite,
   shouldRetry,
+  updateSessionSummaryRewriteProgress,
   writeState,
 } from "../state";
 
@@ -182,5 +185,44 @@ describe("state", () => {
     expect(usage?.memorySearchCount).toBe(1);
     expect(usage?.citationCount).toBe(2);
     expect(typeof usage?.lastAccessAt).toBe("string");
+  });
+
+  test("session summary rewrite progress is persisted in state", async () => {
+    await startSessionSummaryRewrite(statePath, {
+      mode: "projected",
+      total: 5,
+      cleared: 12,
+      clearApplied: true,
+    });
+    await updateSessionSummaryRewriteProgress(statePath, {
+      total: 5,
+      cleared: 12,
+      processed: 2,
+      written: 2,
+      clearApplied: true,
+      currentSessionId: "session-2",
+      completedSessionId: "session-1",
+      wroteSessionId: "session-1",
+    });
+    await finishSessionSummaryRewrite(statePath, {
+      status: "completed",
+      total: 5,
+      processed: 5,
+      written: 5,
+      cleared: 12,
+    });
+
+    const state = await readState(statePath);
+    expect(state.sessionSummaryRewrite?.mode).toBe("projected");
+    expect(state.sessionSummaryRewrite?.status).toBe("completed");
+    expect(state.sessionSummaryRewrite?.total).toBe(5);
+    expect(state.sessionSummaryRewrite?.processed).toBe(5);
+    expect(state.sessionSummaryRewrite?.written).toBe(5);
+    expect(state.sessionSummaryRewrite?.cleared).toBe(12);
+    expect(state.sessionSummaryRewrite?.clearApplied).toBe(true);
+    expect(state.sessionSummaryRewrite?.completedSessionIds).toEqual(["session-1"]);
+    expect(state.sessionSummaryRewrite?.writtenSessionIds).toEqual(["session-1"]);
+    expect(typeof state.sessionSummaryRewrite?.startedAt).toBe("string");
+    expect(typeof state.sessionSummaryRewrite?.finishedAt).toBe("string");
   });
 });

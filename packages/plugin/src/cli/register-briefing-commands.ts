@@ -1,6 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { intro as clackIntro, log as clackLog, outro as clackOutro, spinner as clackSpinner } from "@clack/prompts";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { generateBriefing } from "../briefing/generate";
 import type { PluginConfig } from "../config";
@@ -22,7 +21,6 @@ import {
 import { readPositiveNumberOption, toObject } from "./parse";
 import { resolvePaths } from "./paths";
 import type { CommandLike } from "./command-like";
-import { RECLAW_BANNER } from "./ui";
 
 interface SnapshotGenerateParams {
   config: PluginConfig;
@@ -419,41 +417,7 @@ export function registerBriefingCommands(
     workspaceDir?: string;
   },
 ): void {
-  const runSnapshotRefreshAction = async (): Promise<void> => {
-    clackIntro(RECLAW_BANNER);
-    const spin = clackSpinner();
-    spin.start("Refreshing memory snapshot...");
-    const memoryMdPath = await runSnapshotRefresh({
-      config: params.config,
-      api: params.api,
-      workspaceDir: params.workspaceDir,
-    });
-    spin.stop(`Memory snapshot updated: ${memoryMdPath}`);
-    clackOutro("MEMORY.md snapshot block updated.");
-  };
-
-  const runSessionSummaryRefreshAction = async (): Promise<void> => {
-    clackIntro(RECLAW_BANNER);
-    const result = await runSessionSummaryRefresh({
-      config: params.config,
-      workspaceDir: params.workspaceDir,
-    });
-
-    if (result.updated) {
-      clackLog.step("Session summary refreshed");
-      clackOutro("MEMORY.md session summary block updated.");
-      return;
-    }
-
-    clackOutro("No session summary entries found. MEMORY.md unchanged.");
-  };
-
   const snapshot = reclaw.command("snapshot").description("Memory snapshot helpers");
-  snapshot
-    .command("refresh")
-    .description("Refresh and write MEMORY.md memory snapshot block")
-    .action(runSnapshotRefreshAction);
-
   snapshot
     .command("list")
     .description("List recent snapshot refresh runs")
@@ -480,11 +444,6 @@ export function registerBriefingCommands(
     });
 
   const summary = reclaw.command("summary").description("Reclaw session summary helpers");
-  summary
-    .command("refresh")
-    .description("Force-refresh MEMORY.md session summary block from latest session summary event")
-    .action(runSessionSummaryRefreshAction);
-
   summary
     .command("list")
     .description("List recent session summary entries with compaction status")

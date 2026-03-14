@@ -88,6 +88,7 @@ describe("session summary flow", () => {
       generateSessionSummary: async () => ({
         content: "Worked on auth migration rollout.",
         detail: "Retry validation remains open.",
+        source: "model",
       }),
       extractFromTranscript: async () =>
         '{"type":"fact","content":"Auth migration retry validation remains open","subject":"auth-migration"}',

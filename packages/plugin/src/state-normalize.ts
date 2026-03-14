@@ -13,6 +13,8 @@ import type {
   ImportJobSummaryState,
   ImportedConversationState,
   ReclawState,
+  SessionSummaryRewriteState,
+  SessionSummaryRewriteStatus,
   SnapshotRunState,
   SnapshotRunStatus,
 } from "./state/types";
@@ -31,6 +33,11 @@ const COMPACTION_STATUS_SET: ReadonlySet<CompactionExtractionStatus> = new Set([
   "skipped",
 ]);
 const SNAPSHOT_STATUS_SET: ReadonlySet<SnapshotRunStatus> = new Set(["success", "failed"]);
+const SESSION_SUMMARY_REWRITE_STATUS_SET: ReadonlySet<SessionSummaryRewriteStatus> = new Set([
+  "running",
+  "completed",
+  "failed",
+]);
 
 function readFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -332,6 +339,63 @@ function normalizeSnapshotRuns(raw: unknown): SnapshotRunState[] {
   return runs.sort((left, right) => right.at.localeCompare(left.at));
 }
 
+function normalizeSessionSummaryRewrite(raw: unknown): SessionSummaryRewriteState | undefined {
+  if (!isObject(raw)) {
+    return undefined;
+  }
+
+  const mode = raw.mode === "projected" || raw.mode === undefined ? "projected" : undefined;
+  const status =
+    typeof raw.status === "string" && SESSION_SUMMARY_REWRITE_STATUS_SET.has(raw.status as SessionSummaryRewriteStatus)
+      ? (raw.status as SessionSummaryRewriteStatus)
+      : undefined;
+  const startedAt = readTimestamp(raw.startedAt);
+  const updatedAt = readTimestamp(raw.updatedAt);
+  const total = readNonNegativeInt(raw.total);
+  const processed = readNonNegativeInt(raw.processed);
+  const written = readNonNegativeInt(raw.written);
+  const cleared = readNonNegativeInt(raw.cleared);
+
+  if (
+    mode === undefined ||
+    status === undefined ||
+    startedAt === undefined ||
+    updatedAt === undefined ||
+    total === undefined ||
+    processed === undefined ||
+    written === undefined ||
+    cleared === undefined
+  ) {
+    return undefined;
+  }
+
+  const result: SessionSummaryRewriteState = {
+    mode,
+    status,
+    startedAt,
+    updatedAt,
+    total,
+    processed,
+    written,
+    cleared,
+    clearApplied:
+      raw.clearApplied === true ||
+      (raw.clearApplied === undefined && (processed > 0 || written > 0 || cleared > 0 || status === "completed")),
+    completedSessionIds:
+      Array.isArray(raw.completedSessionIds)
+        ? raw.completedSessionIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        : [],
+    writtenSessionIds:
+      Array.isArray(raw.writtenSessionIds)
+        ? raw.writtenSessionIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        : [],
+  };
+  assignDefined(result, "finishedAt", readTimestamp(raw.finishedAt));
+  assignDefined(result, "currentSessionId", readTrimmedString(raw.currentSessionId));
+  assignDefined(result, "error", readTrimmedString(raw.error));
+  return result;
+}
+
 function normalizeImportJobs(raw: unknown): Record<string, ImportJobState> {
   const importJobs: Record<string, ImportJobState> = {};
   const importJobsRaw = isObject(raw) ? raw : {};
@@ -398,5 +462,8 @@ export function normalizeState(
     importJobs: normalizeImportJobs(raw.importJobs),
     compactionSessions: normalizeCompactionSessions(raw.compactionSessions),
     snapshotRuns: normalizeSnapshotRuns(raw.snapshotRuns),
+    ...(normalizeSessionSummaryRewrite(raw.sessionSummaryRewrite)
+      ? { sessionSummaryRewrite: normalizeSessionSummaryRewrite(raw.sessionSummaryRewrite) }
+      : {}),
   };
 }

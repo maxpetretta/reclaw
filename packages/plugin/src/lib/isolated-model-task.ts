@@ -180,10 +180,11 @@ export async function runIsolatedModelTaskWithMeta(
     timeoutSeconds: opts.timeoutSeconds,
     disabled: true,
   });
+  const waitTimeoutMs = opts.waitTimeoutMs ?? 1_900_000;
 
   try {
-    await resolvedDeps.runCronJobNow(scheduled.jobId, opts.waitTimeoutMs ?? 1_900_000);
-    const completion = await resolvedDeps.waitForCronResult(scheduled.jobId, 60_000);
+    await resolvedDeps.runCronJobNow(scheduled.jobId, waitTimeoutMs);
+    const completion = await resolvedDeps.waitForCronResult(scheduled.jobId, waitTimeoutMs);
 
     try {
       const transcriptOutput = await readTranscriptOutput(completion, {

@@ -13,6 +13,9 @@ export {
   type ImportJobSummaryState,
   type ImportedConversationState,
   type ReclawState,
+  type SessionSummaryRewriteState,
+  type SessionSummaryRewriteMode,
+  type SessionSummaryRewriteStatus,
   type SnapshotRunState,
   type SnapshotRunStatus,
   type TranscriptWatermark,
@@ -32,4 +35,11 @@ export {
   shouldRetry,
 } from "./state/session-tracking";
 export { incrementEventUsage } from "./state/usage";
-export { appendSnapshotRun, markCompactionObserved, markCompactionStatus } from "./state/operational";
+export {
+  appendSnapshotRun,
+  finishSessionSummaryRewrite,
+  markCompactionObserved,
+  markCompactionStatus,
+  startSessionSummaryRewrite,
+  updateSessionSummaryRewriteProgress,
+} from "./state/operational";

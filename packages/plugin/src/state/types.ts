@@ -140,6 +140,26 @@ export interface SnapshotRunState {
   workerSessionKey?: string;
 }
 
+export type SessionSummaryRewriteStatus = "running" | "completed" | "failed";
+export type SessionSummaryRewriteMode = "projected";
+
+export interface SessionSummaryRewriteState {
+  status: SessionSummaryRewriteStatus;
+  mode: SessionSummaryRewriteMode;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+  total: number;
+  processed: number;
+  written: number;
+  cleared: number;
+  clearApplied: boolean;
+  completedSessionIds: string[];
+  writtenSessionIds: string[];
+  currentSessionId?: string;
+  error?: string;
+}
+
 export interface ReclawState {
   extractedSessions: Record<string, ExtractedSession>;
   failedSessions: Record<string, FailedSession>;
@@ -148,6 +168,7 @@ export interface ReclawState {
   importJobs: Record<string, ImportJobState>;
   compactionSessions: Record<string, CompactionSessionState>;
   snapshotRuns: SnapshotRunState[];
+  sessionSummaryRewrite?: SessionSummaryRewriteState;
 }
 
 export function createEmptyState(): ReclawState {

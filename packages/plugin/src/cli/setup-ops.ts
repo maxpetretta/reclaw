@@ -42,13 +42,17 @@ const LEGACY_CRON_NAMES = [
 
 interface InitDeps {
   fireGuidanceEvent?: (paths: InitPaths) => Promise<GuidanceEventResult>;
-  ensureQmdCollection?: (projectionDir: string) => Promise<EnsureQmdCollectionResult> | EnsureQmdCollectionResult;
+  ensureQmdCollection?: (
+    projectionDir: string,
+    name?: string,
+  ) => Promise<EnsureQmdCollectionResult> | EnsureQmdCollectionResult;
 }
 
 export interface InitResult {
   paths: InitPaths;
   guidanceEvent: GuidanceEventResult;
   qmd: EnsureQmdCollectionResult;
+  transcriptQmd: EnsureQmdCollectionResult;
 }
 
 function resolvePluginPromptsDir(): string {
@@ -269,6 +273,7 @@ export async function runInit(
     paths,
     guidanceEvent,
     qmd,
+    transcriptQmd,
   };
 }
 

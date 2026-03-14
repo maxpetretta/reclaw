@@ -480,7 +480,7 @@ describe("extraction hooks", () => {
         llmCalls += 1;
         return joinExtractionOutput(['{"type":"fact","content":"Loaded from sessionFile fallback","subject":"auth-migration"}']);
       },
-      generateSessionSummary: async () => ({ content: "Session summary from fallback", detail: "Details" }),
+      generateSessionSummary: async () => ({ content: "Session summary from fallback", detail: "Details", source: "model" }),
     });
 
     await handlers.before_reset?.(
@@ -1062,7 +1062,7 @@ describe("extraction hooks", () => {
         llmCalls += 1;
         throw new Error("LLM timeout");
       },
-      generateSessionSummary: async () => ({ content: "Summary", detail: "Details" }),
+      generateSessionSummary: async () => ({ content: "Summary", detail: "Details", source: "model" }),
     });
 
     const resetEvent = {
@@ -1107,7 +1107,7 @@ describe("extraction hooks", () => {
         workerSessionId: "worker-invalid-session-id",
         workerSessionKey: "agent:main:cron:job-7:run:worker-invalid-session-id",
       }),
-      generateSessionSummary: async () => ({ content: "Summary", detail: "Details" }),
+      generateSessionSummary: async () => ({ content: "Summary", detail: "Details", source: "model" }),
     });
 
     await handlers.before_reset?.(
@@ -1142,7 +1142,7 @@ describe("extraction hooks", () => {
     registerExtractionHooks(api, createPluginConfig(logDir), {
       extractFromTranscript: async () =>
         '{"type":"fact","content":"Queue retries are enabled","subject":"auth-migration"}',
-      generateSessionSummary: async () => ({ content: "Session summary", detail: "Details" }),
+      generateSessionSummary: async () => ({ content: "Session summary", detail: "Details", source: "model" }),
     });
 
     await handlers.before_reset?.(
@@ -1395,9 +1395,9 @@ describe("extraction hooks", () => {
       generateSessionSummary: async () => {
         summaryCalls += 1;
         if (summaryCalls === 1) {
-          return { content: "Auth migration in progress", detail: "Backfill remains" };
+          return { content: "Auth migration in progress", detail: "Backfill remains", source: "model" };
         }
-        return { content: "Auth migration complete", detail: "Backfill done" };
+        return { content: "Auth migration complete", detail: "Backfill done", source: "model" };
       },
     });
 
@@ -1455,6 +1455,7 @@ describe("extraction hooks", () => {
       generateSessionSummary: async () => ({
         content: "Queue retries stable",
         detail: "Monitoring next 24h",
+        source: "model",
       }),
     });
 

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { PluginConfig } from "../config";
 import type { CommandLike } from "../cli/command-like";
 import { registerBriefingCommands, runSessionSummaryRefresh } from "../cli/register-briefing-commands";
+import { parseRefreshScopes, registerRefreshCommands, runRefresh } from "../cli/register-refresh-commands";
 import { writeState } from "../state";
 import {
   LAST_SESSION_SUMMARY_BEGIN_MARKER,
@@ -88,29 +89,236 @@ describe("snapshot and summary CLI commands", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  test("registers snapshot and summary command sets with refresh/list/status", () => {
+  test("registers unified refresh command and removes old refresh subcommands", () => {
     const root = new MockCommand("reclaw");
+    registerRefreshCommands(root, {
+      config: createConfig(logDir),
+      workspaceDir,
+      api: { config: {} } as never,
+    });
     registerBriefingCommands(root, {
       config: createConfig(logDir),
       workspaceDir,
       api: { config: {} } as never,
     });
 
-    expect(root.children.has("snapshot")).toBe(true);
-    expect(root.children.has("handoff")).toBe(false);
+    expect(root.children.has("refresh")).toBe(true);
 
     const snapshot = root.children.get("snapshot");
-    expect(snapshot?.children.has("refresh")).toBe(true);
-    expect(snapshot?.children.has("generate")).toBe(false);
+    expect(snapshot?.children.has("refresh")).toBe(false);
     expect(snapshot?.children.has("list")).toBe(true);
     expect(snapshot?.children.has("status")).toBe(true);
 
     const summary = root.children.get("summary");
-    expect(summary?.children.has("refresh")).toBe(true);
+    expect(summary?.children.has("refresh")).toBe(false);
     expect(summary?.children.has("list")).toBe(true);
     expect(summary?.children.has("status [sessionId]")).toBe(true);
 
     expect(root.children.has("status")).toBe(true);
+    expect(root.children.has("projection")).toBe(false);
+    expect(root.children.has("handoff")).toBe(false);
+  });
+
+  test("parseRefreshScopes defaults to all scopes and supports aliases", () => {
+    expect(parseRefreshScopes(undefined)).toEqual(["subjects", "sessions", "transcripts", "summary", "snapshot"]);
+    expect(parseRefreshScopes("memory,transcript,summary")).toEqual(["subjects", "transcripts", "summary"]);
+    expect(parseRefreshScopes(["sessions", "snapshot"])).toEqual(["sessions", "snapshot"]);
+  });
+
+  test("runRefresh sessions scope only refreshes existing projections by default", async () => {
+    await mkdir(join(logDir, "sessions"), { recursive: true });
+    await writeFile(
+      join(logDir, "log.jsonl"),
+      '{"timestamp":"2026-03-01T00:02:00.000Z","id":"A1b2C3d4E5f6","type":"session_summary","content":"Native summary.","session":"session-native"}\n',
+      "utf8",
+    );
+
+    const result = await runRefresh({
+      config: createConfig(logDir),
+      api: { config: {} } as never,
+      workspaceDir,
+      scope: "sessions",
+    });
+
+    const logContent = await readFile(join(logDir, "log.jsonl"), "utf8");
+    const projection = await readFile(join(logDir, "sessions", "session-native.md"), "utf8");
+
+    expect(result.sessionSummaryBackfilled).toBe(0);
+    expect(logContent).toContain('"type":"session_summary"');
+    expect(logContent).toContain('"session":"session-native"');
+    expect(projection).toContain("# Session session-native");
+  });
+
+  test("runRefresh can rewrite existing native session summaries when requested", async () => {
+    await writeFile(
+      join(logDir, "log.jsonl"),
+      [
+        '{"timestamp":"2026-03-01T00:02:00.000Z","id":"A1b2C3d4E5f6","type":"session_summary","content":"Old native summary.","session":"session-native"}',
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const result = await runRefresh({
+      config: createConfig(logDir),
+      api: { config: {} } as never,
+      workspaceDir,
+      scope: "sessions",
+      rewriteExistingSessionSummaries: true,
+    }, {
+      backfillSessionSummaries: async ({ logPath, onProgress }) => {
+        await writeFile(
+          logPath,
+          '{"timestamp":"2026-03-01T00:02:00.001Z","id":"B1b2C3d4E5f6","type":"session_summary","content":"Rebuilt native summary.","session":"session-native"}\n',
+          "utf8",
+        );
+        await onProgress?.({
+          total: 1,
+          processed: 1,
+          written: 1,
+          existing: 0,
+          skippedNoTranscript: 0,
+          skippedNoConversation: 0,
+          skippedFallback: 0,
+          cleared: 1,
+        });
+        return {
+          scanned: 1,
+          total: 1,
+          processed: 1,
+          written: 1,
+          existing: 0,
+          skippedNoTranscript: 0,
+          skippedNoConversation: 0,
+          skippedFallback: 0,
+          cleared: 1,
+        };
+      },
+    });
+
+    const logContent = await readFile(join(logDir, "log.jsonl"), "utf8");
+    const summaryLines = logContent.split("\n").filter((line) => line.includes('"session":"session-native"'));
+
+    expect(result.sessionSummaryBackfilled).toBe(1);
+    expect(result.sessionSummaryCleared).toBe(1);
+    expect(summaryLines.length).toBe(1);
+  });
+
+  test("runRefresh forwards configurable session summary concurrency", async () => {
+    const observed: number[] = [];
+
+    const result = await runRefresh({
+      config: createConfig(logDir),
+      api: { config: {} } as never,
+      workspaceDir,
+      scope: "sessions",
+      rewriteExistingSessionSummaries: true,
+      sessionSummaryConcurrency: "7",
+    }, {
+      backfillSessionSummaries: async ({ concurrency, onProgress }) => {
+        observed.push(concurrency ?? -1);
+        await onProgress?.({
+          total: 1,
+          processed: 1,
+          written: 1,
+          existing: 0,
+          skippedNoTranscript: 0,
+          skippedNoConversation: 0,
+          skippedFallback: 0,
+          cleared: 0,
+        });
+        return {
+          scanned: 1,
+          total: 1,
+          processed: 1,
+          written: 1,
+          existing: 0,
+          skippedNoTranscript: 0,
+          skippedNoConversation: 0,
+          skippedFallback: 0,
+          cleared: 0,
+        };
+      },
+    });
+
+    expect(result.sessionSummaryBackfilled).toBe(1);
+    expect(observed).toEqual([7]);
+  });
+
+  test("runRefresh resumes an incomplete projected session summary rewrite", async () => {
+    await writeState(join(logDir, "state.json"), {
+      extractedSessions: {},
+      failedSessions: {},
+      importedConversations: {},
+      eventUsage: {},
+      importJobs: {},
+      compactionSessions: {},
+      snapshotRuns: [],
+      sessionSummaryRewrite: {
+        mode: "projected",
+        status: "failed",
+        startedAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:10:00.000Z",
+        finishedAt: "2026-03-01T00:10:00.000Z",
+        total: 10,
+        processed: 4,
+        written: 3,
+        cleared: 12,
+        clearApplied: true,
+        completedSessionIds: ["session-a", "session-b", "session-c", "session-d"],
+        writtenSessionIds: ["session-a", "session-b", "session-c"],
+      },
+    });
+
+    let observedResume: unknown;
+    const result = await runRefresh({
+      config: createConfig(logDir),
+      api: { config: {} } as never,
+      workspaceDir,
+      scope: "sessions",
+      rewriteExistingSessionSummaries: true,
+    }, {
+      backfillSessionSummaries: async ({ resume, onProgress }) => {
+        observedResume = resume;
+        await onProgress?.({
+          total: 10,
+          processed: 5,
+          written: 4,
+          existing: 0,
+          skippedNoTranscript: 0,
+          skippedNoConversation: 0,
+          skippedFallback: 0,
+          cleared: 12,
+          completedSessionId: "session-e",
+          wroteSessionId: "session-e",
+        });
+        return {
+          scanned: 10,
+          total: 10,
+          processed: 5,
+          written: 4,
+          existing: 0,
+          skippedNoTranscript: 0,
+          skippedNoConversation: 0,
+          skippedFallback: 0,
+          cleared: 12,
+        };
+      },
+    });
+
+    const state = await readFile(join(logDir, "state.json"), "utf8");
+    expect(result.sessionSummaryBackfilled).toBe(4);
+    expect(observedResume).toEqual({
+      processed: 4,
+      written: 3,
+      cleared: 12,
+      clearApplied: true,
+      completedSessionIds: ["session-a", "session-b", "session-c", "session-d"],
+      writtenSessionIds: ["session-a", "session-b", "session-c"],
+      skipFirstProcessedCount: 0,
+    });
+    expect(state).toContain('"status": "completed"');
+    expect(state).toContain('"completedSessionIds": [');
+    expect(state).toContain('"session-e"');
   });
 
   test("status command prints recent snapshots, extractions, and handoffs", async () => {
