@@ -82,7 +82,7 @@ Reclaw keeps one generated markdown file per subject under `~/.openclaw/reclaw/m
 - Treat projection files as generated output — don't manually edit them
 - Successful live extraction refreshes touched subject projections automatically
 - Successful non-dry-run imports refresh the full projection set automatically
-- If the index seems stale, rebuild with `openclaw reclaw projection refresh`
+- If the index seems stale, rebuild with `openclaw reclaw refresh --scope subjects`
 
 ## Using `memory_get`
 
@@ -140,15 +140,15 @@ openclaw reclaw subjects list
 openclaw reclaw subjects add <slug> --type <project|person|system|topic>
 openclaw reclaw subjects rename <old-slug> <new-slug>
 
-# Refresh generated subject markdown projections
-openclaw reclaw projection refresh
-openclaw reclaw projection list
+# Refresh all generated Reclaw outputs
+openclaw reclaw refresh
 
-# Regenerate the MEMORY.md memory snapshot now
-openclaw reclaw snapshot refresh
-
-# Force-refresh MEMORY.md session summary block from log
-openclaw reclaw summary refresh
+# Refresh one surface
+openclaw reclaw refresh --scope subjects
+openclaw reclaw refresh --scope sessions
+openclaw reclaw refresh --scope transcripts
+openclaw reclaw refresh --scope summary
+openclaw reclaw refresh --scope snapshot
 
 # Import historical conversations
 openclaw reclaw import <chatgpt|claude|grok|openclaw> <file>

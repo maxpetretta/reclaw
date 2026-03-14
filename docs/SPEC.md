@@ -1,7 +1,7 @@
 # Reclaw Specification
 
 Status: Implementation contract
-Last updated: 2026-03-06
+Last updated: 2026-03-13
 Scope: `packages/plugin` + `packages/skill`
 
 ## 1. Identity
@@ -30,7 +30,7 @@ It provides a durable memory system built from four pieces:
 1. An append-only structured event log in `log.jsonl`
 2. A subject registry in `subjects.json`
 3. A state file in `state.json`
-4. Wrapped `memory_search` / `memory_get` tools plus derived markdown surfaces (`MEMORY.md` blocks and subject projections)
+4. Wrapped `memory_search` / `memory_get` tools plus derived markdown surfaces (`MEMORY.md` blocks, subject projections, session-summary projections, and transcript projections)
 
 The log is the source of truth. `MEMORY.md` is a derived cache that keeps the most useful current context in prompt-ready form.
 
@@ -46,10 +46,11 @@ Reclaw does not use legacy daily memory files such as `memory/YYYY-MM-DD.md`.
   - user-maintained manual context
   - a nightly generated memory snapshot block
   - a latest-session summary block
-- Reclaw also maintains per-subject markdown projection files under its store directory so builtin markdown indexing can semantically search event-log content.
+- Reclaw also maintains generated markdown projection files under its store directory so search can bridge from structured/log-backed memory into markdown-indexed recall surfaces.
 - The event log is authoritative when `MEMORY.md` and the log disagree.
 - OpenClaw's native compaction summary is the continuity mechanism for long-running sessions that compact in place. Reclaw should not duplicate that summary path by default.
-- Semantic search applies to indexed markdown memory content surfaced through the builtin memory tool integration. Reclaw bridges event-log content into that leg through generated per-subject markdown projections and registers the projection directory in `agents.defaults.memorySearch.extraPaths`; the raw `jsonl` log itself is still searched with structured filters and keyword matching, not a vector index.
+- Default semantic search applies to indexed markdown memory content surfaced through the builtin memory tool integration. Reclaw bridges event-log content into that leg through generated subject and session-summary projections registered in `agents.defaults.memorySearch.extraPaths`; the raw `jsonl` log itself is still searched with structured filters and keyword matching, not a vector index.
+- Full-transcript semantic search is a separate recall mode. Transcript projections live in their own directory, use a dedicated QMD collection, and are excluded from the default builtin memory-search surface.
 - Extraction only stores user-specific, durable information. Generic world knowledge and one-off browsing artifacts are filtered out.
 - Main-session traffic is the normal extraction scope. By default, session keys prefixed with `cron:`, `sub:`, or `hook:` are skipped.
 
@@ -81,7 +82,8 @@ Notes:
 
 - `cron.timezone` defaults to the local machine timezone when unset.
 - OpenClaw's existing `agents.defaults.memorySearch` settings remain the search/embedding config used by the builtin markdown search leg.
-- Reclaw appends `<logDir>/memory` to `agents.defaults.memorySearch.extraPaths` so builtin semantic search indexes generated subject projections.
+- Reclaw appends `<logDir>/memory` and `<logDir>/sessions` to `agents.defaults.memorySearch.extraPaths` so builtin semantic search indexes durable-memory and session-summary projections.
+- Reclaw does not add `<logDir>/transcripts` to `agents.defaults.memorySearch.extraPaths`; transcript search is opt-in and uses a dedicated QMD collection instead of the default builtin memory-search corpus.
 
 ## 5. On-Disk Layout
 
@@ -108,6 +110,18 @@ Generated markdown used for builtin semantic search lives under the Reclaw store
 ~/.openclaw/reclaw/
   memory/
     <subject-slug>.md
+  sessions/
+    <session-id>.md
+```
+
+Generated markdown used for transcript-only recall search also lives under the Reclaw store:
+
+```text
+~/.openclaw/reclaw/
+  transcripts/
+    <session-id>/
+      chunk-0001.md
+      chunk-0002.md
 ```
 
 ## 6. Data Schemas
@@ -240,8 +254,60 @@ Projection contract:
 - They are distinct from per-subject projections so recall-oriented session summaries do not mix with durable subject memory.
 - The projection shape should optimize for fast recall: session id, timestamp, concise summary content, and a retrieval hint that points back to `memory_get("session:<id>")`.
 - If OpenClaw's native transcript compaction summaries are indexed for recall later, they should join this surface rather than the subject projection set.
+- Session-summary projections remain part of the default memory-search surface; they are not part of the transcript-only search mode.
 
-### 6.5 State file
+### 6.5 Transcript markdown projections
+
+Reclaw should maintain a separate generated markdown surface for full session transcripts.
+
+Projection contract:
+
+- Transcript projections are derived from retained OpenClaw transcript session files, not from `log.jsonl`.
+- They are distinct from subject and session-summary projections because they are recall-oriented raw conversation artifacts, not durable memory.
+- Transcript projections live under `<logDir>/transcripts/` and are intentionally excluded from `agents.defaults.memorySearch.extraPaths`.
+- When QMD is available, Reclaw should maintain a dedicated collection named `reclaw-transcripts` rooted at `<logDir>/transcripts/`.
+- Transcript search is opt-in. The default `memory_search` behavior must not search transcript projections.
+- When transcript search is requested, Reclaw searches transcript projections only; it does not also search `MEMORY.md`, subject projections, session-summary projections, or the event log in the same request.
+- A session may be split across multiple deterministic chunk files to keep indexing and retrieval precise. Unlike subject projections, one session does not need to stay in a single markdown file.
+- Projection rendering should preserve ordered user/assistant turns with minimal normalization only. There is no summarization, extraction, or reasoning layer in transcript projection content.
+- Every transcript chunk should include enough metadata for search results to point back to the source session and chunk window, plus a retrieval hint that points back to `memory_get("session:<id>")`.
+- Projection write failures do not invalidate or roll back the underlying transcript store.
+
+Suggested shape:
+
+```markdown
+# Transcript session-h2
+
+- Session: `session-h2`
+- Agent: `main`
+- Chunk: `1`
+- Turns: `1-40`
+- Generated: `2026-03-13T12:00:00.000Z`
+
+## Transcript
+
+### User | 2026-03-13T11:05:00.000Z
+
+Can you walk me through the retry failure we saw yesterday?
+
+### Assistant | 2026-03-13T11:05:10.000Z
+
+The failure path started in the webhook worker after the synchronous retry loop saturated the queue.
+
+### Retrieval
+
+Use `memory_get("session:session-h2")` for the full transcript.
+```
+
+Refresh triggers:
+
+- after `session_end`, when the session transcript is stable enough to project
+- after `after_compaction`, when the transcript watermark has advanced
+- after successful transcript-writing import, for imported sessions
+- on `gateway_start`, to reconcile missing or stale transcript projections for retained sessions
+- on demand through future CLI refresh commands
+
+### 6.6 State file
 
 `state.json` stores operational state in addition to memory content:
 
@@ -347,6 +413,7 @@ By trigger:
 - `gateway_start`: scans known transcript sessions at startup
 
 Transcript provenance is retained through the event `session` field, and `memory_get("session:<id>")` can be used to read the underlying conversation when the transcript can be resolved.
+Transcript projections are the search-oriented derivative of that same retained transcript store; they do not replace transcript lookup through `memory_get`.
 
 ### 7.3 Extraction prompt context
 
@@ -499,14 +566,25 @@ Parameters:
 | `type` | Optional event-type filter |
 | `subject` | Optional subject slug filter |
 | `status` | Optional task-status filter |
+| `searchTranscripts` | Optional boolean flag; when `true`, search full transcript projections instead of the default memory surfaces |
 
 Execution model:
 
+Default mode (`searchTranscripts` unset or `false`):
+
 1. If `type`, `subject`, or `status` is present, run a direct structured query over `log.jsonl`
 2. If `query` is present, run direct keyword search over log `content` / `detail`
-3. If `query` is present and builtin `memory_search` exists, also run builtin semantic/keyword search over indexed markdown memory content
+3. If `query` is present and builtin `memory_search` exists, also run builtin semantic/keyword search over indexed default memory content (`MEMORY.md`, subject projections, and session-summary projections)
 4. Merge the results and render log-backed matches with inline event ids
 5. Render `session_summary` matches distinctly from subject-scoped durable events so session recall is visually separable from subject memory
+
+Transcript mode (`searchTranscripts=true`):
+
+1. `query` is required
+2. `type`, `subject`, and `status` are invalid because transcript search is session-centric rather than event-centric
+3. Search the dedicated `reclaw-transcripts` QMD collection only
+4. Render transcript matches with session id, chunk metadata, and a retrieval hint back to `memory_get("session:<id>")`
+5. Do not also search `MEMORY.md`, subject projections, session-summary projections, or the event log in the same request
 
 Example log-backed output:
 
@@ -518,7 +596,9 @@ Contracts:
 
 - The log leg is structured + keyword only. There is no vector index over `log.jsonl`.
 - `memorySearchCount` is incremented for log-backed result ids returned by the search.
-- Semantic search is delegated to the builtin runtime helper and therefore follows OpenClaw's markdown indexing behavior across `MEMORY.md`, generated subject projection files, and any generated session-summary projection surface.
+- Default semantic search is delegated to the builtin runtime helper and therefore follows OpenClaw's markdown indexing behavior across `MEMORY.md`, generated subject projection files, and any generated session-summary projection surface.
+- Transcript semantic search uses the dedicated `reclaw-transcripts` QMD collection and is intentionally isolated from the default memory-search corpus.
+- Transcript-search results are recall aids, not durable memory entries, and therefore do not participate in log-entry usage scoring unless the user later cites or retrieves related log entries separately.
 
 ### 9.2 `memory_get`
 
@@ -566,11 +646,14 @@ Example event-id response:
    - `session.maintenance.maxEntries = 100000`
    - `session.maintenance.resetArchiveRetention = false`
 6. Disables the bundled `session-memory` hook
-7. Adds `<logDir>/memory` to `agents.defaults.memorySearch.extraPaths`
+7. Adds `<logDir>/memory` and `<logDir>/sessions` to `agents.defaults.memorySearch.extraPaths`
 8. Ensures the snapshot and session-summary markers exist in `MEMORY.md`
-9. Ensures the projection directory exists at `<logDir>/memory`
-10. Registers or updates the nightly snapshot cron job
-11. Fires a post-init system event instructing the main session to update `AGENTS.md` and `MEMORY.md` guidance blocks
+9. Ensures the projection directories exist at `<logDir>/memory`, `<logDir>/sessions`, and `<logDir>/transcripts`
+10. Configures QMD collections when QMD is available:
+    - `reclaw-memory` for the durable-memory projection surface
+    - `reclaw-transcripts` for transcript-only recall search
+11. Registers or updates the nightly snapshot cron job
+12. Fires a post-init system event instructing the main session to update `AGENTS.md` and `MEMORY.md` guidance blocks
 
 Important: `init` does not directly rewrite `AGENTS.md` or inject the `RECLAW MEMORY NOTICE` block into `MEMORY.md`. That is delegated to the post-init guidance flow.
 
@@ -589,7 +672,8 @@ It does not fully scrub all session-summary or guidance content from the workspa
 - `openclaw.json` contains the expected slot, session-retention, hook, memory-flush, and `memorySearch.extraPaths` settings
 - `AGENTS.md` contains Reclaw guidance markers
 - `MEMORY.md` contains snapshot markers, session-summary markers, and the Reclaw notice block
-- the projection directory exists under `<logDir>/memory`
+- the projection directories exist under `<logDir>/memory`, `<logDir>/sessions`, and `<logDir>/transcripts`
+- `<logDir>/transcripts` is not present in `agents.defaults.memorySearch.extraPaths`
 - the nightly snapshot cron job exists and is enabled
 
 ### 10.2 Operational commands
@@ -601,14 +685,14 @@ Primary CLI groups:
 - `openclaw reclaw trace`
 - `openclaw reclaw status`
 - `openclaw reclaw subjects list|add|rename`
-- `openclaw reclaw projection refresh|list`
-- `openclaw reclaw snapshot refresh|list|status`
-- `openclaw reclaw summary refresh|list|status`
+- `openclaw reclaw refresh [--scope all|subjects|sessions|transcripts|summary|snapshot]`
+- `openclaw reclaw snapshot list|status`
+- `openclaw reclaw summary list|status`
 - `openclaw reclaw import ...`
 
 Notes:
 
-- the nightly cron uses `snapshot refresh`
+- the nightly cron uses `refresh --scope snapshot`
 - `trace` groups event history by subject and renders chronological chains
 
 ## 11. Import Contract
@@ -707,11 +791,11 @@ A similar implementation should satisfy these checks:
 4. Startup sweep can extract missed sessions and retry failed ones
 5. Compaction-triggered delta extraction records compaction state and only processes transcript content newer than the last extraction watermark, while same-session continuity relies on OpenClaw's native compaction summary
 6. Snapshot generation rewrites only the snapshot block and preserves unrelated `MEMORY.md` content
-7. `memory_search` returns log-backed results with inline ids, distinguishes session-summary recall artifacts from subject memory, and combines them with builtin markdown semantic results when queried
+7. `memory_search` defaults to log-backed results plus builtin semantic search over `MEMORY.md`, subject projections, and session-summary projections, while `searchTranscripts=true` switches to a transcript-only search mode against the dedicated transcript corpus
 8. `memory_get` can read files, log entries by id, subject histories by `subject:<slug>`, and transcripts by `session:<id>`
 9. Extraction context can match subjects from transcript text beyond exact kebab-case slug mentions
-10. Subject projection files are generated under `<logDir>/memory/`, with one markdown file per subject and event ids preserved in the event headings, while session summaries use a separate projection surface
-11. Successful live extraction refreshes touched subject projections, and successful non-dry-run import refreshes the projection set
+10. Subject projection files are generated under `<logDir>/memory/`, session-summary projections under `<logDir>/sessions/`, and transcript projections under `<logDir>/transcripts/`, with transcript search isolated from the default memory-search surface
+11. Successful live extraction refreshes touched subject projections, while session-summary and transcript projections refresh on their own lifecycle triggers
 12. Subject add/rename flows update the registry, and rename also rewrites historical log subjects
 13. Async import jobs can be queued, inspected, resumed, stopped, and executed by worker runs
-14. Verify checks the fully initialized workspace and store, including guidance markers, memory notice markers, the projection directory, and the configured semantic-search extra path
+14. Verify checks the fully initialized workspace and store, including guidance markers, memory notice markers, the projection directories, the configured semantic-search extra paths, and the exclusion of transcript projections from the default memory-search corpus

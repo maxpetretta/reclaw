@@ -66,7 +66,7 @@ Reclaw maintains one generated markdown file per subject under `<logDir>/memory/
 - Projection files are generated output, not source of truth — don't edit them manually
 - Successful live extraction refreshes touched subject projections automatically
 - Successful non-dry-run imports refresh the full projection set automatically
-- Rebuild or inspect them with `openclaw reclaw projection refresh` and `openclaw reclaw projection list`
+- Rebuild all generated outputs with `openclaw reclaw refresh`
 
 ## Import
 
@@ -102,11 +102,12 @@ openclaw reclaw subjects list     # list all subjects
 openclaw reclaw subjects add      # add a subject
 openclaw reclaw subjects rename   # rename a subject (updates registry + log)
 
-openclaw reclaw projection refresh # rebuild generated subject markdown projections
-openclaw reclaw projection list    # list generated projection files
-
-openclaw reclaw snapshot refresh # run snapshot generation now
-openclaw reclaw summary refresh  # refresh session summary block from latest log entry
+openclaw reclaw refresh           # rebuild subjects, sessions, transcripts, summary block, and snapshot block
+openclaw reclaw refresh --scope subjects
+openclaw reclaw refresh --scope sessions
+openclaw reclaw refresh --scope transcripts
+openclaw reclaw refresh --scope summary
+openclaw reclaw refresh --scope snapshot
 
 openclaw reclaw import            # import conversation history
 openclaw reclaw import status     # check import job status
