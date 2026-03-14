@@ -53,10 +53,10 @@ function createConfig(logDir: string): PluginConfig {
   };
 }
 
-function createQmdResult(projectionDir: string) {
+function createQmdResult(projectionDir: string, name = "reclaw-memory") {
   return {
     collection: {
-      name: "reclaw-memory",
+      name,
       path: projectionDir,
       mask: "**/*.md",
     },
@@ -146,7 +146,7 @@ describe("cli init helpers", () => {
   });
 
   const fakeGuidanceEvent = async () => ({ sent: true as const });
-  const fakeEnsureQmdCollection = async (projectionDir: string) => createQmdResult(projectionDir);
+  const fakeEnsureQmdCollection = async (projectionDir: string, name?: string) => createQmdResult(projectionDir, name);
 
   test("runInit creates log files, updates config, and adds MEMORY.md markers", async () => {
     const memoryPath = join(workspaceDir, "MEMORY.md");
@@ -166,6 +166,7 @@ describe("cli init helpers", () => {
     };
     const memoryContent = await readFile(memoryPath, "utf8");
     const projectionDirEntries = await readdir(join(logDir, "memory"));
+    const transcriptProjectionDirEntries = await readdir(join(logDir, "transcripts"));
 
     expect(logExists).toBe(true);
     expect(subjectsText.trim()).toBe("{}");
@@ -197,8 +198,10 @@ describe("cli init helpers", () => {
     expect(memoryContent).toContain(LAST_SESSION_SUMMARY_BEGIN_MARKER);
     expect(memoryContent).toContain(LAST_SESSION_SUMMARY_END_MARKER);
     expect(projectionDirEntries).toEqual([]);
+    expect(transcriptProjectionDirEntries).toEqual([]);
     expect(initResult.guidanceEvent.sent).toBe(true);
     expect(initResult.qmd).toEqual(createQmdResult(join(logDir, "memory")));
+    expect(initResult.transcriptQmd).toEqual(createQmdResult(join(logDir, "transcripts"), "reclaw-transcripts"));
   });
 
   test("buildPostInitSystemEventText renders AGENTS/MEMORY excerpts and target paths", async () => {
@@ -212,6 +215,8 @@ describe("cli init helpers", () => {
       agentsMdPath: join(workspaceDir, "AGENTS.md"),
       memoryMdPath: join(workspaceDir, "MEMORY.md"),
       projectionDir: join(logDir, "memory"),
+      sessionSummaryProjectionDir: join(logDir, "sessions"),
+      transcriptProjectionDir: join(logDir, "transcripts"),
     };
 
     const eventText = await buildPostInitSystemEventText(paths);
@@ -277,7 +282,7 @@ describe("cli init helpers", () => {
     const memoryPath = join(workspaceDir, "MEMORY.md");
     const binDir = join(tempDir, "bin-pass");
     await mkdir(binDir, { recursive: true });
-    await writeQmdListBinary(binDir, ["reclaw-memory"]);
+    await writeQmdListBinary(binDir, ["reclaw-memory", "reclaw-transcripts"]);
 
     await withEnv({ PATH: `${binDir}:${process.env.PATH ?? ""}` }, async () => {
       await runInit(createConfig(logDir), workspaceDir, {
@@ -314,6 +319,8 @@ describe("cli init helpers", () => {
       expect(result.ok).toBe(true);
       const qmdCheck = result.checks.find((check) => check.name === "qmd:reclaw-memory");
       expect(qmdCheck).toEqual({ name: "qmd:reclaw-memory", ok: true, detail: "ok" });
+      const transcriptQmdCheck = result.checks.find((check) => check.name === "qmd:reclaw-transcripts");
+      expect(transcriptQmdCheck).toEqual({ name: "qmd:reclaw-transcripts", ok: true, detail: "ok" });
     });
   });
 
@@ -323,7 +330,7 @@ describe("cli init helpers", () => {
     const statePath = join(logDir, "state.json");
     const binDir = join(tempDir, "bin-legacy");
     await mkdir(binDir, { recursive: true });
-    await writeQmdListBinary(binDir, ["reclaw-memory"]);
+    await writeQmdListBinary(binDir, ["reclaw-memory", "reclaw-transcripts"]);
 
     await withEnv({ PATH: `${binDir}:${process.env.PATH ?? ""}` }, async () => {
       await runInit(createConfig(logDir), workspaceDir, {
@@ -415,6 +422,12 @@ describe("cli init helpers", () => {
         name: "qmd:reclaw-memory",
         ok: false,
         detail: 'missing collection "reclaw-memory"',
+      });
+      const transcriptQmdCheck = result.checks.find((check) => check.name === "qmd:reclaw-transcripts");
+      expect(transcriptQmdCheck).toEqual({
+        name: "qmd:reclaw-transcripts",
+        ok: false,
+        detail: 'missing collection "reclaw-transcripts"',
       });
     });
   });

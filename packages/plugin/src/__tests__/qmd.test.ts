@@ -7,6 +7,7 @@ import {
   expectedQmdCollection,
   installQmdGlobal,
   listQmdCollections,
+  RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME,
 } from "../lib/qmd";
 
 async function withTempDir<T>(prefix: string, run: (path: string) => Promise<T>): Promise<T> {
@@ -61,6 +62,11 @@ describe("qmd integration helpers", () => {
       path: "/tmp/reclaw/memory",
       mask: "**/*.md",
     });
+    expect(expectedQmdCollection("/tmp/reclaw/transcripts", RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME)).toEqual({
+      name: "reclaw-transcripts",
+      path: "/tmp/reclaw/transcripts",
+      mask: "**/*.md",
+    });
   });
 
   test("reports missing qmd binaries", async () => {
@@ -71,6 +77,10 @@ describe("qmd integration helpers", () => {
           missingBinary: true,
         });
         expect(ensureQmdCollection("/tmp/reclaw/memory")).toMatchObject({
+          skipped: true,
+          missingBinary: true,
+        });
+        expect(ensureQmdCollection("/tmp/reclaw/transcripts", RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME)).toMatchObject({
           skipped: true,
           missingBinary: true,
         });
@@ -129,6 +139,10 @@ exit 1
 
       await withEnv({ PATH: binDir, QMD_LOG: logPath }, async () => {
         const result = ensureQmdCollection(join(dir, "memory"));
+        const transcriptResult = ensureQmdCollection(
+          join(dir, "transcripts"),
+          RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME,
+        );
 
         expect(result).toEqual({
           collection: {
@@ -139,7 +153,18 @@ exit 1
           configured: true,
           skipped: false,
         });
-        expect(await readFile(logPath, "utf8")).toBe(`${join(dir, "memory")}|reclaw-memory|**/*.md\n`);
+        expect(transcriptResult).toEqual({
+          collection: {
+            name: "reclaw-transcripts",
+            path: join(dir, "transcripts"),
+            mask: "**/*.md",
+          },
+          configured: true,
+          skipped: false,
+        });
+        expect(await readFile(logPath, "utf8")).toBe(
+          `${join(dir, "memory")}|reclaw-memory|**/*.md\n${join(dir, "transcripts")}|reclaw-transcripts|**/*.md\n`,
+        );
       });
     });
   });

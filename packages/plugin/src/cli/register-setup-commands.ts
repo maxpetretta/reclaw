@@ -22,6 +22,7 @@ interface InitResult {
     message?: string;
   };
   qmd: EnsureQmdCollectionResult;
+  transcriptQmd: EnsureQmdCollectionResult;
 }
 
 async function promptInstallQmd(): Promise<boolean> {
@@ -47,7 +48,10 @@ export function registerSetupCommands(
     config: PluginConfig;
     workspaceDir?: string;
     runInit: (config: PluginConfig, workspaceDir?: string) => Promise<InitResult>;
-    ensureQmdCollection: (projectionDir: string) => Promise<EnsureQmdCollectionResult> | EnsureQmdCollectionResult;
+    ensureQmdCollection: (
+      projectionDir: string,
+      name?: string,
+    ) => Promise<EnsureQmdCollectionResult> | EnsureQmdCollectionResult;
     installQmdGlobal: () => Promise<InstallQmdResult>;
     runUninstall: (config: PluginConfig, workspaceDir?: string) => Promise<InitPaths>;
     runVerify: (config: PluginConfig, workspaceDir?: string) => Promise<unknown>;
@@ -61,6 +65,7 @@ export function registerSetupCommands(
       const initResult = await params.runInit(params.config, params.workspaceDir);
       const paths = initResult.paths;
       let qmdResult = initResult.qmd;
+      let transcriptQmdResult = initResult.transcriptQmd;
       let qmdMessageHandled = false;
 
       clackLog.step(`Created ${paths.logDir}`);
@@ -69,7 +74,15 @@ export function registerSetupCommands(
 
       if (qmdResult.configured) {
         clackLog.step(`QMD collection configured: ${qmdResult.collection.name}`);
-      } else if (qmdResult.skipped && qmdResult.missingBinary && isInteractiveTerminal()) {
+      }
+      if (transcriptQmdResult.configured) {
+        clackLog.step(`QMD collection configured: ${transcriptQmdResult.collection.name}`);
+      }
+
+      const qmdMissingBinary =
+        (qmdResult.skipped && qmdResult.missingBinary) ||
+        (transcriptQmdResult.skipped && transcriptQmdResult.missingBinary);
+      if (qmdMissingBinary && isInteractiveTerminal()) {
         if (await promptInstallQmd()) {
           const spin = clackSpinner();
           spin.start("Installing QMD");
@@ -80,7 +93,15 @@ export function registerSetupCommands(
             spin.stop(`QMD installed${command}`);
             spin.start("Configuring QMD collection");
             qmdResult = await params.ensureQmdCollection(paths.projectionDir);
-            spin.stop(qmdResult.configured ? "QMD collection configured" : "QMD collection failed");
+            transcriptQmdResult = await params.ensureQmdCollection(
+              paths.transcriptProjectionDir,
+              "reclaw-transcripts",
+            );
+            spin.stop(
+              qmdResult.configured && transcriptQmdResult.configured
+                ? "QMD collections configured"
+                : "QMD collection failed",
+            );
           } else {
             spin.stop("QMD install failed");
             if (installResult.message) {
@@ -98,10 +119,16 @@ export function registerSetupCommands(
         if (qmdResult.configured) {
           clackLog.step(`QMD collection ready: ${qmdResult.collection.name}`);
         }
+        if (transcriptQmdResult.configured) {
+          clackLog.step(`QMD collection ready: ${transcriptQmdResult.collection.name}`);
+        }
       }
 
       if (!qmdResult.configured && qmdResult.message && !qmdMessageHandled) {
         clackLog.warn(qmdResult.message);
+      }
+      if (!transcriptQmdResult.configured && transcriptQmdResult.message && !qmdMessageHandled) {
+        clackLog.warn(transcriptQmdResult.message);
       }
 
       if (initResult.guidanceEvent.sent) {

@@ -34,6 +34,7 @@ export interface ExtractionPaths {
   statePath: string;
   projectionDir: string;
   sessionSummaryProjectionDir: string;
+  transcriptProjectionDir: string;
 }
 
 export interface ExtractionPipelineDeps {

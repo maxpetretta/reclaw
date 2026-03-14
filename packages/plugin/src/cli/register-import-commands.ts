@@ -9,6 +9,7 @@ import {
 } from "@clack/prompts";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
+import { resolveImportPathForPlatform } from "./import-detect";
 import { DEFAULT_IMPORT_MODEL } from "../import/run";
 import { readState, type ImportJobStatus } from "../state";
 import {
@@ -16,8 +17,10 @@ import {
   formatImportJobLine,
   formatImportJobStatusDetail,
   printImportSummary,
+  printRestoreTranscriptsSummary,
   queueImportJob,
   resumeImportJobs,
+  runRestoreTranscriptsCommand,
   runImportCommand,
   runImportWorker,
   stopImportJobs,
@@ -47,8 +50,13 @@ export function registerImportCommands(
     config: PluginConfig;
     api: OpenClawPluginApi;
     workspaceDir?: string;
+    runRestoreTranscriptsCommand?: typeof runRestoreTranscriptsCommand;
   },
 ): void {
+  const runtimeDeps = {
+    runRestoreTranscriptsCommand,
+    ...params,
+  };
   const importCommand = reclaw
     .command("import [platform] [file]")
     .description("Import historical data as async worker jobs (interactive if args are omitted)")
@@ -263,6 +271,35 @@ export function registerImportCommands(
         }
         throw error;
       }
+    });
+
+  importCommand
+    .command("transcripts <platform> <file>")
+    .description("Restore imported ChatGPT/Claude/Grok OpenClaw session transcripts without replaying extraction")
+    .option("--dry-run", "Preview transcript restore without writing files", false)
+    .option("--after <date>", "Only include conversations updated on/after this date")
+    .option("--before <date>", "Only include conversations updated on/before this date")
+    .option("--min-messages <n>", "Minimum user/assistant messages per conversation")
+    .action(async (platform: unknown, file: unknown, opts: unknown) => {
+      const rawPlatform = typeof platform === "string" ? platform.trim() : "";
+      if (rawPlatform !== "chatgpt" && rawPlatform !== "claude" && rawPlatform !== "grok") {
+        throw new Error("transcript restore only supports chatgpt, claude, or grok");
+      }
+
+      const rawFilePath = typeof file === "string" ? file.trim() : "";
+      if (!rawFilePath) {
+        throw new Error("transcript restore requires a source export file");
+      }
+      const filePath = await resolveImportPathForPlatform(rawPlatform, rawFilePath);
+
+      const result = await runtimeDeps.runRestoreTranscriptsCommand({
+        config: params.config,
+        workspaceDir: params.workspaceDir,
+        platform: rawPlatform,
+        filePath,
+        opts,
+      });
+      printRestoreTranscriptsSummary(result.summary);
     });
 
   importCommand

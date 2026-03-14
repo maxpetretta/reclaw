@@ -195,7 +195,7 @@ function createConversationKey(platform: ImportPlatform, conversationId: string)
   return `${platform}:${conversationId}`;
 }
 
-function buildSessionId(platform: ImportPlatform, conversationId: string): string {
+export function buildSessionId(platform: ImportPlatform, conversationId: string): string {
   return `reclaw:${platform}:${conversationId}`;
 }
 

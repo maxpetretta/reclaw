@@ -40,8 +40,26 @@ export interface InstallQmdResult {
   message?: string;
 }
 
+export interface QmdSearchResultRow {
+  docid?: string;
+  score?: number;
+  file?: string;
+  title?: string;
+  context?: string;
+  snippet?: string;
+  body?: string;
+}
+
+export interface SearchQmdCollectionResult {
+  ok: boolean;
+  results: QmdSearchResultRow[];
+  missingBinary?: boolean;
+  message?: string;
+}
+
 const MARKDOWN_MASK = "**/*.md";
 export const RECLAW_QMD_COLLECTION_NAME = "reclaw-memory";
+export const RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME = "reclaw-transcripts";
 
 function formatFailureMessage(args: string[], status: number, stderr: string, stdout: string): string {
   const trimmedStderr = stderr.trim();
@@ -211,16 +229,22 @@ function qmdMissingMessage(): string {
   return "qmd is not installed. Install it with `npm install -g @tobilu/qmd` (or `bun install -g @tobilu/qmd`) and rerun `openclaw reclaw init`.";
 }
 
-export function expectedQmdCollection(projectionDir: string): QmdCollectionSpec {
+export function expectedQmdCollection(
+  projectionDir: string,
+  name = RECLAW_QMD_COLLECTION_NAME,
+): QmdCollectionSpec {
   return {
-    name: RECLAW_QMD_COLLECTION_NAME,
+    name,
     path: projectionDir,
     mask: MARKDOWN_MASK,
   };
 }
 
-export function ensureQmdCollection(projectionDir: string): EnsureQmdCollectionResult {
-  const collection = expectedQmdCollection(projectionDir);
+export function ensureQmdCollection(
+  projectionDir: string,
+  name = RECLAW_QMD_COLLECTION_NAME,
+): EnsureQmdCollectionResult {
+  const collection = expectedQmdCollection(projectionDir, name);
   const check = runQmdCommand(["--help"], { timeoutMs: 10_000 });
 
   if (!check.ok && check.errorCode === "ENOENT") {
@@ -289,6 +313,67 @@ export function listQmdCollections(): ListQmdCollectionsResult {
     ok: true,
     names: parseQmdCollectionNames(output.stdout),
   };
+}
+
+export function searchQmdCollection(params: {
+  collection: string;
+  query: string;
+  limit?: number;
+  minScore?: number;
+}): SearchQmdCollectionResult {
+  const args = [
+    "query",
+    params.query,
+    "--json",
+    "-c",
+    params.collection,
+    "-n",
+    String(typeof params.limit === "number" && Number.isFinite(params.limit) ? Math.max(1, Math.floor(params.limit)) : 5),
+  ];
+
+  if (typeof params.minScore === "number" && Number.isFinite(params.minScore)) {
+    args.push("--min-score", String(params.minScore));
+  }
+
+  const output = runQmdCommand(args, { timeoutMs: 30_000 });
+  if (!output.ok && output.errorCode === "ENOENT") {
+    return {
+      ok: false,
+      results: [],
+      missingBinary: true,
+      message: qmdMissingMessage(),
+    };
+  }
+
+  if (!output.ok) {
+    return {
+      ok: false,
+      results: [],
+      message: output.message ?? "Could not search qmd collection.",
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(output.stdout) as unknown;
+    if (!Array.isArray(parsed)) {
+      return {
+        ok: false,
+        results: [],
+        message: "qmd returned unexpected JSON.",
+      };
+    }
+
+    return {
+      ok: true,
+      results: parsed.filter((row): row is QmdSearchResultRow => typeof row === "object" && row !== null),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      results: [],
+      message: error instanceof Error ? error.message : "Could not parse qmd JSON output.",
+    };
+  }
 }
 
 export async function installQmdGlobal(): Promise<InstallQmdResult> {

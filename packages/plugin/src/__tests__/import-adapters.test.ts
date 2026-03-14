@@ -153,6 +153,72 @@ describe("import adapters", () => {
     expect(conversations[0]?.messages[1]?.content).toBe("Here is a summary.");
   });
 
+  test("import adapters preserve internal newlines in imported message text", () => {
+    const chatgpt = parseChatGptConversations([
+      {
+        id: "chatgpt-multiline",
+        title: "Multiline ChatGPT",
+        create_time: 1704067200,
+        update_time: 1704067500,
+        messages: [
+          {
+            id: "u1",
+            role: "user",
+            content: "line one\nline two\n\nline four",
+            create_time: 1704067200,
+          },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "answer one\nanswer two",
+            create_time: 1704067260,
+          },
+        ],
+      },
+    ]);
+
+    const claude = parseClaudeConversations({
+      conversations: [
+        {
+          uuid: "claude-multiline",
+          name: "Multiline Claude",
+          created_at: "2024-01-01T00:00:00.000Z",
+          updated_at: "2024-01-01T00:04:00.000Z",
+          chat_messages: [
+            {
+              uuid: "c1",
+              sender: "human",
+              text: "first line\nsecond line",
+              created_at: "2024-01-01T00:01:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+
+    const grok = parseGrokConversations({
+      conversations: [
+        {
+          id: "grok-multiline",
+          title: "Multiline Grok",
+          messages: [
+            {
+              id: "g1",
+              role: "assistant",
+              content: "alpha\nbeta\n\ngamma",
+              timestamp: 1704067200,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(chatgpt[0]?.messages[0]?.content).toBe("line one\nline two\n\nline four");
+    expect(chatgpt[0]?.messages[1]?.content).toBe("answer one\nanswer two");
+    expect(claude[0]?.messages[0]?.content).toBe("first line\nsecond line");
+    expect(grok[0]?.messages[0]?.content).toBe("alpha\nbeta\n\ngamma");
+  });
+
   test("grok adapter handles Mongo $date.$numberLong timestamps", () => {
     const raw = {
       data: [

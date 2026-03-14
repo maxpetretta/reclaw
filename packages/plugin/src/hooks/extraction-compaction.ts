@@ -8,6 +8,8 @@ import {
   parseSessionIdFromTranscriptFileName,
   readTranscript,
 } from "../lib/transcript";
+import { normalizeError } from "../lib/guards";
+import { refreshTranscriptProjectionSession } from "../projections/transcripts";
 import {
   createTranscriptWatermark,
   getExtractedSessionWatermark,
@@ -28,10 +30,7 @@ import {
   selectMessagesAfterTimestamp,
 } from "./transcript-utils";
 import { runExtractionPipeline, type ExtractionPaths } from "./pipeline";
-import {
-  type ExtractionHookDeps,
-  readTrimmedString,
-} from "./extraction-common";
+import { type ExtractionHookDeps, readTrimmedString } from "./extraction-common";
 
 const COMPACTION_FALLBACK_WINDOW_MS = 10 * 60 * 1000;
 const ACTIVE_COMPACTION_EXTRACTIONS = new Set<string>();
@@ -257,6 +256,17 @@ export async function runCompactionExtraction(params: {
         reason: "no user messages",
       });
       return;
+    }
+
+    try {
+      await refreshTranscriptProjectionSession({
+        projectionDir: paths.transcriptProjectionDir,
+        agentId,
+        sessionId,
+        messages: allMessages,
+      });
+    } catch (error) {
+      api.logger.warn(`reclaw transcript projection refresh failed for ${sessionId}: ${normalizeError(error)}`);
     }
 
     const state = await readState(paths.statePath);

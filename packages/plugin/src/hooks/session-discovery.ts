@@ -8,17 +8,21 @@ export interface SessionCandidate {
   agentId: string;
   sessionId: string;
   sessionKey?: string;
+  label?: string;
+  provider?: string;
+  surface?: string;
+  chatType?: string;
 }
 
 function parseSessionStoreCandidates(
   rawStore: unknown,
   agentId: string,
-): Array<{ sessionId: string; sessionKey: string }> {
+): SessionCandidate[] {
   if (!isObject(rawStore)) {
     return [];
   }
 
-  const candidates: Array<{ sessionId: string; sessionKey: string }> = [];
+  const candidates: SessionCandidate[] = [];
 
   for (const [sessionKey, value] of Object.entries(rawStore)) {
     if (!isObject(value)) {
@@ -38,9 +42,32 @@ function parseSessionStoreCandidates(
       }
     }
 
+    const origin = isObject(value.origin) ? value.origin : undefined;
+    const label =
+      typeof value.label === "string" && value.label.trim()
+        ? value.label.trim()
+        : typeof origin?.label === "string" && origin.label.trim()
+          ? origin.label.trim()
+          : undefined;
+    const provider =
+      typeof origin?.provider === "string" && origin.provider.trim() ? origin.provider.trim() : undefined;
+    const surface =
+      typeof origin?.surface === "string" && origin.surface.trim() ? origin.surface.trim() : undefined;
+    const chatType =
+      typeof value.chatType === "string" && value.chatType.trim()
+        ? value.chatType.trim()
+        : typeof origin?.chatType === "string" && origin.chatType.trim()
+          ? origin.chatType.trim()
+          : undefined;
+
     candidates.push({
+      agentId,
       sessionId,
       sessionKey: normalizedKey,
+      ...(label ? { label } : {}),
+      ...(provider ? { provider } : {}),
+      ...(surface ? { surface } : {}),
+      ...(chatType ? { chatType } : {}),
     });
   }
 
@@ -78,9 +105,7 @@ export async function listSessionCandidates(
         }
 
         candidatesByKey.set(dedupeKey, {
-          agentId,
-          sessionId: candidate.sessionId,
-          sessionKey: candidate.sessionKey,
+          ...candidate,
         });
       }
     } catch {

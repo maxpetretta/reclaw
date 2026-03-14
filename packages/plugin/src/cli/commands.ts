@@ -77,7 +77,14 @@ export function registerReclawCli(
 }
 
 export { detectImportSources };
-export { queueImportJob, resumeImportJobs, runImportCommand, runImportWorker, stopImportJobs } from "./import-ops";
+export {
+  queueImportJob,
+  resumeImportJobs,
+  runImportCommand,
+  runRestoreTranscriptsCommand,
+  runImportWorker,
+  stopImportJobs,
+} from "./import-ops";
 export {
   buildPostInitSystemEventText,
   firePostInitGuidanceEvent,

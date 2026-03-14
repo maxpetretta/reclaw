@@ -48,9 +48,19 @@ export function toIso(value: unknown, fallbackMs: number): string {
   return new Date(parseTimestampMs(value) ?? fallbackMs).toISOString();
 }
 
+function normalizeLinePreservingBreaks(value: string): string {
+  return value
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .split("\n")
+    .map((line) => line.replaceAll(/[^\S\n]+/gu, " ").trim())
+    .join("\n")
+    .trim();
+}
+
 export function extractText(value: unknown): string {
   if (typeof value === "string") {
-    return value.replaceAll(/\s+/gu, " ").trim();
+    return normalizeLinePreservingBreaks(value);
   }
 
   if (Array.isArray(value)) {
@@ -81,19 +91,19 @@ export function extractText(value: unknown): string {
   }
 
   if (typeof value.text === "string") {
-    return value.text.replaceAll(/\s+/gu, " ").trim();
+    return normalizeLinePreservingBreaks(value.text);
   }
 
   if (typeof value.input_text === "string") {
-    return value.input_text.replaceAll(/\s+/gu, " ").trim();
+    return normalizeLinePreservingBreaks(value.input_text);
   }
 
   if (typeof value.result === "string") {
-    return value.result.replaceAll(/\s+/gu, " ").trim();
+    return normalizeLinePreservingBreaks(value.result);
   }
 
   if (typeof value.value === "string") {
-    return value.value.replaceAll(/\s+/gu, " ").trim();
+    return normalizeLinePreservingBreaks(value.value);
   }
 
   return "";

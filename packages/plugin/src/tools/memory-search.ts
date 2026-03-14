@@ -2,9 +2,14 @@ import { join } from "node:path";
 import type { AnyAgentTool, OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
 import { isObject } from "../lib/guards";
+import {
+  RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME,
+  searchQmdCollection,
+  type QmdSearchResultRow,
+} from "../lib/qmd";
 import { extractTextContent } from "../lib/text";
 import { queryLog, searchLog, type LogQueryFilter } from "../log/query";
-import { parseEntryType, parseEntryStatus, type EntryType, type LogEntry } from "../log/schema";
+import { parseEntryType, parseEntryStatus, type LogEntry } from "../log/schema";
 import { incrementEventUsage } from "../state";
 import { textResult } from "./shared";
 
@@ -15,20 +20,22 @@ interface SearchParams {
   type?: string;
   subject?: string;
   status?: string;
+  searchTranscripts?: boolean;
 }
 
 interface MemorySearchDeps {
   queryLog: typeof queryLog;
   searchLog: typeof searchLog;
   incrementEventUsage: typeof incrementEventUsage;
+  searchQmdCollection: typeof searchQmdCollection;
 }
 
 const DEFAULT_DEPS: MemorySearchDeps = {
   queryLog,
   searchLog,
   incrementEventUsage,
+  searchQmdCollection,
 };
-
 
 function normalizeQuery(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -46,6 +53,10 @@ function normalizeSubject(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeTranscriptSearchFlag(value: unknown): boolean {
+  return value === true;
 }
 
 function extractTextFromToolResult(result: unknown): string {
@@ -115,6 +126,7 @@ function buildParametersSchema(baseParameters: unknown): Record<string, unknown>
         type: { type: "string" },
         subject: { type: "string" },
         status: { type: "string", enum: ["open", "done"] },
+        searchTranscripts: { type: "boolean" },
       },
       anyOf: [
         { required: ["query"] },
@@ -140,6 +152,7 @@ function buildParametersSchema(baseParameters: unknown): Record<string, unknown>
       type: { type: "string", enum: ["task", "fact", "decision", "question", "session_summary"] },
       subject: { type: "string" },
       status: { type: "string", enum: ["open", "done"] },
+      searchTranscripts: { type: "boolean" },
     },
     required: requiredWithoutQuery,
     anyOf: [
@@ -149,6 +162,61 @@ function buildParametersSchema(baseParameters: unknown): Record<string, unknown>
       { required: ["status"] },
     ],
   };
+}
+
+function parseTranscriptFile(file: string | undefined): { sessionId?: string } {
+  if (typeof file !== "string" || file.trim().length === 0) {
+    return {};
+  }
+
+  const trimmed = file.trim().replace(/^qmd:\/\//u, "");
+  const parts = trimmed.split("/").filter((part) => part.length > 0);
+  if (parts.length === 0) {
+    return {};
+  }
+
+  const leaf = parts.at(-1);
+  if (!leaf) {
+    return {};
+  }
+
+  if (leaf.endsWith(".md") && !leaf.startsWith("chunk-")) {
+    return {
+      sessionId: leaf.replace(/\.md$/u, ""),
+    };
+  }
+
+  if (parts.length < 2) {
+    return {};
+  }
+
+  const sessionId = parts.at(-2);
+  return {
+    ...(sessionId ? { sessionId } : {}),
+  };
+}
+
+function formatTranscriptResult(result: QmdSearchResultRow): string {
+  const { sessionId } = parseTranscriptFile(result.file);
+  const headerParts = [
+    "[transcript]",
+    ...(sessionId ? [`session=${sessionId}`] : []),
+    ...(typeof result.score === "number" ? [`score=${result.score}`] : []),
+  ];
+
+  const snippet = typeof result.snippet === "string" && result.snippet.trim().length > 0
+    ? result.snippet.trim()
+    : typeof result.body === "string" && result.body.trim().length > 0
+      ? result.body.trim()
+      : "";
+
+  const lines = [
+    headerParts.join(" "),
+    ...(typeof result.file === "string" ? [`file: ${result.file}`] : []),
+    ...(snippet ? ["", snippet] : []),
+  ];
+
+  return lines.join("\n");
 }
 
 export function createWrappedMemorySearchTool(
@@ -179,7 +247,7 @@ export function createWrappedMemorySearchTool(
     name: "memory_search",
     label: builtin?.label ?? "Memory Search",
     description:
-      "Search memory with semantic query support and structured log filters (type, subject, task status).",
+      "Search memory with semantic query support and structured log filters (type, subject, task status). Set searchTranscripts=true to search transcript projections only.",
     parameters: buildParametersSchema(builtin?.parameters),
     async execute(
       toolCallId: string,
@@ -191,6 +259,47 @@ export function createWrappedMemorySearchTool(
       const params = rawParams as SearchParams;
       const query = normalizeQuery(params.query);
       const { filter, hasStructuredFilters } = buildStructuredFilter(params);
+      const searchTranscripts = normalizeTranscriptSearchFlag(params.searchTranscripts);
+
+      if (searchTranscripts) {
+        if (!query) {
+          return textResult("Transcript search requires a query.", {
+            reason: "missing query",
+          });
+        }
+
+        if (hasStructuredFilters) {
+          return textResult(
+            "Transcript search is exclusive and cannot be combined with type, subject, or status filters.",
+            { reason: "exclusive transcript search" },
+          );
+        }
+
+        const transcriptResult = resolvedDeps.searchQmdCollection({
+          collection: RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME,
+          query,
+          ...(typeof params.maxResults === "number" ? { limit: params.maxResults } : {}),
+          ...(typeof params.minScore === "number" ? { minScore: params.minScore } : {}),
+        });
+
+        if (!transcriptResult.ok) {
+          return textResult("Transcript search is unavailable.", {
+            reason: transcriptResult.message ?? "qmd search failed",
+            missingBinary: transcriptResult.missingBinary === true,
+          });
+        }
+
+        if (transcriptResult.results.length === 0) {
+          return textResult("No results.", {
+            transcriptMatches: 0,
+          });
+        }
+
+        return textResult(
+          transcriptResult.results.map(formatTranscriptResult).join("\n\n"),
+          { transcriptMatches: transcriptResult.results.length },
+        );
+      }
 
       if (!query && !hasStructuredFilters) {
         return textResult("No results.", { reason: "missing query and structured filters" });

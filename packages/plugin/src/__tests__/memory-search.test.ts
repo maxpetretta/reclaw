@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk";
 import type { PluginConfig } from "../config";
+import type { SearchQmdCollectionResult } from "../lib/qmd";
 import { createWrappedMemorySearchTool } from "../tools/memory-search";
 import type { LogEntry } from "../log/schema";
 
@@ -218,5 +219,148 @@ describe("memory-search", () => {
     expect(text).toContain("[id=entry00000001]");
     expect(text).toContain("[decision] auth-migration");
     expect(text).toContain("Queue retries for webhooks");
+  });
+
+  test("transcript search mode is exclusive and bypasses builtin and log search", async () => {
+    let builtinCalls = 0;
+    let queryLogCalls = 0;
+    let searchLogCalls = 0;
+    let transcriptCalls = 0;
+
+    const api = {
+      runtime: {
+        tools: {
+          createMemorySearchTool: () => ({
+            name: "memory_search",
+            description: "builtin",
+            parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+            async execute() {
+              builtinCalls += 1;
+              return { content: [{ type: "text", text: "builtin semantic match" }] };
+            },
+          }),
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const tool = createWrappedMemorySearchTool(api, createContext(), createConfig(), {
+      queryLog: async () => {
+        queryLogCalls += 1;
+        return [createEntry()];
+      },
+      searchLog: async () => {
+        searchLogCalls += 1;
+        return [createEntry()];
+      },
+      searchQmdCollection: () => {
+        transcriptCalls += 1;
+        return {
+          ok: true,
+          results: [
+            {
+              file: "qmd://reclaw-transcripts/session-77.md",
+              score: 0.98,
+              snippet: "Retry logic was discussed in the transcript chunk.",
+            },
+          ],
+        };
+      },
+    });
+
+    const result = await tool.execute("call-transcript", {
+      query: "retry logic",
+      searchTranscripts: true,
+    });
+    const text = readResultText(result);
+
+    expect(builtinCalls).toBe(0);
+    expect(queryLogCalls).toBe(0);
+    expect(searchLogCalls).toBe(0);
+    expect(transcriptCalls).toBe(1);
+    expect(text).toContain("[transcript] session=session-77 score=0.98");
+    expect(text).toContain("file: qmd://reclaw-transcripts/session-77.md");
+    expect(text).toContain("Retry logic was discussed in the transcript chunk.");
+  });
+
+  test("transcript search requires a query", async () => {
+    let transcriptCalls = 0;
+    const api = {
+      runtime: {
+        tools: {
+          createMemorySearchTool: () => null,
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const tool = createWrappedMemorySearchTool(api, createContext(), createConfig(), {
+      searchQmdCollection: () => {
+        transcriptCalls += 1;
+        return { ok: true, results: [] };
+      },
+    });
+
+    const result = await tool.execute("call-transcript-missing-query", {
+      searchTranscripts: true,
+    });
+    const text = readResultText(result);
+
+    expect(transcriptCalls).toBe(0);
+    expect(text).toContain("Transcript search requires a query.");
+  });
+
+  test("transcript search rejects structured filters", async () => {
+    let transcriptCalls = 0;
+    const api = {
+      runtime: {
+        tools: {
+          createMemorySearchTool: () => null,
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const tool = createWrappedMemorySearchTool(api, createContext(), createConfig(), {
+      searchQmdCollection: () => {
+        transcriptCalls += 1;
+        return { ok: true, results: [] };
+      },
+    });
+
+    const result = await tool.execute("call-transcript-exclusive", {
+      query: "retry logic",
+      subject: "auth-migration",
+      searchTranscripts: true,
+    });
+    const text = readResultText(result);
+
+    expect(transcriptCalls).toBe(0);
+    expect(text).toContain("Transcript search is exclusive and cannot be combined with type, subject, or status filters.");
+  });
+
+  test("transcript search reports qmd failures cleanly", async () => {
+    const api = {
+      runtime: {
+        tools: {
+          createMemorySearchTool: () => null,
+        },
+      },
+    } as unknown as OpenClawPluginApi;
+
+    const tool = createWrappedMemorySearchTool(api, createContext(), createConfig(), {
+      searchQmdCollection: () =>
+        ({
+          ok: false,
+          results: [],
+          missingBinary: true,
+          message: "qmd is not installed",
+        }) satisfies SearchQmdCollectionResult,
+    });
+
+    const result = await tool.execute("call-transcript-failure", {
+      query: "retry logic",
+      searchTranscripts: true,
+    });
+    const text = readResultText(result);
+
+    expect(text).toContain("Transcript search is unavailable.");
   });
 });

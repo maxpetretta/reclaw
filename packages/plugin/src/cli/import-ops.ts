@@ -1,8 +1,11 @@
 export {
   createSilentImportLogger,
+  printRestoreTranscriptsSummary,
   printImportSummary,
+  runRestoreTranscriptsCommand,
   runImportCommand,
   type ImportProgressLogger,
+  type RunRestoreTranscriptsCommandOptions,
   type RunImportCommandOptions,
   type RunImportCommandResult,
 } from "./import-command-ops";

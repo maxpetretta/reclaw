@@ -92,6 +92,7 @@ export function resolveExtractionPaths(config: { logDir: string }): ExtractionPa
     statePath: paths.statePath,
     projectionDir: paths.projectionDir,
     sessionSummaryProjectionDir: paths.sessionSummaryProjectionDir,
+    transcriptProjectionDir: paths.transcriptProjectionDir,
   };
 }
 

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { PluginConfig } from "../config";
 import { resolveOpenClawHome } from "../lib/runtime-env";
 import { SESSION_SUMMARY_PROJECTION_DIRNAME } from "../projections/session-summaries";
+import { TRANSCRIPT_PROJECTION_DIRNAME } from "../projections/transcripts";
 import { SUBJECT_PROJECTION_DIRNAME } from "../projections/subjects";
 
 export interface InitPaths {
@@ -15,6 +16,7 @@ export interface InitPaths {
   memoryMdPath: string;
   projectionDir: string;
   sessionSummaryProjectionDir: string;
+  transcriptProjectionDir: string;
 }
 
 export function resolvePaths(config: PluginConfig, workspaceDir?: string): InitPaths {
@@ -22,6 +24,7 @@ export function resolvePaths(config: PluginConfig, workspaceDir?: string): InitP
   const resolvedWorkspaceDir = workspaceDir?.trim() || process.cwd();
   const projectionDir = join(config.logDir, SUBJECT_PROJECTION_DIRNAME);
   const sessionSummaryProjectionDir = join(config.logDir, SESSION_SUMMARY_PROJECTION_DIRNAME);
+  const transcriptProjectionDir = join(config.logDir, TRANSCRIPT_PROJECTION_DIRNAME);
 
   return {
     logDir: config.logDir,
@@ -34,5 +37,6 @@ export function resolvePaths(config: PluginConfig, workspaceDir?: string): InitP
     memoryMdPath: join(resolvedWorkspaceDir, "MEMORY.md"),
     projectionDir,
     sessionSummaryProjectionDir,
+    transcriptProjectionDir,
   };
 }

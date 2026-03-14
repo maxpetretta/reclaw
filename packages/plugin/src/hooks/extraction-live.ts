@@ -7,6 +7,7 @@ import { appendEntry, finalizeEntry } from "../log/schema";
 import { queryLog } from "../log/query";
 import { applyLastSessionSummaryBlock } from "../memory/session-summary";
 import { refreshSessionSummaryProjections } from "../projections/session-summaries";
+import { refreshTranscriptProjectionSession, refreshTranscriptProjections } from "../projections/transcripts";
 import { markFailed } from "../state";
 import { findSessionKeyForSession, listSessionCandidates, shouldExtractSession } from "./session-discovery";
 import { hasUserMessage, loadBeforeResetMessages } from "./transcript-utils";
@@ -97,6 +98,27 @@ async function writeSessionSummary(params: {
   }
 }
 
+async function refreshTranscriptProjectionBestEffort(params: {
+  api: OpenClawPluginApi;
+  projectionDir: string;
+  agentId: string;
+  sessionId: string;
+  messages: Awaited<ReturnType<typeof readTranscript>>;
+}): Promise<void> {
+  try {
+    await refreshTranscriptProjectionSession({
+      projectionDir: params.projectionDir,
+      agentId: params.agentId,
+      sessionId: params.sessionId,
+      messages: params.messages,
+    });
+  } catch (error) {
+    params.api.logger.warn(
+      `reclaw transcript projection refresh failed for ${params.sessionId}: ${normalizeError(error)}`,
+    );
+  }
+}
+
 export async function runSessionEndExtraction(params: {
   api: OpenClawPluginApi;
   config: PluginConfig;
@@ -137,6 +159,14 @@ export async function runSessionEndExtraction(params: {
   if (!hasUserMessage(messages)) {
     return;
   }
+
+  await refreshTranscriptProjectionBestEffort({
+    api,
+    projectionDir: paths.transcriptProjectionDir,
+    agentId: ctx.agentId,
+    sessionId: event.sessionId,
+    messages,
+  });
 
   await runExclusiveExtraction(event.sessionId, api.logger, async () => {
     await runExtractionPipeline({
@@ -220,6 +250,14 @@ export async function runGatewayStartSweep(params: {
   event: { port: number };
 }): Promise<void> {
   const { api, config, paths, runtimeDeps, apiToken, event } = params;
+  try {
+    await refreshTranscriptProjections({
+      projectionDir: paths.transcriptProjectionDir,
+    });
+  } catch (error) {
+    api.logger.warn(`reclaw transcript projection refresh failed during gateway_start: ${normalizeError(error)}`);
+  }
+
   const candidates = await listSessionCandidates();
 
   for (const candidate of candidates) {

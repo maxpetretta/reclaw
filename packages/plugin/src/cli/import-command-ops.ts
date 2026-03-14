@@ -8,6 +8,12 @@ import {
   type ReclawImportSummary,
   runReclawImport,
 } from "../import/run";
+import {
+  restoreImportedTranscripts,
+  type RestoreImportedTranscriptsResult,
+  type RestoreImportedTranscriptsSummary,
+  type TranscriptRestorePlatform,
+} from "../import/transcript-restore";
 import type { ImportPlatform } from "../import/types";
 import { readGatewayToken, resolveApiBaseUrlFromConfig, resolveOpenClawHome } from "../lib/runtime-env";
 import type { InitPaths } from "./paths";
@@ -21,6 +27,7 @@ import {
 } from "./import-file-ops";
 import { readNumberOption, toObject } from "./import-job-options";
 import { refreshSubjectProjections } from "../projections/subjects";
+import { refreshTranscriptProjections } from "../projections/transcripts";
 
 interface ImportCommandDeps {
   ensureImportStoreFiles: (paths: InitPaths, statePath: string) => Promise<void>;
@@ -54,6 +61,15 @@ export interface RunImportCommandResult {
   memoryDocBackupPath?: string;
   userDocBackupPath?: string;
   legacyMemoryCleared: boolean;
+}
+
+export interface RunRestoreTranscriptsCommandOptions {
+  config: PluginConfig;
+  workspaceDir?: string;
+  platform: TranscriptRestorePlatform;
+  filePath: string;
+  opts: unknown;
+  logger?: ImportProgressLogger;
 }
 
 function shouldClearLegacyMemoryDir(summary: ReclawImportSummary): boolean {
@@ -148,6 +164,18 @@ export async function runImportCommand(
         `projection refresh failed after import: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+
+    if (summary.transcriptsWritten > 0) {
+      try {
+        await refreshTranscriptProjections({
+          projectionDir: paths.transcriptProjectionDir,
+        });
+      } catch (error) {
+        input.logger?.warn?.(
+          `transcript projection refresh failed after import: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
   }
 
   let legacyMemoryCleared = false;
@@ -196,4 +224,56 @@ export function createSilentImportLogger(): ImportProgressLogger {
     info() {},
     warn() {},
   };
+}
+
+export async function runRestoreTranscriptsCommand(
+  input: RunRestoreTranscriptsCommandOptions,
+  deps: Partial<ImportCommandDeps> = {},
+): Promise<RestoreImportedTranscriptsResult> {
+  const options = toObject(input.opts);
+  const paths = resolvePaths(input.config, input.workspaceDir);
+  const runtimeDeps: ImportCommandDeps = {
+    ...DEFAULT_IMPORT_DEPS,
+    ...deps,
+  };
+  const result = await restoreImportedTranscripts({
+    platform: input.platform,
+    filePath: input.filePath.trim(),
+    dryRun: options.dryRun === true,
+    after: typeof options.after === "string" ? options.after : undefined,
+    before: typeof options.before === "string" ? options.before : undefined,
+    minMessages: readNumberOption(options.minMessages, DEFAULT_IMPORT_MIN_MESSAGES),
+    openClawHome: resolveOpenClawHome(),
+  });
+
+  if (result.summary.restored > 0) {
+    try {
+      await refreshTranscriptProjections({
+        projectionDir: paths.transcriptProjectionDir,
+        sessions: result.restoredSessions,
+      });
+    } catch (error) {
+      input.logger?.warn?.(
+        `transcript projection refresh failed after transcript restore: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return result;
+}
+
+export function printRestoreTranscriptsSummary(summary: RestoreImportedTranscriptsSummary): void {
+  const mode = summary.dryRun ? " (dry-run)" : "";
+  console.log(`Transcript restore ${summary.platform}${mode}`);
+  console.log("");
+  console.log(`  Conversations  ${summary.parsed} parsed → ${summary.selected} selected → ${summary.restored} restored`);
+  if (summary.dedupedInInput > 0) {
+    console.log(`  Deduped        ${summary.dedupedInInput} duplicate conversations ignored`);
+  }
+  if (summary.skippedByDate > 0) {
+    console.log(`  Skipped date   ${summary.skippedByDate}`);
+  }
+  if (summary.skippedByMinMessages > 0) {
+    console.log(`  Skipped short  ${summary.skippedByMinMessages}`);
+  }
 }

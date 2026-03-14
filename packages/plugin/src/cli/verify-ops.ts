@@ -2,7 +2,11 @@ import { readFile, stat } from "node:fs/promises";
 import { log as clackLog } from "@clack/prompts";
 import type { PluginConfig } from "../config";
 import { isEnoent, isObject } from "../lib/guards";
-import { listQmdCollections, RECLAW_QMD_COLLECTION_NAME } from "../lib/qmd";
+import {
+  listQmdCollections,
+  RECLAW_QMD_COLLECTION_NAME,
+  RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME,
+} from "../lib/qmd";
 import {
   AGENTS_MEMORY_GUIDANCE_BEGIN_MARKER,
   AGENTS_MEMORY_GUIDANCE_END_MARKER,
@@ -133,6 +137,7 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     const resetArchiveDisabled = configView.resetArchiveRetention === false;
     const hasProjectionMemoryPath = configView.extraPaths.includes(paths.projectionDir);
     const hasSessionSummaryProjectionPath = configView.extraPaths.includes(paths.sessionSummaryProjectionDir);
+    const hasTranscriptProjectionPath = configView.extraPaths.includes(paths.transcriptProjectionDir);
 
     if (
       configView.slotValue === RECLAW_OPENCLAW_MEMORY_SLOT &&
@@ -142,7 +147,8 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
       maxEntriesHigh &&
       resetArchiveDisabled &&
       hasProjectionMemoryPath &&
-      hasSessionSummaryProjectionPath
+      hasSessionSummaryProjectionPath &&
+      !hasTranscriptProjectionPath
     ) {
       addCheck("openclaw.json", true, "ok");
     } else {
@@ -174,6 +180,9 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
       }
       if (!hasSessionSummaryProjectionPath) {
         issues.push(`agents.defaults.memorySearch.extraPaths is missing "${paths.sessionSummaryProjectionDir}"`);
+      }
+      if (hasTranscriptProjectionPath) {
+        issues.push(`agents.defaults.memorySearch.extraPaths should not include "${paths.transcriptProjectionDir}"`);
       }
       addCheck("openclaw.json", false, issues.join("; "));
     }
@@ -248,15 +257,37 @@ export async function verifySetup(config: PluginConfig, workspaceDir?: string): 
     addCheck("reclaw session summary projection dir", false, isEnoent(error) ? "missing" : String(error));
   }
 
+  try {
+    const projectionDirStat = await stat(paths.transcriptProjectionDir);
+    addCheck(
+      "reclaw transcript projection dir",
+      projectionDirStat.isDirectory(),
+      projectionDirStat.isDirectory() ? "ok" : "not a directory",
+    );
+  } catch (error) {
+    addCheck("reclaw transcript projection dir", false, isEnoent(error) ? "missing" : String(error));
+  }
+
   const qmdCollections = listQmdCollections();
   if (!qmdCollections.ok) {
     addCheck(`qmd:${RECLAW_QMD_COLLECTION_NAME}`, false, summarizeQmdIssue(qmdCollections.message, qmdCollections.missingBinary));
+    addCheck(
+      `qmd:${RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME}`,
+      false,
+      summarizeQmdIssue(qmdCollections.message, qmdCollections.missingBinary),
+    );
   } else {
     const hasReclawCollection = qmdCollections.names.includes(RECLAW_QMD_COLLECTION_NAME);
+    const hasTranscriptCollection = qmdCollections.names.includes(RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME);
     addCheck(
       `qmd:${RECLAW_QMD_COLLECTION_NAME}`,
       hasReclawCollection,
       hasReclawCollection ? "ok" : `missing collection "${RECLAW_QMD_COLLECTION_NAME}"`,
+    );
+    addCheck(
+      `qmd:${RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME}`,
+      hasTranscriptCollection,
+      hasTranscriptCollection ? "ok" : `missing collection "${RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME}"`,
     );
   }
 

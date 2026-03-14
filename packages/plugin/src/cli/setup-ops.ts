@@ -12,6 +12,7 @@ import {
   LAST_SESSION_SUMMARY_END_MARKER,
 } from "../memory/markers";
 import { ensureSessionSummaryProjectionDir } from "../projections/session-summaries";
+import { ensureTranscriptProjectionDir } from "../projections/transcripts";
 import { ensureSubjectProjectionDir } from "../projections/subjects";
 import { ensureStoreFiles } from "../store/files";
 import {
@@ -22,6 +23,7 @@ import {
 } from "../lib/cron-jobs-store";
 import {
   ensureQmdCollection,
+  RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME,
   type EnsureQmdCollectionResult,
 } from "../lib/qmd";
 import { dispatchPostInitGuidanceEvent, type GuidanceEventResult } from "./post-init-guidance-event";
@@ -191,7 +193,7 @@ function buildBriefingCronJob(config: PluginConfig, existing?: Record<string, un
     wakeMode: "now",
     payload: {
       kind: "agentTurn",
-      message: "Run: openclaw reclaw snapshot refresh",
+      message: "Run: openclaw reclaw refresh --scope snapshot",
       timeoutSeconds: 300,
     },
     delivery: {
@@ -252,7 +254,12 @@ export async function runInit(
   await ensureMemoryMarkers(paths.memoryMdPath);
   await ensureSubjectProjectionDir(paths.projectionDir);
   await ensureSessionSummaryProjectionDir(paths.sessionSummaryProjectionDir);
+  await ensureTranscriptProjectionDir(paths.transcriptProjectionDir);
   const qmd = await (deps.ensureQmdCollection ?? ensureQmdCollection)(paths.projectionDir);
+  const transcriptQmd = await (deps.ensureQmdCollection ?? ensureQmdCollection)(
+    paths.transcriptProjectionDir,
+    RECLAW_TRANSCRIPT_QMD_COLLECTION_NAME,
+  );
   await ensureBriefingCron(paths, config);
 
   const fireGuidanceEvent = deps.fireGuidanceEvent ?? firePostInitGuidanceEvent;
